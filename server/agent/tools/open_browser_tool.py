@@ -155,7 +155,9 @@ class OpenBrowserObservation(Observation):
                 active_marker = "●" if tab.get('active') else "○"
                 title = tab.get('title', 'No title')[:50]
                 url = tab.get('url', 'No URL')
-                text_parts.append(f"{i}. {active_marker} **[{tab['id']}]** {title}")
+                # ✅ FIX: Use 'tabId' (from Extension ManagedTab) or fallback to 'id'
+                tab_id = tab.get('tabId') or tab.get('id', 'unknown')
+                text_parts.append(f"{i}. {active_marker} **[{tab_id}]** {title}")
                 text_parts.append(f"   URL: {url}")
             text_parts.append("")
         
@@ -215,7 +217,13 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
     
     def __init__(self, conversation_id: str = None):
         # We'll use the existing command_processor from the server
-        self.conversation_id = conversation_id or 'default'
+        # ✅ FIX: Generate UUID if conversation_id is None to avoid all sessions using 'default'
+        import uuid
+        if conversation_id is None:
+            conversation_id = str(uuid.uuid4())
+            logger.warning(f"⚠️ conversation_id was None, generated new UUID: {conversation_id}")
+        self.conversation_id = conversation_id
+        logger.info(f"🔍 [Executor] Created executor with conversation_id={self.conversation_id}")
     
     async def _execute_command(self, command) -> Any:
         """Execute command with conversation context"""
@@ -268,7 +276,8 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 command = TabCommand(
                     action=action_enum,
                     url=action.url,
-                    tab_id=action.tab_id
+                    tab_id=action.tab_id,
+                    conversation_id=self.conversation_id  # ✅ FIX: Pass conversation_id during creation
                 )
                 result_dict = self._execute_command_sync(command)
                 
@@ -291,7 +300,10 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 # Validate required parameters
                 if action.script is None:
                     raise ValueError("javascript_execute requires script parameter")
-                command = JavascriptExecuteCommand(script=action.script)
+                command = JavascriptExecuteCommand(
+                    script=action.script,
+                    conversation_id=self.conversation_id  # ✅ FIX: Pass conversation_id
+                )
                 result_dict = self._execute_command_sync(command)
                 
                 # Truncate long scripts for message
@@ -449,12 +461,16 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
         """Execute a command synchronously via HTTP with conversation context"""
         logger.debug(f"DEBUG: _execute_command_sync called with command type: {command.type if hasattr(command, 'type') else type(command).__name__}, conversation_id={self.conversation_id}")
         try:
-            # Set conversation_id for multi-session support
+            # Set conversation_id for multi-session support (backup if not set during creation)
             if hasattr(command, 'conversation_id'):
-                command.conversation_id = self.conversation_id
+                if command.conversation_id is None:
+                    command.conversation_id = self.conversation_id
+                    logger.debug(f"🔍 Set conversation_id to {self.conversation_id}")
             
             # Convert command to dict using model_dump
             cmd_dict = command.model_dump()
+            logger.info(f"🔍 Command dict: type={cmd_dict.get('type')}, conversation_id={cmd_dict.get('conversation_id')}")
+            
             # Send HTTP POST to server - explicitly disable proxy for localhost
             response = requests.post(
                 "http://127.0.0.1:8765/command",
@@ -473,7 +489,10 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
     def _get_tabs_sync(self) -> Any:
         """Get current tab list synchronously"""
         logger.debug(f"DEBUG: _get_tabs_sync called, sending GetTabsCommand via HTTP")
-        command = GetTabsCommand(managed_only=True)
+        command = GetTabsCommand(
+            managed_only=True,
+            conversation_id=self.conversation_id  # ✅ FIX: Pass conversation_id
+        )
         result = self._execute_command_sync(command)
         logger.debug(f"DEBUG: _get_tabs_sync result: success={result.get('success')}, data keys={list(result.get('data', {}).keys()) if result.get('data') else 'None'}")
         return result
@@ -481,7 +500,12 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
     def _get_screenshot_sync(self) -> Any:
         """Capture screenshot synchronously"""
         logger.debug(f"DEBUG: _get_screenshot_sync called, sending ScreenshotCommand via HTTP")
-        command = ScreenshotCommand(include_cursor=True, include_visual_mouse=True, quality=90)
+        command = ScreenshotCommand(
+            include_cursor=True,
+            include_visual_mouse=True,
+            quality=90,
+            conversation_id=self.conversation_id  # ✅ FIX: Pass conversation_id
+        )
         result = self._execute_command_sync(command)
         logger.debug(f"DEBUG: _get_screenshot_sync result: success={result.get('success')}, data keys={list(result.get('data', {}).keys()) if result.get('data') else 'None'}")
         return result
@@ -659,9 +683,15 @@ class OpenBrowserTool(ToolDefinition[OpenBrowserAction, OpenBrowserObservation])
         """Create OpenBrowserTool instance with executor"""
         # Extract conversation_id from conv_state for multi-session support
         conversation_id = None
-        if conv_state and hasattr(conv_state, 'conversation_id'):
-            conversation_id = conv_state.conversation_id
-            
+        if conv_state:
+            if hasattr(conv_state, 'conversation_id'):
+                conversation_id = conv_state.conversation_id
+                logger.info(f"🔍 [Tool Creation] Extracted conversation_id from conv_state: {conversation_id}")
+            else:
+                logger.warning(f"⚠️ [Tool Creation] conv_state exists but has no conversation_id attribute")
+        else:
+            logger.warning(f"⚠️ [Tool Creation] conv_state is None")
+        
         # Create executor with conversation context
         executor = OpenBrowserExecutor(conversation_id=conversation_id)
         

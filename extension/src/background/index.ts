@@ -624,9 +624,15 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
         }
 
       case 'tab':
-        // Extract conversation_id from command for multi-session support
-        const conversationId = command.conversation_id || 'default';
-        
+        // ✅ STRICT MODE: conversation_id is REQUIRED
+        if (!command.conversation_id) {
+          const errorMsg = '❌ STRICT MODE: conversation_id is required but was not provided. Command rejected.';
+          console.error(errorMsg);
+          throw new Error(errorMsg);
+        }
+        const conversationId = command.conversation_id;
+        console.log(`🔍 [Tab Command] Received conversation_id: "${conversationId}"`);
+
         switch (command.action) {
           case 'init':
             if (!command.url) {
@@ -734,7 +740,11 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
             };
 
           case 'list':
-            const listTabsConversationId = command.conversation_id || 'default';
+            // ✅ STRICT MODE: conversation_id is REQUIRED
+            if (!command.conversation_id) {
+              throw new Error('conversation_id is required for list action (strict mode)');
+            }
+            const listTabsConversationId = command.conversation_id;
             const listResult = await tabs.getAllTabs();
             // Filter tabs by conversation if needed
             const conversationTabs = tabManager.getManagedTabs(listTabsConversationId);
@@ -753,7 +763,11 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
             if (!command.tab_id) {
               throw new Error('tab_id is required for refresh action');
             }
-            const refreshConversationId = command.conversation_id || 'default';
+            // ✅ STRICT MODE: conversation_id is REQUIRED
+            if (!command.conversation_id) {
+              throw new Error('conversation_id is required for refresh action (strict mode)');
+            }
+            const refreshConversationId = command.conversation_id;
             // Ensure tab is managed by tab manager for this conversation
             await tabManager.ensureTabManaged(command.tab_id, refreshConversationId);
             // Update tab activity for status tracking
@@ -779,8 +793,11 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
         }
 
       case 'cleanup_session':
-        // Clean up a specific conversation session
-        const cleanupConversationId = command.conversation_id || 'default';
+        // ✅ STRICT MODE: conversation_id is REQUIRED
+        if (!command.conversation_id) {
+          throw new Error('conversation_id is required for cleanup_session (strict mode)');
+        }
+        const cleanupConversationId = command.conversation_id;
         console.log(`🧹 [Cleanup Session] Cleaning up session ${cleanupConversationId}`);
         
         await tabManager.cleanupSession(cleanupConversationId);
@@ -795,11 +812,15 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
         };
 
       case 'get_tabs':
-        // Support managed_only parameter and conversation_id for multi-session
-        const getTabsConversationId = command.conversation_id || 'default';
+        // ✅ STRICT MODE: conversation_id is REQUIRED for managed_only=true
         const getTabsManagedOnly = command.managed_only !== false; // true if undefined or true
         
         if (getTabsManagedOnly) {
+          // Require conversation_id for managed tabs
+          if (!command.conversation_id) {
+            throw new Error('conversation_id is required for get_tabs with managed_only=true (strict mode)');
+          }
+          const getTabsConversationId = command.conversation_id;
           // Return only managed tabs for this conversation
           const conversationTabs = tabManager.getManagedTabs(getTabsConversationId);
           return {

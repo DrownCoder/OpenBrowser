@@ -135,66 +135,38 @@ export class TabManager {
   
   /**
    * Generate tab group name for a conversation
+   * Always uses a suffix based on the conversation ID for uniqueness.
    */
   private generateGroupName(conversationId: string): string {
-    if (conversationId === 'default') {
-      return TAB_GROUP_NAME;
-    }
+    console.log(`🔍 [generateGroupName] Called with conversationId: "${conversationId}"`);
     // Use first 8 characters of conversation ID for shorter group names
-    const shortId = conversationId.substring(0, 8);
-    return `${TAB_GROUP_NAME}-${shortId}`;
+    const shortId = (conversationId && conversationId.length >= 8)
+      ? conversationId.substring(0, 8)
+      : (conversationId && conversationId.length > 0 ? conversationId : 'default');
+    const groupName = `${TAB_GROUP_NAME}-${shortId}`;
+    console.log(`✅ [generateGroupName] Generated group name: "${groupName}" for conversationId: "${conversationId}"`);
+    return groupName;
   }
 
   /**
    * Create a new tab group for a conversation
+   * Note: This now just prepares the group, no dummy tab needed
    */
   private async createTabGroup(windowId: number, conversationId: string = 'default'): Promise<number> {
     try {
       const session = this.getOrCreateSession(conversationId);
       const groupName = this.generateGroupName(conversationId);
       
-      // Create a dummy tab to group (we'll remove it if it's not needed)
-      const dummyTab = await chrome.tabs.create({
-        url: 'about:blank',
-        active: false,
-        windowId: windowId
-      });
+      // ✅ FIX: Don't create dummy tab - group will be created when first real tab is added
+      // Store the intended group name in session for later use
+      session.groupId = null; // Will be set when first tab is added
       
-      // Group the tab
-      const groupId = await chrome.tabs.group({
-        createProperties: { windowId: windowId },
-        tabIds: [dummyTab.id!]
-      });
+      console.log(`✅ [TabManager] Prepared tab group settings for ${conversationId}: ${groupName}`);
       
-      // Update group properties
-      await chrome.tabGroups.update(groupId, {
-        title: groupName,
-        collapsed: TAB_GROUP_COLLAPSED,
-        color: TAB_GROUP_COLOR
-      });
-      
-      // Remove the dummy tab if it's still about:blank
-      if (dummyTab.url === 'about:blank' || dummyTab.url === 'chrome://newtab/') {
-        await chrome.tabs.remove(dummyTab.id!);
-      } else {
-        // Keep the tab and add to managed tabs
-        session.managedTabs.set(dummyTab.id!, {
-          tabId: dummyTab.id!,
-          groupId,
-          windowId: windowId,
-          url: dummyTab.url || '',
-          title: dummyTab.title,
-          createdAt: Date.now(),
-          lastActivity: Date.now()
-        });
-      }
-      
-      session.groupId = groupId;
-      console.log(`✅ [TabManager] Created new tab group for ${conversationId}: ${groupName} (ID: ${groupId})`);
-      
-      return groupId;
+      // Return 0 to indicate no group created yet, but settings are ready
+      return 0;
     } catch (error) {
-      console.error(`❌ [TabManager] Error creating tab group for ${conversationId}:`, error);
+      console.error(`❌ [TabManager] Error preparing tab group for ${conversationId}:`, error);
       throw error;
     }
   }
@@ -355,10 +327,26 @@ export class TabManager {
       let groupId = session.groupId;
       if (chrome.tabGroups && tab.id) {
         if (!session.groupId) {
-          groupId = await this.createTabGroup(tab.windowId, conversationId);
-        }
-        
-        if (groupId && tab.id) {
+          // ✅ FIX: Create group with first real tab instead of dummy tab
+          const groupName = this.generateGroupName(conversationId);
+          console.log(`📁 [TabManager] Creating tab group with first real tab for ${conversationId}`);
+          
+          groupId = await chrome.tabs.group({
+            createProperties: { windowId: tab.windowId },
+            tabIds: [tab.id]
+          });
+          
+          // Update group properties
+          await chrome.tabGroups.update(groupId, {
+            title: groupName,
+            collapsed: TAB_GROUP_COLLAPSED,
+            color: TAB_GROUP_COLOR
+          });
+          
+          session.groupId = groupId;
+          console.log(`✅ [TabManager] Created tab group for ${conversationId}: ${groupName} (ID: ${groupId})`);
+        } else {
+          // Add to existing group
           await chrome.tabs.group({
             groupId,
             tabIds: [tab.id]
