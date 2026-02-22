@@ -7,6 +7,7 @@ export interface BaseCommand {
   command_id?: string;
   timestamp?: number;
   tab_id?: number;
+  conversation_id?: string;  // For multi-session support
 }
 
 export interface MouseMoveCommand extends BaseCommand {
@@ -72,6 +73,12 @@ export interface JavascriptExecuteCommand extends BaseCommand {
   timeout?: number;
 }
 
+// Cleanup session command for multi-session support
+export interface CleanupSessionCommand extends BaseCommand {
+  type: 'cleanup_session';
+  conversation_id: string;
+}
+
 export type Command = 
   | MouseMoveCommand
   | MouseClickCommand
@@ -82,7 +89,8 @@ export type Command =
   | ScreenshotCommand
   | TabCommand
   | GetTabsCommand
-  | JavascriptExecuteCommand;
+  | JavascriptExecuteCommand
+  | CleanupSessionCommand;
 
 export interface CommandResponse {
   success: boolean;

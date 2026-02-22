@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from server.core.config import config
 from server.core.processor import command_processor
 from server.core.llm_config import llm_config_manager, LLMConfig
+from server.core.session_manager import session_manager
 from server.websocket.manager import ws_manager
 from server.models.commands import Command, parse_command, CommandResponse
 from server.agent.agent import (
@@ -343,10 +344,81 @@ async def remove_conversation(conversation_id: str):
 
 
 @app.get("/agent/conversations")
-async def get_all_conversations():
-    """List all conversations"""
-    conversations = await list_conversations()
-    return {"success": True, "conversations": conversations}
+async def get_all_conversations(status: str = None):
+    """List all conversations with optional status filter
+    
+    Query Parameters:
+        status: Optional status filter ('active', 'idle', 'error', 'completed')
+    """
+    conversations = await list_conversations(status=status)
+    return {
+        "success": True,
+        "conversations": conversations,
+        "count": len(conversations),
+        "filter": {"status": status} if status else None
+    }
+
+
+@app.get("/agent/conversations/{conversation_id}/events")
+async def get_conversation_events(conversation_id: str):
+    """Get event history for a conversation (without images)"""
+    try:
+        events = session_manager.get_session_events(conversation_id)
+        return {
+            "success": True,
+            "conversation_id": conversation_id,
+            "events": events,
+            "count": len(events)
+        }
+    except Exception as e:
+        logger.error(f"Error getting events for {conversation_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/agent/conversations/{conversation_id}/replay")
+async def replay_conversation(conversation_id: str):
+    """Replay conversation history as SSE stream (without images)"""
+    try:
+        events = session_manager.get_session_events(conversation_id)
+        
+        async def replay_generator():
+            for event in events:
+                # Format as SSE
+                event_data_json = json.dumps(event['event_data'])
+                yield f"event: {event['event_type']}\ndata: {event_data_json}\n\n"
+                await asyncio.sleep(0.01)  # Small delay for streaming effect
+            
+            # Send completion event
+            yield f"event: complete\ndata: {json.dumps({'conversation_id': conversation_id})}\n\n"
+        
+        return StreamingResponse(
+            replay_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error replaying conversation {conversation_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/agent/conversations/{conversation_id}/messages")
+async def get_conversation_messages(conversation_id: str):
+    """Get user messages for a conversation"""
+    try:
+        messages = session_manager.get_user_messages(conversation_id)
+        return {
+            "success": True,
+            "conversation_id": conversation_id,
+            "messages": messages,
+            "count": len(messages)
+        }
+    except Exception as e:
+        logger.error(f"Error getting messages for {conversation_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # --- Configuration API Endpoints ---
@@ -500,6 +572,17 @@ async def get_frontend():
 async def get_agent_ui():
     """Alternative route for agent UI"""
     return await get_frontend()
+
+
+@app.get("/sessions.html", response_class=HTMLResponse)
+async def get_sessions_page():
+    """Serve the sessions management page"""
+    sessions_path = os.path.join(FRONTEND_DIR, "sessions.html")
+    if os.path.exists(sessions_path):
+        with open(sessions_path, "r") as f:
+            return HTMLResponse(content=f.read())
+    else:
+        return HTMLResponse(content="<h1>Sessions</h1><p>Sessions page not found.</p>", status_code=404)
 
 
 @app.websocket("/ws")

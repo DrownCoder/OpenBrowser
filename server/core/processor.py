@@ -23,7 +23,19 @@ class CommandProcessor:
     """Processes and executes commands"""
     
     def __init__(self):
-        self._current_tab_id: Optional[int] = None
+        # ✅ Multi-session support: Map conversation_id -> current_tab_id
+        self._current_tab_ids: Dict[str, Optional[int]] = {}
+    
+    def _get_current_tab_id(self, conversation_id: str = None) -> Optional[int]:
+        """Get current tab ID for a specific conversation"""
+        key = conversation_id or 'default'
+        return self._current_tab_ids.get(key)
+    
+    def _set_current_tab_id(self, tab_id: int, conversation_id: str = None):
+        """Set current tab ID for a specific conversation"""
+        key = conversation_id or 'default'
+        self._current_tab_ids[key] = tab_id
+        logger.debug(f"Set current tab ID {tab_id} for conversation {key}")
     
     def _prepare_command_dict(self, command: Command) -> dict:
         """
@@ -40,10 +52,15 @@ class CommandProcessor:
             JavascriptExecuteCommand
         )
         
+        # Get conversation_id for multi-session support
+        conversation_id = command.conversation_id
+        
         # Check if we should auto-fill tab_id
         should_fill_tab_id = False
         
-        if hasattr(command, 'tab_id') and command.tab_id is None and self._current_tab_id is not None:
+        current_tab_id = self._get_current_tab_id(conversation_id)
+        
+        if hasattr(command, 'tab_id') and command.tab_id is None and current_tab_id is not None:
             # Check command type to decide if we should fill tab_id
             if isinstance(command, TabCommand):
                 # For tab commands, only fill tab_id for certain actions
@@ -61,8 +78,8 @@ class CommandProcessor:
                 should_fill_tab_id = True
         
         if should_fill_tab_id:
-            command_dict['tab_id'] = self._current_tab_id
-            logger.debug(f"Auto-filled tab_id {self._current_tab_id} for {command.type} command")
+            command_dict['tab_id'] = current_tab_id
+            logger.debug(f"Auto-filled tab_id {current_tab_id} for {command.type} command in conversation {conversation_id}")
             
         return command_dict
     
@@ -155,22 +172,24 @@ class CommandProcessor:
         """Execute tab management command"""
         response = await self._send_prepared_command(command)
         
-        # Update current tab based on action
+        # Update current tab based on action (conversation-aware)
         if response.success:
+            conversation_id = command.conversation_id
+            
             if command.action == "switch" and command.tab_id:
-                self._current_tab_id = command.tab_id
+                self._set_current_tab_id(command.tab_id, conversation_id)
             elif command.action == "init":
                 # For init action, update current tab to the newly created tab
                 if response.data and 'tabId' in response.data:
-                    self._current_tab_id = response.data['tabId']
+                    self._set_current_tab_id(response.data['tabId'], conversation_id)
                 elif response.data and 'tab_id' in response.data:
-                    self._current_tab_id = response.data['tab_id']
+                    self._set_current_tab_id(response.data['tab_id'], conversation_id)
             elif command.action == "open":
                 # For open action, update current tab to the newly opened tab
                 if response.data and 'tabId' in response.data:
-                    self._current_tab_id = response.data['tabId']
+                    self._set_current_tab_id(response.data['tabId'], conversation_id)
                 elif response.data and 'tab_id' in response.data:
-                    self._current_tab_id = response.data['tab_id']
+                    self._set_current_tab_id(response.data['tab_id'], conversation_id)
             
         return response
         
@@ -189,13 +208,20 @@ class CommandProcessor:
         response = await self._send_prepared_command(command)
         return response
         
-    def set_current_tab(self, tab_id: int):
-        """Set current active tab ID"""
-        self._current_tab_id = tab_id
+    def set_current_tab(self, tab_id: int, conversation_id: str = None):
+        """Set current active tab ID for a specific conversation"""
+        self._set_current_tab_id(tab_id, conversation_id)
         
-    def get_current_tab(self) -> Optional[int]:
-        """Get current active tab ID"""
-        return self._current_tab_id
+    def get_current_tab(self, conversation_id: str = None) -> Optional[int]:
+        """Get current active tab ID for a specific conversation"""
+        return self._get_current_tab_id(conversation_id)
+    
+    def cleanup_conversation(self, conversation_id: str):
+        """Cleanup command processor state for a conversation"""
+        key = conversation_id or 'default'
+        if key in self._current_tab_ids:
+            del self._current_tab_ids[key]
+            logger.info(f"Cleaned up command processor state for conversation {key}")
         
     async def health_check(self) -> bool:
         """Check if command processor is healthy"""

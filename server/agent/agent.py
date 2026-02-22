@@ -53,6 +53,7 @@ from openhands.tools.task_tracker import TaskTrackerTool
 from openhands.tools.preset.default import get_default_condenser
 from .tools.open_browser_tool import OpenBrowserTool
 from server.core.llm_config import llm_config_manager
+from server.core.session_manager import session_manager, SessionStatus
 
 logger = get_logger(__name__)
 
@@ -82,19 +83,26 @@ class SSEEvent:
 # --- Queue-based Visualizer for SSE Streaming ---
 
 class QueueVisualizer(ConversationVisualizerBase):
-    """Visualizer that puts events into a queue for SSE streaming"""
+    """Visualizer that puts events into a queue for SSE streaming with event persistence"""
     
-    def __init__(self, event_queue: queue.Queue = None):
+    def __init__(self, event_queue: queue.Queue = None, conversation_id: str = None):
         """
         Args:
             event_queue: queue.Queue to put visualized events into (can be set later)
+            conversation_id: Conversation ID for event persistence
         """
         super().__init__()
         self.event_queue = event_queue
+        self.conversation_id = conversation_id
+        self.event_index = 0  # Track event index for ordering
     
     def set_event_queue(self, event_queue: queue.Queue) -> None:
         """Set the event queue (useful for delayed initialization)"""
         self.event_queue = event_queue
+    
+    def set_conversation_id(self, conversation_id: str) -> None:
+        """Set conversation ID for event persistence"""
+        self.conversation_id = conversation_id
     
     def on_event(self, event: Event) -> None:
         """Handle conversation events and put them into the queue"""
@@ -187,6 +195,19 @@ class QueueVisualizer(ConversationVisualizerBase):
             self.event_queue.put(sse_event)
             logger.debug(f"Queued SSE event: {sse_event.event_type} - type: {event_type}")
             
+            # Persist event to database (async, don't block)
+            if self.conversation_id:
+                try:
+                    session_manager.save_event(
+                        conversation_id=self.conversation_id,
+                        event_type=event_type,
+                        event_data=sse_data,
+                        event_index=self.event_index
+                    )
+                    self.event_index += 1
+                except Exception as e:
+                    logger.warning(f"Failed to persist event: {e}")
+            
         except Exception as e:
             logger.error(f"Error processing event in QueueVisualizer: {e}")
             # Put error event in queue
@@ -260,7 +281,7 @@ class OpenBrowserAgentManager:
         )
     
     def create_conversation(self, conversation_id: Optional[str] = None, cwd: str = ".") -> str:
-        """Create a new conversation
+        """Create a new conversation with session management
         
         Args:
             conversation_id: Optional conversation ID (auto-generated if None)
@@ -271,6 +292,12 @@ class OpenBrowserAgentManager:
         
         if conversation_id in self.conversations:
             raise ValueError(f"Conversation {conversation_id} already exists")
+        
+        # Create session in session manager
+        session_manager.create_session(
+            conversation_id=conversation_id,
+            working_directory=cwd
+        )
         
         # Create agent with tools
         agent_context = AgentContext(current_datetime=datetime.now())
@@ -298,6 +325,10 @@ class OpenBrowserAgentManager:
             visualizer=visualizer,
         )
         
+        # Set conversation_id on visualizer for event persistence
+        visualizer.set_conversation_id(conversation_id)
+        
+        logger.info(f"Created conversation: {conversation_id}")
         return conversation_id
     
     def get_conversation(self, conversation_id: str) -> Optional[ConversationState]:
@@ -319,6 +350,13 @@ class OpenBrowserAgentManager:
         if conversation_id in self.conversations:
             # Race condition: conversation was just created by another thread
             return self.conversations[conversation_id]
+        
+        # Create session in session manager (if not exists)
+        if not session_manager.get_session(conversation_id):
+            session_manager.create_session(
+                conversation_id=conversation_id,
+                working_directory=cwd
+            )
         
         # Create new conversation with the given ID
         # Create agent with tools
@@ -342,26 +380,94 @@ class OpenBrowserAgentManager:
             visualizer=visualizer,
         )
         
-        logger.debug(f"Created new conversation with ID: {conversation_id}")
+        # Set conversation_id on visualizer for event persistence
+        visualizer.set_conversation_id(conversation_id)
+        
+        logger.info(f"Created new conversation with ID: {conversation_id}")
         return self.conversations[conversation_id]
     
     def delete_conversation(self, conversation_id: str) -> bool:
-        """Delete a conversation"""
+        """Delete a conversation and cleanup resources"""
         if conversation_id in self.conversations:
+            # Close conversation
+            conv_state = self.conversations[conversation_id]
+            try:
+                conv_state.conversation.close()
+            except Exception as e:
+                logger.warning(f"Error closing conversation {conversation_id}: {e}")
+            
+            # Remove from memory
             del self.conversations[conversation_id]
+            
+            # Update session status to completed
+            session_manager.update_session_status(
+                conversation_id, 
+                SessionStatus.COMPLETED
+            )
+            
+            # Cleanup command processor state
+            from server.core.processor import command_processor
+            command_processor.cleanup_conversation(conversation_id)
+            
+            logger.info(f"Deleted conversation: {conversation_id}")
             return True
+        
+        # Also try to delete from session manager even if not in memory
+        session_manager.delete_session(conversation_id)
         return False
     
-    def list_conversations(self) -> List[Dict[str, Any]]:
-        """List all conversations"""
-        return [
-            {
+    def list_conversations(self, status: SessionStatus = None) -> List[Dict[str, Any]]:
+        """List all conversations with enhanced session info
+        
+        Args:
+            status: Optional status filter (active, idle, error, completed)
+        """
+        # Get in-memory conversations
+        memory_conversations = {}
+        for conv in self.conversations.values():
+            memory_conversations[conv.conversation_id] = {
                 "id": conv.conversation_id,
                 "created_at": conv.created_at,
                 "agent_id": id(conv.conversation.agent),
+                "in_memory": True,
             }
-            for conv in self.conversations.values()
-        ]
+        
+        # Get persisted sessions
+        persisted_sessions = session_manager.list_sessions(status=status)
+        
+        # Merge information
+        result = []
+        for session in persisted_sessions:
+            conv_id = session.conversation_id
+            session_dict = session.to_dict()
+            if conv_id in memory_conversations:
+                # Merge in-memory and persisted data
+                merged = memory_conversations[conv_id].copy()
+                merged.update({
+                    "status": session.status.value,
+                    "message_count": session.message_count,
+                    "last_message_at": session.last_message_at.isoformat() if session.last_message_at else None,
+                    "working_directory": session.working_directory,
+                    "tags": session.tags,
+                    "first_user_message": session.first_user_message,
+                })
+                result.append(merged)
+            else:
+                # Only persisted data (conversation not in memory)
+                result.append({
+                    "id": session.conversation_id,
+                    "status": session.status.value,
+                    "created_at": session.created_at.timestamp(),
+                    "updated_at": session.updated_at.isoformat(),
+                    "message_count": session.message_count,
+                    "last_message_at": session.last_message_at.isoformat() if session.last_message_at else None,
+                    "working_directory": session.working_directory,
+                    "tags": session.tags,
+                    "first_user_message": session.first_user_message,
+                    "in_memory": False,
+                })
+        
+        return result
     
     async def process_message(
         self,
@@ -369,10 +475,26 @@ class OpenBrowserAgentManager:
         message_text: str,
         event_callback: callable = None
     ) -> AsyncGenerator[SSEEvent, None]:
-        """Process a user message and stream events"""
+        """Process a user message and stream events with session tracking"""
         conv_state = self.get_conversation(conversation_id)
         if not conv_state:
             raise ValueError(f"Conversation {conversation_id} not found")
+        
+        # Update session status to active
+        session_manager.update_session_status(
+            conversation_id, 
+            SessionStatus.ACTIVE,
+            increment_message_count=True
+        )
+        
+        # Save user message for history
+        try:
+            session_manager.save_user_message(
+                conversation_id=conversation_id,
+                message_text=message_text
+            )
+        except Exception as e:
+            logger.warning(f"Failed to save user message: {e}")
         
         # Set event callback on visualizer
         conv_state.visualizer.event_callback = event_callback
@@ -384,11 +506,18 @@ class OpenBrowserAgentManager:
             # Run conversation (this will trigger visualizer callbacks)
             await conv_state.conversation.run_async()
             
+            # Update session status to idle after successful completion
+            session_manager.update_session_status(conversation_id, SessionStatus.IDLE)
+            
             # Yield completion event
             yield SSEEvent("complete", {"conversation_id": conversation_id})
             
         except Exception as e:
             logger.error(f"Error processing message: {e}")
+            
+            # Update session status to error
+            session_manager.update_session_status(conversation_id, SessionStatus.ERROR)
+            
             yield SSEEvent("error", {
                 "conversation_id": conversation_id,
                 "error": str(e)
@@ -433,6 +562,22 @@ async def process_agent_message(
     
     conv_state = agent_manager.get_or_create_conversation(conversation_id, cwd)
     logger.debug(f"DEBUG: Using conversation {conversation_id} (created if new)")
+    
+    # Update session status to active and increment message count
+    session_manager.update_session_status(
+        conversation_id, 
+        SessionStatus.ACTIVE,
+        increment_message_count=True
+    )
+    
+    # Save user message for history
+    try:
+        session_manager.save_user_message(
+            conversation_id=conversation_id,
+            message_text=message_text
+        )
+    except Exception as e:
+        logger.warning(f"Failed to save user message: {e}")
     
     # Create a queue for collecting events from visualizer
     event_queue = queue.Queue()
@@ -604,6 +749,12 @@ async def process_agent_message(
             logger.warning(f"Conversation thread for {conversation_id} still alive after join timeout")
             
     finally:
+        # Update session status to idle after completion (or error if conversation_error is set)
+        if conversation_error:
+            session_manager.update_session_status(conversation_id, SessionStatus.ERROR)
+        else:
+            session_manager.update_session_status(conversation_id, SessionStatus.IDLE)
+        
         # Clear the event queue from visualizer
         conv_state.visualizer.set_event_queue(None)
         logger.debug(f"Cleaned up visualizer event queue for conversation {conversation_id}")
@@ -622,13 +773,42 @@ async def get_conversation_info(conversation_id: str) -> Optional[Dict[str, Any]
 
 
 async def delete_conversation(conversation_id: str) -> bool:
-    """Delete a conversation"""
-    return agent_manager.delete_conversation(conversation_id)
+    """Delete a conversation and cleanup all resources"""
+    success = agent_manager.delete_conversation(conversation_id)
+    
+    if success:
+        # Send cleanup command to extension
+        try:
+            from server.core.processor import command_processor
+            from server.models.commands import BaseCommand
+            
+            # Send cleanup_session command to extension
+            cleanup_command = BaseCommand(
+                type="cleanup_session",
+                conversation_id=conversation_id
+            )
+            await command_processor.execute(cleanup_command)
+            logger.info(f"Sent cleanup command to extension for {conversation_id}")
+        except Exception as e:
+            logger.warning(f"Failed to cleanup extension resources for {conversation_id}: {e}")
+    
+    return success
 
 
-async def list_conversations() -> List[Dict[str, Any]]:
-    """List all conversations"""
-    return agent_manager.list_conversations()
+async def list_conversations(status: str = None) -> List[Dict[str, Any]]:
+    """List all conversations with optional status filter
+    
+    Args:
+        status: Optional status filter ('active', 'idle', 'error', 'completed')
+    """
+    status_enum = None
+    if status:
+        try:
+            status_enum = SessionStatus(status)
+        except ValueError:
+            logger.warning(f"Invalid status filter: {status}")
+    
+    return agent_manager.list_conversations(status=status_enum)
 
 
 # --- Initialization ---

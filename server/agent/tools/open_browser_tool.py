@@ -213,9 +213,21 @@ class OpenBrowserObservation(Observation):
 class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation]):
     """Executor for browser automation commands"""
     
-    def __init__(self):
+    def __init__(self, conversation_id: str = None):
         # We'll use the existing command_processor from the server
-        pass
+        self.conversation_id = conversation_id or 'default'
+    
+    async def _execute_command(self, command) -> Any:
+        """Execute command with conversation context"""
+        logger.debug(f"DEBUG: _execute_command called with action_type={command.type}, conversation_id={self.conversation_id}")
+        
+        # Set conversation_id for multi-session support
+        if hasattr(command, 'conversation_id'):
+            command.conversation_id = self.conversation_id
+        
+        result = await command_processor.execute(command)
+        logger.debug(f"DEBUG: _execute_command result: success={result.success if result else 'None'}")
+        return result
     
     def _execute_action_sync(self, action: OpenBrowserAction) -> OpenBrowserObservation:
         """Execute a browser action synchronously via HTTP"""
@@ -434,9 +446,13 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
             raise
     
     def _execute_command_sync(self, command) -> Any:
-        """Execute a command synchronously via HTTP"""
-        logger.debug(f"DEBUG: _execute_command_sync called with command type: {command.type if hasattr(command, 'type') else type(command).__name__}")
+        """Execute a command synchronously via HTTP with conversation context"""
+        logger.debug(f"DEBUG: _execute_command_sync called with command type: {command.type if hasattr(command, 'type') else type(command).__name__}, conversation_id={self.conversation_id}")
         try:
+            # Set conversation_id for multi-session support
+            if hasattr(command, 'conversation_id'):
+                command.conversation_id = self.conversation_id
+            
             # Convert command to dict using model_dump
             cmd_dict = command.model_dump()
             # Send HTTP POST to server - explicitly disable proxy for localhost
@@ -641,7 +657,13 @@ class OpenBrowserTool(ToolDefinition[OpenBrowserAction, OpenBrowserObservation])
     @classmethod
     def create(cls, conv_state, terminal_executor=None) -> Sequence[ToolDefinition]:
         """Create OpenBrowserTool instance with executor"""
-        executor = OpenBrowserExecutor()
+        # Extract conversation_id from conv_state for multi-session support
+        conversation_id = None
+        if conv_state and hasattr(conv_state, 'conversation_id'):
+            conversation_id = conv_state.conversation_id
+            
+        # Create executor with conversation context
+        executor = OpenBrowserExecutor(conversation_id=conversation_id)
         
         return [
             cls(

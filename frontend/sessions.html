@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenBrowserAgent - Session Manager</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Monaco', 'Menlo', 'Consolas', 'Courier New', monospace;
+            background-color: #1a1a1a;
+            color: #cccccc;
+            line-height: 1.6;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: #222222;
+            border-bottom: 1px solid #444444;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            color: #ffffff;
+            margin-bottom: 5px;
+        }
+
+        .header p {
+            font-size: 14px;
+            color: #888888;
+        }
+
+        .container {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        /* Session List Panel */
+        .session-list-panel {
+            width: 400px;
+            background: #1e1e1e;
+            border-right: 1px solid #444444;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .session-list-header {
+            padding: 15px;
+            background: #222222;
+            border-bottom: 1px solid #444444;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .session-list-header h2 {
+            font-size: 16px;
+            color: #cccccc;
+        }
+
+        .new-session-btn {
+            background: #0066cc;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 13px;
+            transition: background 0.2s;
+        }
+
+        .new-session-btn:hover {
+            background: #0052a3;
+        }
+
+        .session-filters {
+            padding: 10px 15px;
+            background: #222222;
+            border-bottom: 1px solid #444444;
+            display: flex;
+            gap: 10px;
+        }
+
+        .filter-btn {
+            background: #333333;
+            color: #999999;
+            border: 1px solid #444444;
+            padding: 6px 12px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+
+        .filter-btn:hover {
+            background: #3a3a3a;
+            color: #cccccc;
+        }
+
+        .filter-btn.active {
+            background: #0066cc;
+            color: white;
+            border-color: #0066cc;
+        }
+
+        .session-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .session-item {
+            background: #2a2a2a;
+            border: 1px solid #444444;
+            border-radius: 5px;
+            padding: 12px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .session-item:hover {
+            background: #333333;
+            border-color: #666666;
+        }
+
+        .session-item.selected {
+            border-color: #0066cc;
+            background: #2a3a4a;
+        }
+
+        .session-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .session-id {
+            font-size: 13px;
+            font-weight: bold;
+            color: #cccccc;
+            font-family: monospace;
+        }
+
+        .session-status {
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 3px;
+            text-transform: uppercase;
+        }
+
+        .session-status.active {
+            background: #2d5a2d;
+            color: #7fff7f;
+        }
+
+        .session-status.idle {
+            background: #4a4a2d;
+            color: #ffff7f;
+        }
+
+        .session-status.error {
+            background: #5a2d2d;
+            color: #ff7f7f;
+        }
+
+        .session-status.completed {
+            background: #3a3a3a;
+            color: #999999;
+        }
+
+        .session-meta {
+            display: flex;
+            gap: 15px;
+            font-size: 11px;
+            color: #888888;
+            margin-bottom: 6px;
+        }
+
+        .session-meta-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .session-preview {
+            font-size: 12px;
+            color: #aaaaaa;
+            line-height: 1.4;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .session-actions {
+            display: flex;
+            gap: 5px;
+            margin-top: 8px;
+        }
+
+        .session-action-btn {
+            background: #444444;
+            color: #cccccc;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 11px;
+            transition: background 0.2s;
+        }
+
+        .session-action-btn:hover {
+            background: #555555;
+        }
+
+        .session-action-btn.primary {
+            background: #0066cc;
+            color: white;
+        }
+
+        .session-action-btn.primary:hover {
+            background: #0052a3;
+        }
+
+        .session-action-btn.danger {
+            background: #660000;
+            color: #ffcccc;
+        }
+
+        .session-action-btn.danger:hover {
+            background: #800000;
+        }
+
+        /* New Session Panel */
+        .new-session-panel {
+            flex: 1;
+            background: #1a1a1a;
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .new-session-form {
+            background: #2a2a2a;
+            border: 1px solid #444444;
+            border-radius: 8px;
+            padding: 30px;
+            width: 100%;
+            max-width: 500px;
+        }
+
+        .form-title {
+            font-size: 20px;
+            color: #cccccc;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 13px;
+            color: #aaaaaa;
+            margin-bottom: 8px;
+        }
+
+        .form-input {
+            width: 100%;
+            background: #1a1a1a;
+            border: 1px solid #444444;
+            color: #cccccc;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 14px;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: #0066cc;
+        }
+
+        .form-help {
+            font-size: 11px;
+            color: #888888;
+            margin-top: 5px;
+        }
+
+        .form-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 30px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #0066cc;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #0052a3;
+        }
+
+        .btn-secondary {
+            background: #444444;
+            color: #cccccc;
+        }
+
+        .btn-secondary:hover {
+            background: #555555;
+        }
+
+        /* Loading and Empty States */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #888888;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #888888;
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        .empty-state-text {
+            font-size: 14px;
+        }
+
+        /* Hidden utility */
+        .hidden {
+            display: none !important;
+        }
+
+        /* Loading spinner */
+        .spinner {
+            border: 3px solid #444444;
+            border-top: 3px solid #0066cc;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🗂️ OpenBrowserAgent - Session Manager</h1>
+        <p>Select an existing session or create a new one to start</p>
+    </div>
+
+    <div class="container">
+        <!-- Session List Panel -->
+        <div class="session-list-panel">
+            <div class="session-list-header">
+                <h2>Sessions</h2>
+                <button class="new-session-btn" onclick="showNewSessionForm()">+ New Session</button>
+            </div>
+
+            <div class="session-filters">
+                <button class="filter-btn active" onclick="filterSessions('all')" id="filter-all">All</button>
+                <button class="filter-btn" onclick="filterSessions('active')" id="filter-active">Active</button>
+                <button class="filter-btn" onclick="filterSessions('idle')" id="filter-idle">Idle</button>
+                <button class="filter-btn" onclick="filterSessions('error')" id="filter-error">Error</button>
+            </div>
+
+            <div class="session-list" id="session-list">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <div>Loading sessions...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- New Session Panel -->
+        <div class="new-session-panel" id="welcome-panel">
+            <div class="empty-state">
+                <div class="empty-state-icon">👋</div>
+                <div class="empty-state-text">
+                    <h2 style="margin-bottom: 10px;">Welcome to OpenBrowserAgent</h2>
+                    <p style="margin-bottom: 20px;">Select a session from the left or create a new one to get started</p>
+                    <button class="btn btn-primary" onclick="showNewSessionForm()">Create New Session</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- New Session Form (Hidden by default) -->
+        <div class="new-session-panel hidden" id="new-session-panel">
+            <div class="new-session-form">
+                <h2 class="form-title">Create New Session</h2>
+                
+                <div class="form-group">
+                    <label class="form-label">Working Directory</label>
+                    <input type="text" class="form-input" id="new-session-cwd" placeholder="/path/to/your/project">
+                    <div class="form-help">The directory where the agent will operate</div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Session Name (Optional)</label>
+                    <input type="text" class="form-input" id="new-session-name" placeholder="My new session">
+                    <div class="form-help">A friendly name to identify this session</div>
+                </div>
+
+                <div class="form-actions">
+                    <button class="btn btn-secondary" onclick="hideNewSessionForm()">Cancel</button>
+                    <button class="btn btn-primary" onclick="createNewSession()">Create & Start</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Continue Session Panel (Hidden by default) -->
+        <div class="new-session-panel hidden" id="continue-session-panel">
+            <div class="new-session-form">
+                <h2 class="form-title">Continue Session</h2>
+                
+                <div class="form-group">
+                    <label class="form-label">Session ID</label>
+                    <input type="text" class="form-input" id="continue-session-id" readonly>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Status</label>
+                    <input type="text" class="form-input" id="continue-session-status" readonly>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Messages</label>
+                    <input type="text" class="form-input" id="continue-session-messages" readonly>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Working Directory</label>
+                    <input type="text" class="form-input" id="continue-session-cwd" readonly>
+                </div>
+
+                <div class="form-actions">
+                    <button class="btn btn-secondary" onclick="hideContinueSessionPanel()">Cancel</button>
+                    <button class="btn btn-danger" onclick="deleteSelectedSession()">Delete</button>
+                    <button class="btn btn-primary" onclick="continueSession()">Continue Session</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        let sessions = [];
+        let selectedSession = null;
+        let currentFilter = 'all';
+        const API_BASE = 'http://127.0.0.1:8765';
+
+        // API helper function
+        async function apiCall(endpoint, options = {}) {
+            const response = await fetch(`${API_BASE}${endpoint}`, {
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                ...options
+            });
+            
+            if (!response.ok) {
+                throw new Error(`API call failed: ${response.statusText}`);
+            }
+            
+            return response.json();
+        }
+
+        // Load sessions from API
+        async function loadSessions() {
+            try {
+                const data = await apiCall(`/agent/conversations?status=${currentFilter === 'all' ? '' : currentFilter}`);
+                sessions = data.conversations || [];
+                renderSessions();
+            } catch (error) {
+                console.error('Error loading sessions:', error);
+                document.getElementById('session-list').innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">❌</div>
+                        <div class="empty-state-text">Failed to load sessions: ${error.message}</div>
+                    </div>
+                `;
+            }
+        }
+
+        // Render session list
+        function renderSessions() {
+            const listEl = document.getElementById('session-list');
+            
+            if (sessions.length === 0) {
+                listEl.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📭</div>
+                        <div class="empty-state-text">No sessions found</div>
+                    </div>
+                `;
+                return;
+            }
+
+            listEl.innerHTML = sessions.map(session => {
+                const created = new Date(session.created_at * 1000).toLocaleString();
+                const lastActive = session.last_message_at 
+                    ? new Date(session.last_message_at).toLocaleString() 
+                    : 'Never';
+                
+                return `
+                    <div class="session-item ${selectedSession?.id === session.id ? 'selected' : ''}" 
+                         onclick="selectSession('${session.id}')">
+                        <div class="session-item-header">
+                            <span class="session-id">${session.id.substring(0, 8)}...</span>
+                            <span class="session-status ${session.status}">${session.status}</span>
+                        </div>
+                        <div class="session-meta">
+                            <div class="session-meta-item">
+                                <span>💬</span>
+                                <span>${session.message_count || 0} messages</span>
+                            </div>
+                            <div class="session-meta-item">
+                                <span>📁</span>
+                                <span>${session.working_directory || '.'}</span>
+                            </div>
+                        </div>
+                        <div class="session-meta">
+                            <div class="session-meta-item">
+                                <span>🕐</span>
+                                <span>Last active: ${lastActive}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Filter sessions by status
+        function filterSessions(status) {
+            currentFilter = status;
+            
+            // Update filter buttons
+            document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById(`filter-${status}`).classList.add('active');
+            
+            // Reload sessions with filter
+            loadSessions();
+        }
+
+        // Select a session
+        function selectSession(sessionId) {
+            selectedSession = sessions.find(s => s.id === sessionId);
+            renderSessions();
+            
+            // Show continue panel
+            document.getElementById('continue-session-id').value = selectedSession.id;
+            document.getElementById('continue-session-status').value = selectedSession.status;
+            document.getElementById('continue-session-messages').value = `${selectedSession.message_count || 0} messages`;
+            document.getElementById('continue-session-cwd').value = selectedSession.working_directory || '.';
+            
+            document.getElementById('welcome-panel').classList.add('hidden');
+            document.getElementById('new-session-panel').classList.add('hidden');
+            document.getElementById('continue-session-panel').classList.remove('hidden');
+        }
+
+        // Show new session form
+        function showNewSessionForm() {
+            document.getElementById('welcome-panel').classList.add('hidden');
+            document.getElementById('continue-session-panel').classList.add('hidden');
+            document.getElementById('new-session-panel').classList.remove('hidden');
+            
+            // Reset form
+            document.getElementById('new-session-cwd').value = '';
+            document.getElementById('new-session-name').value = '';
+        }
+
+        // Hide new session form
+        function hideNewSessionForm() {
+            document.getElementById('new-session-panel').classList.add('hidden');
+            document.getElementById('welcome-panel').classList.remove('hidden');
+        }
+
+        // Hide continue session panel
+        function hideContinueSessionPanel() {
+            document.getElementById('continue-session-panel').classList.add('hidden');
+            document.getElementById('welcome-panel').classList.remove('hidden');
+            selectedSession = null;
+            renderSessions();
+        }
+
+        // Create new session
+        async function createNewSession() {
+            const cwd = document.getElementById('new-session-cwd').value || '.';
+            
+            try {
+                const data = await apiCall('/agent/conversations', {
+                    method: 'POST',
+                    body: JSON.stringify({ cwd: cwd })
+                });
+                
+                // Navigate to main interface with conversation_id
+                window.location.href = `/?conversation_id=${data.conversation_id}`;
+            } catch (error) {
+                console.error('Error creating session:', error);
+                alert(`Failed to create session: ${error.message}`);
+            }
+        }
+
+        // Continue existing session
+        function continueSession() {
+            if (selectedSession) {
+                window.location.href = `/?conversation_id=${selectedSession.id}`;
+            }
+        }
+
+        // Delete selected session
+        async function deleteSelectedSession() {
+            if (!selectedSession) return;
+            
+            if (!confirm(`Are you sure you want to delete session ${selectedSession.id.substring(0, 8)}...?`)) {
+                return;
+            }
+            
+            try {
+                await apiCall(`/agent/conversations/${selectedSession.id}`, {
+                    method: 'DELETE'
+                });
+                
+                // Refresh session list
+                await loadSessions();
+                hideContinueSessionPanel();
+            } catch (error) {
+                console.error('Error deleting session:', error);
+                alert(`Failed to delete session: ${error.message}`);
+            }
+        }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            loadSessions();
+        });
+    </script>
+</body>
+</html>

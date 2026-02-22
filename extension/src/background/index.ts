@@ -624,15 +624,18 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
         }
 
       case 'tab':
+        // Extract conversation_id from command for multi-session support
+        const conversationId = command.conversation_id || 'default';
+        
         switch (command.action) {
           case 'init':
             if (!command.url) {
               throw new Error('URL is required for init action');
             }
             // Initialize a new managed session with the given URL
-            const initResult = await tabManager.initializeSession(command.url);
+            const initResult = await tabManager.initializeSession(command.url, conversationId);
             
-            console.log(`🚀 [Tab Init] Initializing session with tab ${initResult.tabId}`);
+            console.log(`🚀 [Tab Init] Initializing session ${conversationId} with tab ${initResult.tabId}`);
             
             // CRITICAL: Do NOT activate tab for initialization
             // resetMousePosition uses CDP which works in background
@@ -640,13 +643,13 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
             console.log(`🖱️ [Tab Init] Resetting mouse position (background)`);
             
             // Initialize mouse position to screen center (like reset command)
-            const resetResult = await computer.resetMousePosition(initResult.tabId);
+            const initResetResult = await computer.resetMousePosition(initResult.tabId);
             
             // Update visual mouse to actual screen center
-            let visualUpdateSuccess = false;
-            if (resetResult.success && resetResult.data?.actualPosition) {
-              const { actualPosition } = resetResult.data;
-              visualUpdateSuccess = await updateVisualMouse(initResult.tabId, {
+            let initVisualUpdateSuccess = false;
+            if (initResetResult.success && initResetResult.data?.actualPosition) {
+              const { actualPosition } = initResetResult.data;
+              initVisualUpdateSuccess = await updateVisualMouse(initResult.tabId, {
                 x: actualPosition.x,
                 y: actualPosition.y,
                 action: 'move',
@@ -654,18 +657,19 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
               });
             }
             
-            console.log(`✅ [Tab Init] Session initialized successfully (background)`);
+            console.log(`✅ [Tab Init] Session ${conversationId} initialized successfully (background)`);
             
             return {
               success: true,
-              message: `Session initialized with ${command.url} (background, no tab activation)`,
+              message: `Session ${conversationId} initialized with ${command.url} (background, no tab activation)`,
               data: {
                 tabId: initResult.tabId,
                 groupId: initResult.groupId,
                 url: initResult.url,
+                conversationId: conversationId,
                 isManaged: true,
-                mouseReset: resetResult.success,
-                visualUpdateSuccess,
+                mouseReset: initResetResult.success,
+                visualUpdateSuccess: initVisualUpdateSuccess,
               },
               timestamp: Date.now(),
             };
@@ -675,10 +679,17 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
               throw new Error('URL is required for open action');
             }
             const openResult = await tabs.openTab(command.url);
+            // Add tab to conversation's managed tabs
+            if (openResult.tabId) {
+              await tabManager.addTabToManagement(openResult.tabId, conversationId);
+            }
             return {
               success: true,
               message: openResult.message,
-              data: openResult,
+              data: {
+                ...openResult,
+                conversationId: conversationId
+              },
               timestamp: Date.now(),
             };
 
@@ -687,10 +698,14 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
               throw new Error('tab_id is required for close action');
             }
             const closeResult = await tabs.closeTab(command.tab_id);
+            // Tab will be removed from managed tabs by event listener
             return {
               success: true,
               message: closeResult.message,
-              data: closeResult,
+              data: {
+                ...closeResult,
+                conversationId: conversationId
+              },
               timestamp: Date.now(),
             };
 
@@ -698,29 +713,39 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
             if (!command.tab_id) {
               throw new Error('tab_id is required for switch action');
             }
-            // Ensure tab is managed by tab manager
-            await tabManager.ensureTabManaged(command.tab_id);
+            // Ensure tab is managed by tab manager for this conversation
+            await tabManager.ensureTabManaged(command.tab_id, conversationId);
             // Update tab activity for status tracking
-            tabManager.updateTabActivity(command.tab_id);
+            tabManager.updateTabActivity(command.tab_id, conversationId);
             
             // CRITICAL: Do NOT activate tab for switch operation
             // switchToTab only updates internal state, does not need tab activation
-            console.log(`🔄 [Tab Switch] Switching internal state to tab ${command.tab_id} (background)`);
+            console.log(`🔄 [Tab Switch] Switching internal state to tab ${command.tab_id} for ${conversationId} (background)`);
             
             const switchResult = await tabs.switchToTab(command.tab_id);
             return {
               success: true,
               message: switchResult.message,
-              data: switchResult,
+              data: {
+                ...switchResult,
+                conversationId: conversationId
+              },
               timestamp: Date.now(),
             };
 
           case 'list':
+            const listTabsConversationId = command.conversation_id || 'default';
             const listResult = await tabs.getAllTabs();
+            // Filter tabs by conversation if needed
+            const conversationTabs = tabManager.getManagedTabs(listTabsConversationId);
             return {
               success: true,
-              message: `Found ${listResult.count} tabs`,
-              data: listResult,
+              message: `Found ${listResult.count} tabs (${conversationTabs.length} in conversation ${listTabsConversationId})`,
+              data: {
+                ...listResult,
+                conversationId: listTabsConversationId,
+                conversationTabs: conversationTabs
+              },
               timestamp: Date.now(),
             };
 
@@ -728,20 +753,24 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
             if (!command.tab_id) {
               throw new Error('tab_id is required for refresh action');
             }
-            // Ensure tab is managed by tab manager
-            await tabManager.ensureTabManaged(command.tab_id);
+            const refreshConversationId = command.conversation_id || 'default';
+            // Ensure tab is managed by tab manager for this conversation
+            await tabManager.ensureTabManaged(command.tab_id, refreshConversationId);
             // Update tab activity for status tracking
-            tabManager.updateTabActivity(command.tab_id);
+            tabManager.updateTabActivity(command.tab_id, refreshConversationId);
             
             // CRITICAL: Do NOT activate tab for refresh operation
             // chrome.tabs.reload() works in background, no need to activate tab
-            console.log(`🔄 [Tab Refresh] Refreshing tab ${command.tab_id} (background)`);
+            console.log(`🔄 [Tab Refresh] Refreshing tab ${command.tab_id} for ${refreshConversationId} (background)`);
             
             const refreshResult = await tabs.refreshTab(command.tab_id);
             return {
               success: true,
               message: refreshResult.message,
-              data: refreshResult,
+              data: {
+                ...refreshResult,
+                conversationId: refreshConversationId
+              },
               timestamp: Date.now(),
             };
 
@@ -749,16 +778,50 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
             throw new Error(`Unknown tab action: ${command.action}`);
         }
 
-      case 'get_tabs':
-        // Support managed_only parameter (default: true for backward compatibility)
-        const managedOnly = command.managed_only !== false; // true if undefined or true
-        const getTabsResult = await tabs.getAllTabs(managedOnly);
+      case 'cleanup_session':
+        // Clean up a specific conversation session
+        const cleanupConversationId = command.conversation_id || 'default';
+        console.log(`🧹 [Cleanup Session] Cleaning up session ${cleanupConversationId}`);
+        
+        await tabManager.cleanupSession(cleanupConversationId);
+        
         return {
           success: true,
-          message: getTabsResult.message || `Found ${getTabsResult.count} tabs`,
-          data: getTabsResult,
+          message: `Session ${cleanupConversationId} cleaned up successfully`,
+          data: {
+            conversationId: cleanupConversationId
+          },
           timestamp: Date.now(),
         };
+
+      case 'get_tabs':
+        // Support managed_only parameter and conversation_id for multi-session
+        const getTabsConversationId = command.conversation_id || 'default';
+        const getTabsManagedOnly = command.managed_only !== false; // true if undefined or true
+        
+        if (getTabsManagedOnly) {
+          // Return only managed tabs for this conversation
+          const conversationTabs = tabManager.getManagedTabs(getTabsConversationId);
+          return {
+            success: true,
+            message: `Found ${conversationTabs.length} managed tabs in conversation ${getTabsConversationId}`,
+            data: {
+              tabs: conversationTabs,
+              count: conversationTabs.length,
+              conversationId: getTabsConversationId
+            },
+            timestamp: Date.now(),
+          };
+        } else {
+          // Return all tabs (original behavior)
+          const getTabsResult = await tabs.getAllTabs(false);
+          return {
+            success: true,
+            message: getTabsResult.message || `Found ${getTabsResult.count} tabs`,
+            data: getTabsResult,
+            timestamp: Date.now(),
+          };
+        }
 
       case 'javascript_execute':
         const tabIdForJS = command.tab_id || await getCurrentTabId();

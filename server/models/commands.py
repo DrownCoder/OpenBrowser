@@ -40,6 +40,10 @@ class BaseCommand(BaseModel):
         default=None,
         description="Tab ID to target (None = current managed tab)"
     )
+    conversation_id: Optional[str] = Field(
+        default=None,
+        description="Conversation ID for session isolation (None = default session)"
+    )
 
 
 class MouseMoveCommand(BaseCommand):
