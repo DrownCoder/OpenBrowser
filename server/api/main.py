@@ -82,16 +82,13 @@ async def api_info():
 
 @app.get("/health")
 async def health():
-    """Health check endpoint"""
-    healthy = await command_processor.health_check()
-    if healthy:
-        return {
-            "status": "healthy", 
-            "websocket_connected": ws_manager.is_connected(),
-            "websocket_connections": ws_manager.get_connection_count()
-        }
-    else:
-        raise HTTPException(status_code=503, detail="Service unhealthy")
+    """Health check endpoint - checks server status, not Chrome extension connection"""
+    # Server is healthy if it's running - WebSocket connection status is informational
+    return {
+        "status": "healthy", 
+        "websocket_connected": ws_manager.is_connected(),
+        "websocket_connections": ws_manager.get_connection_count()
+    }
 
 
 @app.post("/command", response_model=CommandResponse)
