@@ -413,8 +413,11 @@ class OpenBrowserAgentManager:
             return True
         
         # Also try to delete from session manager even if not in memory
-        session_manager.delete_session(conversation_id)
-        return False
+        # Return the actual result of the deletion operation
+        success = session_manager.delete_session(conversation_id)
+        if success:
+            logger.info(f"Deleted session from database: {conversation_id}")
+        return success
     
     def list_conversations(self, status: SessionStatus = None) -> List[Dict[str, Any]]:
         """List all conversations with enhanced session info
