@@ -416,6 +416,24 @@
             cursor: not-allowed;
         }
 
+        .pause-button {
+            background: #660000;
+            color: #ffcccc;
+            border: 1px solid #880000;
+            padding: 6px 15px;
+            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+            font-size: 12px;
+            cursor: pointer;
+            margin-left: 10px;
+            transition: all 0.2s;
+        }
+
+        .pause-button:hover {
+            background: #880000;
+            color: #ffffff;
+            border-color: #aa0000;
+        }
+
         .sidebar {
             flex: 2;
             background: #222222;
@@ -969,9 +987,11 @@
             border: 1px solid #444444;
             border-radius: 5px;
             padding: 10px;
+            padding-right: 35px;  /* Make room for delete button */
             margin-bottom: 8px;
             cursor: pointer;
             transition: all 0.2s;
+            position: relative;  /* For absolute positioning of delete button */
         }
 
         .session-card:hover {
@@ -1043,6 +1063,33 @@
             gap: 10px;
             font-size: 10px;
             color: #666666;
+        }
+
+        .session-card-delete-btn {
+            position: absolute;
+            top: 50%;
+            right: 8px;
+            transform: translateY(-50%);
+            background: transparent;
+            border: none;
+            color: #666666;
+            cursor: pointer;
+            font-size: 14px;
+            padding: 4px 8px;
+            border-radius: 3px;
+            transition: all 0.2s;
+            opacity: 0;
+            visibility: hidden;
+        }
+
+        .session-card:hover .session-card-delete-btn {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .session-card-delete-btn:hover {
+            background: #660000;
+            color: #ffcccc;
         }
 
         .session-overlay {
@@ -1174,6 +1221,7 @@
                 <div class="input-prompt blink">></div>
                 <input type="text" class="command-input" id="command-input" placeholder="Type a command (e.g., 'open google.com') and press Enter" autofocus>
                 <button class="send-button" id="send-button" onclick="sendCommand()">SEND</button>
+                <button class="pause-button" id="pause-button" onclick="pauseConversation()" style="display: none;">PAUSE</button>
             </div>
         </div>
         
@@ -1357,6 +1405,8 @@
         let currentConversationId = null;
         let eventSource = null;
         let isProcessing = false;
+        let isConversationRunning = false; // Track if conversation is actively running
+        let abortController = null; // AbortController for SSE connection
         let eventCounters = {
             total: 0,
             message: 0,
@@ -1447,6 +1497,7 @@
                             <span>💬 ${session.message_count || 0}</span>
                             <span>🕐 ${lastActive}</span>
                         </div>
+                        <button class="session-card-delete-btn" onclick="event.stopPropagation(); deleteSession('${session.id}')" title="Delete session">🗑️</button>
                     </div>
                 `;
             }).join('');
@@ -1494,6 +1545,73 @@
                 console.error('Error creating session:', error);
                 alert(`Failed to create session: ${error.message}`);
             }
+        }
+        
+        async function deleteSession(sessionId) {
+            if (!confirm(`Are you sure you want to delete session ${sessionId.substring(0, 8)}...?`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(apiUrl(`/agent/conversations/${sessionId}`), {
+                    method: 'DELETE'
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to delete session');
+                }
+                
+                // Reload session list
+                await loadSessionsForSidebar();
+                
+                // If deleted session was current, clear it
+                if (sessionId === currentConversationId) {
+                    currentConversationId = null;
+                    localStorage.removeItem('openbrowser_conversation_id');
+                    updateConversationIdDisplay();
+                    addEvent({
+                        type: 'SystemEvent',
+                        text: `Session ${sessionId.substring(0, 8)}... deleted. New conversation will be created on next command.`,
+                        timestamp: new Date().toISOString()
+                    });
+                }
+                
+                addEvent({
+                    type: 'SystemEvent',
+                    text: `Session ${sessionId.substring(0, 8)}... deleted successfully`,
+                    timestamp: new Date().toISOString()
+                });
+            } catch (error) {
+                console.error('Error deleting session:', error);
+                alert(`Failed to delete session: ${error.message}`);
+            }
+        }
+        
+        // Pause conversation by disconnecting SSE
+        function pauseConversation() {
+            if (!isConversationRunning) {
+                return;
+            }
+            
+            console.log('[Frontend] Pausing conversation by disconnecting SSE');
+            
+            // Close the SSE connection (fetch will detect disconnect)
+            if (abortController) {
+                abortController.abort();
+            }
+            
+            // Reset UI state
+            isConversationRunning = false;
+            isProcessing = false;
+            document.getElementById('send-button').disabled = false;
+            document.getElementById('send-button').style.display = 'inline-block';
+            document.getElementById('pause-button').style.display = 'none';
+            
+            addEvent({
+                type: 'SystemEvent',
+                text: 'Conversation paused by user',
+                timestamp: new Date().toISOString()
+            });
         }
         
         function updateSessionDisplay() {
@@ -1675,12 +1793,10 @@
                 }
             });
             
-            // Load saved conversation ID from localStorage (only if not already set from URL)
-            const savedConvId = localStorage.getItem('openbrowser_conversation_id');
-            if (savedConvId && !currentConversationId) {
-                currentConversationId = savedConvId;
-                updateConversationIdDisplay();
-            }
+            // Note: We intentionally do NOT load conversation from localStorage
+            // Always start with a new session unless user explicitly selects from sidebar
+            // The conversation_id URL parameter is checked above (checkConversationId)
+            // which is only set when user clicks on a session from the sidebar
             
             // Focus on input
             document.getElementById('command-input').focus();
@@ -1772,9 +1888,12 @@
                 source: 'user'
             });
             
-            // Disable send button
+            // Disable send button and show pause button
             isProcessing = true;
+            isConversationRunning = true;
             document.getElementById('send-button').disabled = true;
+            document.getElementById('send-button').style.display = 'none';
+            document.getElementById('pause-button').style.display = 'inline-block';
             
             // Check if CWD is provided
             const cwdInput = document.getElementById('cwd-input');
@@ -1816,7 +1935,7 @@
                     const data = await response.json();
                     conversationId = data.conversation_id;
                     currentConversationId = conversationId;
-                    localStorage.setItem('openbrowser_conversation_id', conversationId);
+                    // Don't save to localStorage - always start fresh on page reload
                     updateConversationIdDisplay();
                     
                     // Update cwd display
@@ -1926,8 +2045,8 @@
             // Send the command and read SSE response
             console.log(`[Frontend] Sending POST request to: ${url} with cwd=${cwd}`);
             
-            // Abort controller for cleanup
-            const abortController = new AbortController();
+            // Abort controller for cleanup (use global variable)
+            abortController = new AbortController();
             
             fetch(url, {
                 method: 'POST',
@@ -2039,12 +2158,15 @@
             }).finally(() => {
                 // Cleanup
                 isProcessing = false;
+                isConversationRunning = false;
                 document.getElementById('send-button').disabled = false;
+                document.getElementById('send-button').style.display = 'inline-block';
+                document.getElementById('pause-button').style.display = 'none';
                 if (completionTimeout) {
                     clearTimeout(completionTimeout);
                     completionTimeout = null;
                 }
-                abortController.abort();
+                abortController = null;
             });
             
 
@@ -2074,7 +2196,10 @@
                     
                     // Re-enable send button
                     isProcessing = false;
+                    isConversationRunning = false;
                     document.getElementById('send-button').disabled = false;
+                    document.getElementById('send-button').style.display = 'inline-block';
+                    document.getElementById('pause-button').style.display = 'none';
                     
                     // Close EventSource
                     if (eventSource) {
@@ -2089,7 +2214,10 @@
                         timestamp: new Date().toISOString()
                     });
                     isProcessing = false;
+                    isConversationRunning = false;
                     document.getElementById('send-button').disabled = false;
+                    document.getElementById('send-button').style.display = 'inline-block';
+                    document.getElementById('pause-button').style.display = 'none';
                 }
             });
             
@@ -2133,7 +2261,10 @@
                     
                     // Re-enable send button
                     isProcessing = false;
+                    isConversationRunning = false;
                     document.getElementById('send-button').disabled = false;
+                    document.getElementById('send-button').style.display = 'inline-block';
+                    document.getElementById('pause-button').style.display = 'none';
                     
                     // Close EventSource
                     if (eventSource) {
@@ -2147,6 +2278,11 @@
                         text: `SSE Error: ${error.message}`,
                         timestamp: new Date().toISOString()
                     });
+                    isProcessing = false;
+                    isConversationRunning = false;
+                    document.getElementById('send-button').disabled = false;
+                    document.getElementById('send-button').style.display = 'inline-block';
+                    document.getElementById('pause-button').style.display = 'none';
                 }
             });
             
@@ -2161,7 +2297,10 @@
                         timestamp: new Date().toISOString()
                     });
                     isProcessing = false;
+                    isConversationRunning = false;
                     document.getElementById('send-button').disabled = false;
+                    document.getElementById('send-button').style.display = 'inline-block';
+                    document.getElementById('pause-button').style.display = 'none';
                     // Note: Cannot abort fetch from here as abortController is in fetch scope
                     // The fetch will eventually complete or error on its own
                 }

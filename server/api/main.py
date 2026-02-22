@@ -241,7 +241,7 @@ async def create_conversation(request: Request):
 
 
 @app.api_route("/agent/conversations/{conversation_id}/messages", methods=["GET", "POST"])
-async def agent_messages_stream(conversation_id: str, request: Request = None):
+async def agent_messages_stream(conversation_id: str, request: Request):
     """
     Handle agent conversation messages with SSE streaming
     - GET: Connect to SSE stream
@@ -281,7 +281,16 @@ async def agent_messages_stream(conversation_id: str, request: Request = None):
             logger.error(f"Error processing agent message: {e}")
             yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
         except asyncio.CancelledError:
-            logger.debug(f"SSE connection cancelled for conversation {conversation_id}")
+            logger.debug(f"SSE connection cancelled for conversation {conversation_id} - client disconnected")
+            # Client disconnected - pause the conversation
+            try:
+                conv_state = agent_manager.get_conversation(conversation_id)
+                if conv_state and conv_state.conversation:
+                    logger.info(f"Pausing conversation {conversation_id} due to client disconnect")
+                    conv_state.conversation.pause()
+                    logger.info(f"Conversation {conversation_id} paused successfully")
+            except Exception as e:
+                logger.warning(f"Failed to pause conversation {conversation_id}: {e}")
             # Don't yield error on cancellation, just exit cleanly
             raise
         except Exception as e:
