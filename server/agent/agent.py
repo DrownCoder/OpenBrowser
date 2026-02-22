@@ -311,11 +311,12 @@ class OpenBrowserAgentManager:
         # Create visualizer (queue will be set when processing messages)
         visualizer = QueueVisualizer()
         
-        # Create conversation with specified workspace
+        # Create conversation with specified workspace and conversation_id
         conversation = Conversation(
             agent=agent,
             visualizer=visualizer,
             workspace=cwd,
+            conversation_id=conversation_id,  # ✅ FIX: Pass conversation_id to Conversation
         )
         
         # Store conversation state
@@ -366,11 +367,12 @@ class OpenBrowserAgentManager:
         # Create visualizer (queue will be set when processing messages)
         visualizer = QueueVisualizer()
         
-        # Create conversation with specified workspace
+        # Create conversation with specified workspace and conversation_id
         conversation = Conversation(
             agent=agent,
             visualizer=visualizer,
             workspace=cwd,
+            conversation_id=conversation_id,  # ✅ FIX: Pass conversation_id to Conversation
         )
         
         # Store conversation state

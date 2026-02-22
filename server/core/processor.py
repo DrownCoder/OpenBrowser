@@ -229,7 +229,8 @@ class CommandProcessor:
             # First check if any WebSocket connection exists
             if ws_manager.is_connected():
                 # If independent WebSocket server has connections, test with a command
-                command = GetTabsCommand()
+                # Use 'health_check' as conversation_id for health check commands
+                command = GetTabsCommand(conversation_id='health_check')
                 response = await self.execute(command)
                 return response.success
             else:

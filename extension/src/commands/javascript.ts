@@ -33,13 +33,25 @@ interface RuntimeEvaluateResult {
 }
 
 /**
+ * Console output entry type
+ */
+interface ConsoleOutputEntry {
+  type: 'log' | 'warn' | 'error' | 'info' | 'debug' | 'table' | 'trace' | 'dir' | string;
+  args: any[];  // Serialized console arguments
+  timestamp: number;
+  url?: string;
+  line?: number;
+  column?: number;
+}
+
+/**
  * Execute JavaScript code in a tab using CDP Runtime.evaluate
  * @param tabId Target tab ID
  * @param script JavaScript code to execute
  * @param returnByValue If true, returns result as serializable JSON value (default: true)
  * @param awaitPromise If true, waits for Promise resolution (default: false)
  * @param timeout Maximum execution time in milliseconds (default: 30000)
- * @returns Execution result with success status and data
+ * @returns Execution result with success status, data, and console output
  */
 export async function executeJavaScript(
   tabId: number,
@@ -57,6 +69,10 @@ export async function executeJavaScript(
   }
 
   const cdpCommander = new CdpCommander(tabId);
+  
+  // Collect console output during script execution
+  const consoleOutput: ConsoleOutputEntry[] = [];
+  let consoleListener: ((source: chrome.debugger.Debuggee, method: string, params?: object) => void) | null = null;
 
   try {
     // Enable Runtime domain if not already enabled
@@ -67,6 +83,47 @@ export async function executeJavaScript(
       console.warn('⚠️ [JavaScript] Runtime.enable failed, but continuing:', enableError);
       // Continue anyway - Runtime might already be enabled
     }
+
+    // Set up console listener to capture console API calls
+    consoleListener = (source: chrome.debugger.Debuggee, method: string, params?: object) => {
+      if (source.tabId === tabId && method === 'Runtime.consoleAPICalled') {
+        const consoleParams = params as any;
+        
+        // Serialize console arguments for transmission
+        const serializedArgs = (consoleParams.args || []).map((arg: any) => {
+          // Handle RemoteObject from CDP
+          if (arg.type === 'string') {
+            return arg.value || arg.description || '';
+          } else if (arg.type === 'number') {
+            return arg.value || 0;
+          } else if (arg.type === 'boolean') {
+            return arg.value || false;
+          } else if (arg.type === 'undefined') {
+            return undefined;
+          } else if (arg.type === 'object' || arg.type === 'function') {
+            // For objects and functions, try to get a readable representation
+            return arg.description || arg.preview?.description || JSON.stringify(arg.value || {});
+          } else {
+            return arg.description || arg.value || String(arg);
+          }
+        });
+
+        consoleOutput.push({
+          type: consoleParams.type || 'log',
+          args: serializedArgs,
+          timestamp: consoleParams.timestamp || Date.now(),
+          url: consoleParams.stackTrace?.callFrames?.[0]?.url,
+          line: consoleParams.stackTrace?.callFrames?.[0]?.lineNumber,
+          column: consoleParams.stackTrace?.callFrames?.[0]?.columnNumber,
+        });
+        
+        console.log(`🖥️ [Console] Captured ${consoleParams.type}:`, ...serializedArgs);
+      }
+    };
+
+    // Register console listener
+    chrome.debugger.onEvent.addListener(consoleListener);
+    console.log('🎯 [JavaScript] Console listener registered');
 
     // Execute JavaScript using Runtime.evaluate
     console.log(`📜 [JavaScript] Sending Runtime.evaluate command`);
@@ -84,6 +141,7 @@ export async function executeJavaScript(
     const response: any = {
       success: true,
       message: 'JavaScript executed successfully',
+      consoleOutput: consoleOutput.length > 0 ? consoleOutput : undefined,  // ✅ Add console output
     };
 
     if (result.exceptionDetails) {
@@ -112,6 +170,12 @@ export async function executeJavaScript(
     console.error(`❌ [JavaScript] JavaScript execution failed:`, error);
     throw new Error(`JavaScript execution failed: ${error instanceof Error ? error.message : String(error)}`);
   } finally {
+    // Remove console listener before detaching debugger
+    if (consoleListener) {
+      chrome.debugger.onEvent.removeListener(consoleListener);
+      console.log('🔌 [JavaScript] Console listener removed');
+    }
+    
     // Detach debugger to clean up resources
     await debuggerManager.safeDetachDebugger(tabId);
   }

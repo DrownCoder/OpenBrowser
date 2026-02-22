@@ -59,7 +59,7 @@ export class TabManager {
   /**
    * Get or create session state for a conversation
    */
-  private getOrCreateSession(conversationId: string = 'default'): TabGroupState {
+  private getOrCreateSession(conversationId: string): TabGroupState {
     if (!this.sessions.has(conversationId)) {
       console.log(`📁 [TabManager] Creating new session state for conversation: ${conversationId}`);
       this.sessions.set(conversationId, {
@@ -77,7 +77,7 @@ export class TabManager {
   /**
    * Find existing tab group or create a new one for a conversation
    */
-  private async findOrCreateTabGroup(conversationId: string = 'default'): Promise<number | null> {
+  private async findOrCreateTabGroup(conversationId: string): Promise<number | null> {
     try {
       const session = this.getOrCreateSession(conversationId);
       
@@ -152,7 +152,7 @@ export class TabManager {
    * Create a new tab group for a conversation
    * Note: This now just prepares the group, no dummy tab needed
    */
-  private async createTabGroup(windowId: number, conversationId: string = 'default'): Promise<number> {
+  private async createTabGroup(windowId: number, conversationId: string): Promise<number> {
     try {
       const session = this.getOrCreateSession(conversationId);
       const groupName = this.generateGroupName(conversationId);
@@ -175,7 +175,7 @@ export class TabManager {
    * Initialize a new managed session with a starting URL
    * This creates the tab group and opens the first tab
    */
-  async initializeSession(startUrl: string, conversationId: string = 'default'): Promise<ManagedTab> {
+  async initializeSession(startUrl: string, conversationId: string): Promise<ManagedTab> {
     console.log(`🚀 [TabManager] Initializing new session for ${conversationId} with URL: ${startUrl}`);
     
     const session = this.getOrCreateSession(conversationId);
@@ -224,7 +224,7 @@ export class TabManager {
   /**
    * Check if session is initialized (has a tab group and at least one managed tab)
    */
-  isSessionInitialized(conversationId: string = 'default'): boolean {
+  isSessionInitialized(conversationId: string): boolean {
     const session = this.sessions.get(conversationId);
     return session !== undefined && session.groupId !== null && session.managedTabs.size > 0;
   }
@@ -239,7 +239,7 @@ export class TabManager {
   /**
    * Get only managed tabs for a specific conversation
    */
-  getManagedTabsOnly(conversationId: string = 'default'): ManagedTab[] {
+  getManagedTabsOnly(conversationId: string): ManagedTab[] {
     const session = this.sessions.get(conversationId);
     return session ? Array.from(session.managedTabs.values()) : [];
   }
@@ -247,7 +247,7 @@ export class TabManager {
   /**
    * Open a new tab and add it to the managed tab group
    */
-  async openManagedTab(url: string, active: boolean = false, conversationId: string = 'default'): Promise<ManagedTab> {
+  async openManagedTab(url: string, active: boolean = false, conversationId: string): Promise<ManagedTab> {
     console.log(`📁 [TabManager] Opening managed tab for ${conversationId}: ${url}`);
     
     const session = this.getOrCreateSession(conversationId);
@@ -308,7 +308,7 @@ export class TabManager {
   /**
    * Add an existing tab to the managed group
    */
-  async addTabToManagement(tabId: number, conversationId: string = 'default'): Promise<boolean> {
+  async addTabToManagement(tabId: number, conversationId: string): Promise<boolean> {
     try {
       const session = this.getOrCreateSession(conversationId);
       const tab = await chrome.tabs.get(tabId);
@@ -379,7 +379,7 @@ export class TabManager {
   /**
    * Remove a tab from management (but don't close it)
    */
-  async removeTabFromManagement(tabId: number, conversationId: string = 'default'): Promise<boolean> {
+  async removeTabFromManagement(tabId: number, conversationId: string): Promise<boolean> {
     try {
       const session = this.sessions.get(conversationId);
       if (!session || !session.managedTabs.has(tabId)) {
@@ -411,7 +411,7 @@ export class TabManager {
   /**
    * Get all managed tabs for a specific conversation
    */
-  getManagedTabs(conversationId: string = 'default'): ManagedTab[] {
+  getManagedTabs(conversationId: string): ManagedTab[] {
     const session = this.sessions.get(conversationId);
     return session ? Array.from(session.managedTabs.values()) : [];
   }
@@ -419,7 +419,7 @@ export class TabManager {
   /**
    * Check if a tab is managed in a specific conversation
    */
-  isTabManaged(tabId: number, conversationId: string = 'default'): boolean {
+  isTabManaged(tabId: number, conversationId: string): boolean {
     const session = this.sessions.get(conversationId);
     return session ? session.managedTabs.has(tabId) : false;
   }
@@ -474,7 +474,7 @@ export class TabManager {
   /**
    * Update tab activity timestamp
    */
-  updateTabActivity(tabId: number, conversationId: string = 'default'): void {
+  updateTabActivity(tabId: number, conversationId: string): void {
     const session = this.sessions.get(conversationId);
     if (!session) return;
     
@@ -492,7 +492,7 @@ export class TabManager {
   /**
    * Ensure a tab is managed (add to management if not already)
    */
-  async ensureTabManaged(tabId: number, conversationId: string = 'default'): Promise<boolean> {
+  async ensureTabManaged(tabId: number, conversationId: string): Promise<boolean> {
     if (this.isTabManaged(tabId, conversationId)) {
       return true;
     }
@@ -503,7 +503,7 @@ export class TabManager {
   /**
    * Get or create a managed tab for the current active tab
    */
-  async getOrCreateManagedTabForCurrent(conversationId: string = 'default'): Promise<ManagedTab | null> {
+  async getOrCreateManagedTabForCurrent(conversationId: string): Promise<ManagedTab | null> {
     try {
       const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!activeTab?.id) {

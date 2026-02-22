@@ -83,6 +83,10 @@ class OpenBrowserObservation(Observation):
         default=None,
         description="Result of JavaScript execution (if action was javascript_execute)"
     )
+    console_output: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Console output captured during JavaScript execution (list of {type, args, timestamp})"
+    )
     
     @property
     def to_llm_content(self) -> Sequence[TextContent | ImageContent]:
@@ -145,6 +149,53 @@ class OpenBrowserObservation(Observation):
                 text_parts.append("```")
             text_parts.append("")
         
+        # Console Output Section (if applicable)
+        if self.console_output and len(self.console_output) > 0:
+            text_parts.append("## Console Output")
+            text_parts.append("")
+            
+            for entry in self.console_output:
+                console_type = entry.get('type', 'log')
+                args = entry.get('args', [])
+                timestamp = entry.get('timestamp')
+                
+                # Format console type with emoji
+                type_emoji = {
+                    'log': '📝',
+                    'warn': '⚠️',
+                    'error': '❌',
+                    'info': 'ℹ️',
+                    'debug': '🔍',
+                    'table': '📊',
+                    'trace': '🔍',
+                    'dir': '📁'
+                }.get(console_type, '📝')
+                
+                # Format arguments
+                formatted_args = []
+                for arg in args:
+                    if arg is None:
+                        formatted_args.append('undefined')
+                    elif isinstance(arg, str):
+                        formatted_args.append(arg)
+                    elif isinstance(arg, (dict, list)):
+                        try:
+                            formatted_args.append(json.dumps(arg, indent=2, ensure_ascii=False))
+                        except:
+                            formatted_args.append(str(arg))
+                    else:
+                        formatted_args.append(str(arg))
+                
+                # Join multiple arguments
+                args_str = ' '.join(formatted_args)
+                if len(args_str) > 1000:
+                    args_str = args_str[:1000] + "... (truncated)"
+                
+                # Add console line with type
+                text_parts.append(f"{type_emoji} **[{console_type}]** {args_str}")
+            
+            text_parts.append("")
+            
         # Browser State Section
         if self.tabs:
             text_parts.append("## Browser State")
@@ -215,15 +266,9 @@ class OpenBrowserObservation(Observation):
 class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation]):
     """Executor for browser automation commands"""
     
-    def __init__(self, conversation_id: str = None):
-        # We'll use the existing command_processor from the server
-        # ✅ FIX: Generate UUID if conversation_id is None to avoid all sessions using 'default'
-        import uuid
-        if conversation_id is None:
-            conversation_id = str(uuid.uuid4())
-            logger.warning(f"⚠️ conversation_id was None, generated new UUID: {conversation_id}")
-        self.conversation_id = conversation_id
-        logger.info(f"🔍 [Executor] Created executor with conversation_id={self.conversation_id}")
+    def __init__(self):
+        self.conversation_id = None
+
     
     async def _execute_command(self, command) -> Any:
         """Execute command with conversation context"""
@@ -248,6 +293,7 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
             result_dict = None
             message = ""
             javascript_result = None  # Store JavaScript execution result
+            console_output = None  # Store console output from JavaScript execution
             
             if action_type == "tab":
                 # Validate required parameters
@@ -318,6 +364,11 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                     js_data = result_dict['data']
                     # JavaScript module returns result in 'result' field
                     if isinstance(js_data, dict):
+                        # Extract console output if available
+                        if 'consoleOutput' in js_data:
+                            console_output = js_data['consoleOutput']
+                            logger.debug(f"DEBUG: Captured console output: {len(console_output)} entries")
+                        
                         if 'result' in js_data:
                             js_result = js_data['result']
                             # CDP result object has 'value' field when returnByValue is true
@@ -409,7 +460,8 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 tabs=tabs_data,
                 mouse_position=mouse_position,
                 screenshot_data_url=screenshot_data_url,
-                javascript_result=javascript_result
+                javascript_result=javascript_result,
+                console_output=console_output
             )
             
         except ValueError as e:
@@ -422,7 +474,8 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 tabs=[],
                 mouse_position=None,
                 screenshot_data_url=None,
-                javascript_result=None
+                javascript_result=None,
+                console_output=None
             )
         except Exception as e:
             logger.debug(f"DEBUG: _execute_action_sync caught exception: {e}")
@@ -435,13 +488,16 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 tabs=[],
                 mouse_position=None,
                 screenshot_data_url=None,
-                javascript_result=None
+                javascript_result=None,
+                console_output=None
             )
     
-    def __call__(self, action: OpenBrowserAction, conversation=None) -> OpenBrowserObservation:
+    def __call__(self, action: OpenBrowserAction, conversation) -> OpenBrowserObservation:
         """Execute a browser action and return observation"""
+        self.conversation_id = str(conversation._state.id)
+
         # Use synchronous HTTP API to avoid event loop competition with WebSocket
-        logger.debug(f"DEBUG: OpenBrowserTool.__call__ called with action: {action.type}")
+        logger.debug(f"DEBUG: OpenBrowserTool.__call__ called with action: {action.type}, conversation_id: {self.conversation_id}")
         logger.debug(f"DEBUG: Current thread: {threading.current_thread().name}")
         
         try:
@@ -537,6 +593,16 @@ Execute JavaScript code in the current tab. This is your primary method for all 
 }
 ```
 
+**CRITICAL Requirements:**
+- ⏱️ **Timeout**: Script execution has a 30-second timeout limit
+- 📦 **Serialization**: Return values MUST be JSON-serializable (strings, numbers, booleans, objects, arrays)
+  - ❌ Cannot return: Functions, Symbols, DOM nodes, circular references
+  - ✅ Can return: `document.title`, `{url: location.href}`, `Array.from(elements).map(...)`
+- ✂️ **Data Size**: Results larger than 50KB will be truncated
+- 📝 **Console Output**: `console.log()` outputs are captured and visible to AI agent ✅
+  - All console methods supported: log, warn, error, info, debug, table, trace, dir
+  - Console output appears in "Console Output" section of results
+
 **Capabilities:**
 - DOM Manipulation: Click elements, fill forms, modify content
 - Data Extraction: Get text, attributes, page content
@@ -561,16 +627,30 @@ document.querySelector('input[name="email"]').value = 'user@example.com';
 
 **Extract data:**
 ```javascript
-// Page info
+// Page info (returns string)
 document.title
+
+// URL (returns string)
 window.location.href
+
+// Page text (returns string)
 document.body.innerText
 
-// Links
+// Links (returns array of objects - ✅ JSON-serializable)
 Array.from(document.links).map(link => ({text: link.textContent, href: link.href}))
 
-// Form data
+// Form data (returns array of objects - ✅ JSON-serializable)
 Array.from(document.forms).map(form => ({id: form.id, elements: form.elements.length}))
+
+// ❌ WRONG: Returning DOM nodes or functions (not serializable)
+// document.querySelector('button')  // Returns DOM node - will fail!
+// document.querySelector.bind        // Returns function - will fail!
+
+// ✅ CORRECT: Extract needed data from DOM nodes
+({
+  buttonCount: document.querySelectorAll('button').length,
+  firstButtonText: document.querySelector('button')?.textContent
+})
 ```
 
 **Navigate:**
@@ -595,6 +675,8 @@ document.querySelector('#section').scrollIntoView();
 
 **Wait for elements:**
 ```javascript
+// ⚠️ NOTE: Promise support requires await_promise parameter to be enabled
+// By default, this returns the Promise object immediately, not its result
 new Promise(resolve => {
   const check = () => {
     const el = document.querySelector('.loaded-content');
@@ -606,14 +688,15 @@ new Promise(resolve => {
 ```
 
 **Returns:**
-- Result of JavaScript evaluation (if serializable)
+- JSON-serializable result of JavaScript evaluation
 - `undefined` for operations without explicit return value
-- Error details for invalid JavaScript
+- Error details for invalid JavaScript or non-serializable values
 
 **Tips:**
-- Highlight elements before operating: `element.style.border = '3px solid red'`
-- Use `return` to get specific values
-- Chain operations: `document.querySelector('#input').value = 'text'; document.querySelector('#submit').click();`
+- Highlight elements before operating: `document.querySelector('#myElement').style.border = '3px solid red'`
+- Use explicit return values for debugging: `({success: true, clicked: true})` instead of `console.log('clicked')`
+- Chain operations with explicit return: `document.querySelector('#input').value = 'text'; document.querySelector('#submit').click(); return 'submitted'`
+- Always return data, not DOM nodes: Extract `element.textContent`, `element.href`, etc.
 
 ## 2. tab
 
@@ -665,11 +748,45 @@ Manage browser tabs.
 {"type": "tab", "action": "open", "url": "https://example.com/profile"}
 ```
 
+**Common Mistakes to Avoid:**
+
+❌ **Don't return DOM nodes:**
+```javascript
+// WRONG - Returns DOM node (not serializable)
+document.querySelector('button')
+
+// CORRECT - Extract serializable data
+document.querySelector('button')?.textContent
+```
+
+✅ **Console logging is now supported:**
+```javascript
+// ✅ GOOD - Console output is visible to AI
+console.log('Button found:', button.textContent);
+console.warn('Warning: slow operation');
+console.error('Error: element not found');
+
+// ✅ ALSO GOOD - Combine console.log with return values
+console.log('Processing data...');
+return {success: true, data: result};
+```
+
+❌ **Don't return functions or methods:**
+```javascript
+// WRONG - Returns function reference (not serializable)
+document.querySelector.bind
+
+// CORRECT - Call the function and return result
+document.querySelector('body')?.textContent
+```
+
 **Key Points:**
 - Use JavaScript for all page interactions (clicking, typing, scrolling, data extraction)
 - Use tab action for URL navigation when you know the URL
 - Screenshots help verify results and understand page structure
 - JavaScript execution is fast and reliable - use it for virtually everything!
+- Always return JSON-serializable values: strings, numbers, booleans, objects, arrays
+- Avoid returning DOM nodes, functions, or complex objects with circular references
 """
 
 
@@ -681,19 +798,8 @@ class OpenBrowserTool(ToolDefinition[OpenBrowserAction, OpenBrowserObservation])
     @classmethod
     def create(cls, conv_state, terminal_executor=None) -> Sequence[ToolDefinition]:
         """Create OpenBrowserTool instance with executor"""
-        # Extract conversation_id from conv_state for multi-session support
-        conversation_id = None
-        if conv_state:
-            if hasattr(conv_state, 'conversation_id'):
-                conversation_id = conv_state.conversation_id
-                logger.info(f"🔍 [Tool Creation] Extracted conversation_id from conv_state: {conversation_id}")
-            else:
-                logger.warning(f"⚠️ [Tool Creation] conv_state exists but has no conversation_id attribute")
-        else:
-            logger.warning(f"⚠️ [Tool Creation] conv_state is None")
-        
         # Create executor with conversation context
-        executor = OpenBrowserExecutor(conversation_id=conversation_id)
+        executor = OpenBrowserExecutor()
         
         return [
             cls(

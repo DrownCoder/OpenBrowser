@@ -1,18 +1,18 @@
 /**
- * Background Script - Main entry point for Chrome extension
+ * Background Script - Main entry point for Chrome extension (Strict Mode)
+ * 
+ * All commands require conversation_id to be provided by server.
+ * No default fallback behavior.
  */
 
 import { wsClient } from '../websocket/client';
-import { computer } from '../commands/computer';
 import { captureScreenshot } from '../commands/screenshot';
 import { tabs } from '../commands/tabs';
 import { tabManager } from '../commands/tab-manager';
-import { debuggerManager } from '../commands/debugger-manager';
-import { CdpCommander } from '../commands/cdp-commander';
 import { javascript } from '../commands/javascript';
 import type { Command, CommandResponse } from '../types';
 
-console.log('🚀 OpenBrowser extension starting...');
+console.log('🚀 OpenBrowser extension starting (Strict Mode)...');
 
 // Initialize tab manager
 tabManager.initialize().then(() => {
@@ -21,17 +21,12 @@ tabManager.initialize().then(() => {
   console.error('❌ Failed to initialize tab manager:', error);
 });
 
-// Track current active tab with visual mouse
-let currentActiveTabId: number | null = null;
-
 // Initialize WebSocket connection
 wsClient.connect().then(() => {
-  // Update tab manager status when connected
   tabManager.updateStatus('idle');
   console.log('🌐 WebSocket connected, tab manager status updated');
 }).catch((error) => {
   console.error('Failed to connect to WebSocket server:', error);
-  // Update tab manager status when connection fails
   tabManager.updateStatus('disconnected');
 });
 
@@ -39,90 +34,6 @@ wsClient.connect().then(() => {
 wsClient.onDisconnect(() => {
   console.log('🌐 WebSocket disconnected, updating tab manager status');
   tabManager.updateStatus('disconnected');
-});
-
-// Listen for tab removal to cleanup visual mouse
-chrome.tabs.onRemoved.addListener((tabId) => {
-  if (currentActiveTabId === tabId) {
-    console.log(`🗑️ Active tab ${tabId} was closed, resetting currentActiveTabId`);
-    currentActiveTabId = null;
-  }
-});
-
-// Global flag to track screenshot operations
-let isScreenshotInProgress = false;
-let screenshotStartTime = 0;
-let lastScreenshotTabId: number | null = null;
-
-// Track all tab activations with call stack
-let lastActivationTime = 0;
-let activationCount = 0;
-
-// Track window focus changes
-let lastWindowFocusTime = 0;
-let windowFocusCount = 0;
-
-// Monitor window focus changes
-chrome.windows.onFocusChanged.addListener((windowId) => {
-  const now = Date.now();
-  windowFocusCount++;
-  
-  console.log(`🪟 [WINDOW FOCUS #${windowFocusCount}] Window ${windowId} focused`);
-  console.log(`   ⏰ Time: ${new Date().toISOString()}`);
-  console.log(`   ⏱️ Since last: ${now - lastWindowFocusTime}ms`);
-  console.log(`   📸 Screenshot in progress: ${isScreenshotInProgress}`);
-  
-  if (isScreenshotInProgress) {
-    console.log(`   📸 Screenshot tab: ${lastScreenshotTabId}`);
-    console.log(`   📸 Screenshot duration: ${now - screenshotStartTime}ms`);
-    console.warn(`⚠️ Window focus changed during screenshot! This may cause flashing.`);
-  }
-  
-  lastWindowFocusTime = now;
-});
-
-// Listen for tab activation to manage visual mouse visibility
-chrome.tabs.onActivated.addListener(async (activeInfo) => {
-  const newTabId = activeInfo.tabId;
-  const now = Date.now();
-  activationCount++;
-  
-  // Get call stack to identify what triggered the activation
-  const stack = new Error().stack || '';
-  const stackLines = stack.split('\n').slice(1, 5); // Get first 4 lines of stack
-  
-  console.log(`🔍 [TAB ACTIVATION #${activationCount}] Tab ${newTabId} activated`);
-  console.log(`   ⏰ Time: ${new Date().toISOString()}`);
-  console.log(`   ⏱️ Since last: ${now - lastActivationTime}ms`);
-  console.log(`   📍 Previous: ${currentActiveTabId}`);
-  console.log(`   📸 Screenshot in progress: ${isScreenshotInProgress}`);
-  if (isScreenshotInProgress) {
-    console.log(`   📸 Screenshot tab: ${lastScreenshotTabId}`);
-    console.log(`   📸 Screenshot duration: ${now - screenshotStartTime}ms`);
-  }
-  console.log(`   📚 Call stack (first 4 lines):`);
-  stackLines.forEach((line, i) => {
-    console.log(`      ${i + 1}. ${line.trim()}`);
-  });
-  
-  // Warn if tab activation during screenshot
-  if (isScreenshotInProgress && newTabId !== lastScreenshotTabId) {
-    console.error(`⚠️ UNEXPECTED: Tab ${newTabId} activated during screenshot of tab ${lastScreenshotTabId}!`);
-    console.error(`⚠️ This indicates the screenshot is not truly in background!`);
-  }
-  
-  lastActivationTime = now;
-  
-  // DO NOT clean up visual mouse in previous tab - let content scripts handle visibility
-  // Visual mouse pointers start hidden (opacity: 0) and only show when receiving visual_mouse_update
-  // This prevents flickering when switching between tabs during automation
-  
-  // Update current active tab (for tracking purposes)
-  currentActiveTabId = newTabId;
-  
-  // If this tab is managed, update visual mouse position (optional)
-  // We don't send visual_mouse_update here because we don't know the mouse position
-  // The next command will update it if needed
 });
 
 // Listen for commands from WebSocket server
@@ -139,14 +50,12 @@ wsClient.onMessage(async (data) => {
       const response = await handleCommand(data as Command);
       // Send response back to server
       if (wsClient.isConnected()) {
-        // Create response with same command_id
         const responseWithId = {
           ...response,
           command_id: data.command_id,
           timestamp: Date.now(),
         };
         
-        // Send as raw JSON string
         wsClient.sendCommand(responseWithId as any).catch((error) => {
           console.error('Failed to send response:', error);
         });
@@ -170,512 +79,74 @@ wsClient.onMessage(async (data) => {
 });
 
 /**
- * Temporarily activate tab for automation, then restore user's original active tab
- * Chrome throttles background tabs, so we need to temporarily activate
- * the tab for CDP commands to work, but restore the user's browsing state afterwards
- */
-async function activateTabForAutomation(tabId: number): Promise<() => Promise<void>> {
-  console.log(`🔧 Temporarily activating tab ${tabId} for automation...`);
-  
-  let restoreFn: () => Promise<void> = async () => {};
-  let originalActiveTabId: number | null = null;
-  let originalWindowId: number | null = null;
-  
-  try {
-    // Get tab info
-    const tab = await chrome.tabs.get(tabId);
-    
-    // Check if tab is a normal webpage (not chrome:// etc.)
-    const url = tab.url || '';
-    if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) {
-      console.log(`⚠️ Tab ${tabId} is a restricted URL, skipping activation`);
-      return restoreFn;
-    }
-    
-    // Check if tab is already active
-    if (tab.active) {
-      console.log(`✅ Tab ${tabId} is already active, no need to switch`);
-      return restoreFn;
-    }
-    
-    // Save current user's active tab before switching
-    const [userActiveTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (userActiveTab?.id) {
-      originalActiveTabId = userActiveTab.id;
-      originalWindowId = userActiveTab.windowId;
-      console.log(`📝 Saving user's original active tab: ${originalActiveTabId} in window ${originalWindowId}`);
-    } else {
-      console.log(`📝 No user active tab found, will only activate target tab`);
-    }
-    
-    // Temporarily activate the automation tab
-    console.log(`🔄 Temporarily activating automation tab ${tabId}`);
-    await chrome.tabs.update(tabId, { active: true });
-    
-    // Also bring the window to front if needed
-    if (tab.windowId && originalWindowId !== tab.windowId) {
-      try {
-        // Check if window is already focused to avoid unnecessary flashing
-        const window = await chrome.windows.get(tab.windowId);
-        if (!window.focused) {
-          await chrome.windows.update(tab.windowId, { focused: true });
-          console.log(`✅ Window ${tab.windowId} focused`);
-        } else {
-          console.log(`✅ Window ${tab.windowId} is already focused`);
-        }
-      } catch (windowError) {
-        console.warn(`⚠️ Could not focus window ${tab.windowId}:`, windowError);
-      }
-    }
-    
-    // Enhanced wake-up sequence for background tabs
-    console.log(`⏳ Enhanced wake-up sequence for tab ${tabId}...`);
-    
-    // 1. Initial delay for tab activation
-    await new Promise(resolve => setTimeout(resolve, 150));
-    
-    // 2. Try to attach debugger early to wake up CDP connection
-    try {
-      console.log(`🔧 Attempting early debugger attachment to wake up tab ${tabId}...`);
-      const attached = await debuggerManager.safeAttachDebugger(tabId);
-      if (attached) {
-        console.log(`✅ Early debugger attached successfully`);
-        
-        // 3. Send a simple CDP command to ensure page is responsive
-        try {
-          const cdpCommander = new CdpCommander(tabId);
-          await cdpCommander.sendCommand('Page.getLayoutMetrics', {}, 3000, 1);
-          console.log(`✅ Page is responsive after wake-up`);
-        } catch (cdpError) {
-          console.warn(`⚠️ Page responsiveness check failed, continuing anyway:`, cdpError);
-        }
-        
-        // Note: We don't detach debugger here - individual commands will handle it
-      } else {
-        console.warn(`⚠️ Early debugger attachment failed, continuing anyway`);
-      }
-    } catch (debuggerError) {
-      console.warn(`⚠️ Early debugger attachment error:`, debuggerError);
-      // Continue anyway - the main command will try to attach debugger
-    }
-    
-    // 4. Additional delay for rendering
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    console.log(`✅ Tab ${tabId} fully activated and ready for automation`);
-    
-    // Create restore function that will be called after command execution
-    restoreFn = async () => {
-      if (originalActiveTabId && originalActiveTabId !== tabId) {
-        console.log(`🔄 Restoring user's original tab ${originalActiveTabId}...`);
-        try {
-          // Restore user's original tab
-          await chrome.tabs.update(originalActiveTabId, { active: true });
-          
-          // Restore window focus if different
-          if (originalWindowId && originalWindowId !== tab.windowId) {
-            // Check if window is already focused to avoid unnecessary flashing
-            try {
-              const window = await chrome.windows.get(originalWindowId);
-              if (!window.focused) {
-                await chrome.windows.update(originalWindowId, { focused: true });
-                console.log(`✅ Restored user's tab ${originalActiveTabId} and window ${originalWindowId}`);
-              } else {
-                console.log(`✅ Restored user's tab ${originalActiveTabId} (window already focused)`);
-              }
-            } catch (windowError) {
-              console.warn(`⚠️ Could not check/restore window focus:`, windowError);
-              // Try to focus anyway as fallback
-              await chrome.windows.update(originalWindowId, { focused: true }).catch(console.error);
-            }
-          } else {
-            console.log(`✅ Restored user's tab ${originalActiveTabId}`);
-          }
-        } catch (restoreError) {
-          console.error(`⚠️ Failed to restore user's tab:`, restoreError);
-        }
-      } else {
-        console.log(`✅ No restoration needed (original tab was ${originalActiveTabId})`);
-      }
-    };
-    
-    return restoreFn;
-    
-  } catch (error) {
-    console.error(`⚠️ Failed to activate tab ${tabId} for automation:`, error);
-    return restoreFn;
-  }
-}
-
-/**
- * Handle incoming commands
+ * Handle incoming commands (Strict Mode)
+ * All commands require conversation_id to be provided by server.
  */
 async function handleCommand(command: Command): Promise<CommandResponse> {
   console.log(`📨 Handling command: ${command.type}`, command);
 
   try {
     switch (command.type) {
-      case 'mouse_move':
-        const tabIdForMove = command.tab_id || await getCurrentTabId();
-        // Ensure tab is managed by tab manager
-        await tabManager.ensureTabManaged(tabIdForMove);
-        // Update tab activity for status tracking
-        tabManager.updateTabActivity(tabIdForMove);
-        // Temporarily activate tab for automation and get restore function
-        const restoreMove = await activateTabForAutomation(tabIdForMove);
-        try {
-          const moveResult = await computer.performMouseMove(
-            tabIdForMove,
-            command.x,
-            command.y
-          );
-        
-        // Update visual mouse position using actual screen coordinates
-        let visualUpdateSuccess = false;
-        let visualMessage = '';
-        
-        if (moveResult.success && moveResult.data?.actualPosition) {
-          const { actualPosition } = moveResult.data;
-          visualUpdateSuccess = await updateVisualMouse(tabIdForMove, {
-            x: actualPosition.x,
-            y: actualPosition.y,
-            action: 'move',
-            relative: false, // Send absolute coordinates
-          });
-          
-          if (!visualUpdateSuccess) {
-            visualMessage = ' (Visual mouse update failed - content script may not be loaded)';
-            console.log('⚠️ Visual mouse update failed for mouse_move command');
-          }
-        } else {
-          console.warn('Cannot update visual mouse: moveResult missing actualPosition', moveResult);
-        }
-        
-          return {
-            success: true,
-            message: moveResult.message + visualMessage,
-            data: {
-              ...moveResult.data,
-              visualUpdateSuccess,
-            },
-            timestamp: Date.now(),
-          };
-        } finally {
-          // Restore user's original tab after command execution
-          await restoreMove();
-        }
-
-      case 'mouse_click':
-        const tabIdForClick = command.tab_id || await getCurrentTabId();
-        // Ensure tab is managed by tab manager
-        await tabManager.ensureTabManaged(tabIdForClick);
-        // Update tab activity for status tracking
-        tabManager.updateTabActivity(tabIdForClick);
-        // Temporarily activate tab for automation and get restore function
-        const restoreClick = await activateTabForAutomation(tabIdForClick);
-        try {
-          const clickResult = await computer.performClick(
-            tabIdForClick,
-            0, 0, // Coordinates - will need to be provided or tracked
-            command.button || 'left',
-            command.count || (command.double ? 2 : 1)
-          );
-          
-          // Update visual mouse for click
-          await updateVisualMouse(tabIdForClick, {
-            action: 'click',
-            button: command.button || 'left',
-            count: command.count || (command.double ? 2 : 1),
-          });
-          
-          return {
-            success: true,
-            message: clickResult.message,
-            data: clickResult,
-            timestamp: Date.now(),
-          };
-        } finally {
-          // Restore user's original tab after command execution
-          await restoreClick();
-        }
-
-      case 'mouse_scroll':
-        const tabIdForScroll = command.tab_id || await getCurrentTabId();
-        // Ensure tab is managed by tab manager
-        await tabManager.ensureTabManaged(tabIdForScroll);
-        // Update tab activity for status tracking
-        tabManager.updateTabActivity(tabIdForScroll);
-        // Temporarily activate tab for automation and get restore function
-        const restoreScroll = await activateTabForAutomation(tabIdForScroll);
-        try {
-          const scrollResult = await computer.performScroll(
-            tabIdForScroll,
-            0, 0, // Coordinates - will need to be provided
-            command.direction,
-            command.amount || 100
-          );
-          
-          // Update visual mouse for scroll
-          await updateVisualMouse(tabIdForScroll, {
-            action: 'scroll',
-            direction: command.direction,
-            amount: command.amount || 100,
-          });
-          
-          return {
-            success: true,
-            message: scrollResult.message,
-            data: scrollResult,
-            timestamp: Date.now(),
-          };
-        } finally {
-          // Restore user's original tab after command execution
-          await restoreScroll();
-        }
-
-      case 'keyboard_type':
-        const tabIdForType = command.tab_id || await getCurrentTabId();
-        // Ensure tab is managed by tab manager
-        await tabManager.ensureTabManaged(tabIdForType);
-        // Update tab activity for status tracking
-        tabManager.updateTabActivity(tabIdForType);
-        // Temporarily activate tab for automation and get restore function
-        const restoreType = await activateTabForAutomation(tabIdForType);
-        try {
-          const typeResult = await computer.performType(
-            tabIdForType,
-            command.text
-          );
-          
-          // Visual feedback for typing (optional - could show typing indicator)
-          // For now, just log it
-          console.log(`⌨️ Typing: "${command.text}"`);
-          
-          return {
-            success: true,
-            message: typeResult.message,
-            data: typeResult,
-            timestamp: Date.now(),
-          };
-        } finally {
-          // Restore user's original tab after command execution
-          await restoreType();
-        }
-
-      case 'keyboard_press':
-        const tabIdForKeyPress = command.tab_id || await getCurrentTabId();
-        // Ensure tab is managed by tab manager
-        await tabManager.ensureTabManaged(tabIdForKeyPress);
-        // Update tab activity for status tracking
-        tabManager.updateTabActivity(tabIdForKeyPress);
-        // Temporarily activate tab for automation and get restore function
-        const restoreKeyPress = await activateTabForAutomation(tabIdForKeyPress);
-        try {
-          const keyResult = await computer.performKeyPress(
-            tabIdForKeyPress,
-            command.key,
-            command.modifiers
-          );
-          
-          // Visual feedback for key press (optional)
-          console.log(`⌨️ Key press: ${command.key}${command.modifiers ? ` with modifiers: ${command.modifiers.join('+')}` : ''}`);
-          
-          return {
-            success: true,
-            message: keyResult.message,
-            data: keyResult,
-            timestamp: Date.now(),
-          };
-        } finally {
-          // Restore user's original tab after command execution
-          await restoreKeyPress();
-        }
-
       case 'screenshot':
-        const tabIdForScreenshot = command.tab_id || await getCurrentTabId();
-        
-        console.log(`📸 [Screenshot Command] Starting for tab ${tabIdForScreenshot}`);
-        console.log(`📸 [Screenshot Command] Current time: ${new Date().toISOString()}`);
-        
-        // ========================================
-        // CRITICAL FIX: Save and restore window focus to prevent DevTools flashing
-        // ========================================
-        let originalFocusedWindow: chrome.windows.Window | null = null;
-        
-        try {
-          // Get currently focused window
-          const focusedWindow = await chrome.windows.getLastFocused({ populate: false });
-          if (focusedWindow && focusedWindow.focused) {
-            originalFocusedWindow = focusedWindow;
-            console.log(`📸 [Screenshot Command] Saved focused window: ${focusedWindow.id}`);
-          }
-        } catch (error) {
-          console.warn('📸 [Screenshot Command] Could not get focused window:', error);
+        // ✅ STRICT MODE: conversation_id and tab_id are REQUIRED
+        if (!command.conversation_id) {
+          throw new Error('conversation_id is required for screenshot command (strict mode)');
         }
-        
-        // Set global screenshot tracking flag
-        isScreenshotInProgress = true;
-        screenshotStartTime = Date.now();
-        lastScreenshotTabId = tabIdForScreenshot;
-        
-        // Ensure tab is managed by tab manager
-        await tabManager.ensureTabManaged(tabIdForScreenshot);
-        // Update tab activity for status tracking
-        tabManager.updateTabActivity(tabIdForScreenshot);
-        
-        // CRITICAL: Do NOT activate tab for screenshot
-        // This is the key to avoid flashing - we capture in background using CDP
-        
-        console.log(`📸 [Screenshot Command] Taking screenshot WITHOUT activating tab`);
-        console.log(`📸 [Screenshot Command] Method: CDP (background capture)`);
-        console.log(`📸 [Screenshot Command] Global flag set: isScreenshotInProgress=${isScreenshotInProgress}`);
-        
-        try {
-          const screenshotResult = await captureScreenshot(
-            tabIdForScreenshot,
-            command.include_cursor !== false,
-            command.quality || 90,
-            true, // resizeToPreset
-            0    // waitForRender: no need to wait since tab is not activated
-          );
-          
-          const screenshotDuration = Date.now() - screenshotStartTime;
-          console.log(`✅ [Screenshot Command] Screenshot completed in ${screenshotDuration}ms WITHOUT tab activation`);
-          
-          // Clear global flag
-          isScreenshotInProgress = false;
-          lastScreenshotTabId = null;
-          console.log(`📸 [Screenshot Command] Global flag cleared: isScreenshotInProgress=${isScreenshotInProgress}`);
-          
-          // ========================================
-          // CRITICAL FIX: Restore window focus after screenshot
-          // ========================================
-          if (originalFocusedWindow) {
-            // Small delay to let Chrome settle
-            await new Promise(resolve => setTimeout(resolve, 100));
-            
-            try {
-              // Check if window still exists and needs refocusing
-              const currentFocused = await chrome.windows.getLastFocused({ populate: false });
-              if (currentFocused && currentFocused.id !== originalFocusedWindow.id) {
-                console.log(`📸 [Screenshot Command] Restoring focus to window ${originalFocusedWindow.id} (current: ${currentFocused.id})`);
-                await chrome.windows.update(originalFocusedWindow.id, { focused: true });
-                console.log(`✅ [Screenshot Command] Focus restored`);
-              } else {
-                console.log(`📸 [Screenshot Command] Focus already correct, no need to restore`);
-              }
-            } catch (restoreError) {
-              console.warn('📸 [Screenshot Command] Could not restore window focus:', restoreError);
-            }
-          }
-          
-          return {
-            success: true,
-            message: 'Screenshot captured (background, no tab activation, focus preserved)',
-            data: screenshotResult,
-            timestamp: Date.now(),
-            duration: screenshotDuration,
-          };
-        } catch (screenshotError) {
-          const screenshotDuration = Date.now() - screenshotStartTime;
-          console.error(`❌ [Screenshot Command] Screenshot failed after ${screenshotDuration}ms:`, screenshotError);
-          
-          // Clear global flag even on error
-          isScreenshotInProgress = false;
-          lastScreenshotTabId = null;
-          console.log(`📸 [Screenshot Command] Global flag cleared (error): isScreenshotInProgress=${isScreenshotInProgress}`);
-          
-          throw screenshotError;
+        if (!command.tab_id) {
+          throw new Error('tab_id is required for screenshot command (strict mode)');
         }
-
-      case 'reset_mouse':
-        const tabIdForReset = command.tab_id || await getCurrentTabId();
-        // Ensure tab is managed by tab manager
-        await tabManager.ensureTabManaged(tabIdForReset);
-        // Update tab activity for status tracking
-        tabManager.updateTabActivity(tabIdForReset);
-        // Temporarily activate tab for automation and get restore function
-        const restoreReset = await activateTabForAutomation(tabIdForReset);
-        try {
-          const resetResult = await computer.resetMousePosition(tabIdForReset);
-          
-          // Update visual mouse to actual screen center
-          if (resetResult.success && resetResult.data?.actualPosition) {
-            const { actualPosition } = resetResult.data;
-            await updateVisualMouse(tabIdForReset, {
-              x: actualPosition.x,
-              y: actualPosition.y,
-              action: 'move',
-              relative: false,
-            });
-          } else {
-            console.warn('Cannot update visual mouse for reset: missing actualPosition', resetResult);
-          }
-          
-          return {
-            success: true,
-            message: resetResult.message,
-            data: resetResult,
-            timestamp: Date.now(),
-          };
-        } finally {
-          // Restore user's original tab after command execution
-          await restoreReset();
-        }
+        const tabIdForScreenshot = command.tab_id;
+        
+        console.log(`📸 [Screenshot] Starting for tab ${tabIdForScreenshot}, conversation: ${command.conversation_id}`);
+        
+        // Ensure tab is managed by tab manager for this conversation
+        await tabManager.ensureTabManaged(tabIdForScreenshot, command.conversation_id);
+        tabManager.updateTabActivity(tabIdForScreenshot, command.conversation_id);
+        
+        // Take screenshot in background (no tab activation)
+        const screenshotResult = await captureScreenshot(
+          tabIdForScreenshot,
+          command.include_cursor !== false,
+          command.quality || 90,
+          true, // resizeToPreset
+          0    // waitForRender
+        );
+        
+        console.log(`✅ [Screenshot] Completed for tab ${tabIdForScreenshot}`);
+        
+        return {
+          success: true,
+          message: 'Screenshot captured',
+          data: screenshotResult,
+          timestamp: Date.now(),
+        };
 
       case 'tab':
         // ✅ STRICT MODE: conversation_id is REQUIRED
         if (!command.conversation_id) {
-          const errorMsg = '❌ STRICT MODE: conversation_id is required but was not provided. Command rejected.';
-          console.error(errorMsg);
-          throw new Error(errorMsg);
+          throw new Error('conversation_id is required for tab command (strict mode)');
         }
         const conversationId = command.conversation_id;
-        console.log(`🔍 [Tab Command] Received conversation_id: "${conversationId}"`);
+        console.log(`🔍 [Tab Command] conversation_id: "${conversationId}"`);
 
         switch (command.action) {
           case 'init':
             if (!command.url) {
               throw new Error('URL is required for init action');
             }
-            // Initialize a new managed session with the given URL
             const initResult = await tabManager.initializeSession(command.url, conversationId);
             
-            console.log(`🚀 [Tab Init] Initializing session ${conversationId} with tab ${initResult.tabId}`);
-            
-            // CRITICAL: Do NOT activate tab for initialization
-            // resetMousePosition uses CDP which works in background
-            // This prevents flashing during session initialization
-            console.log(`🖱️ [Tab Init] Resetting mouse position (background)`);
-            
-            // Initialize mouse position to screen center (like reset command)
-            const initResetResult = await computer.resetMousePosition(initResult.tabId);
-            
-            // Update visual mouse to actual screen center
-            let initVisualUpdateSuccess = false;
-            if (initResetResult.success && initResetResult.data?.actualPosition) {
-              const { actualPosition } = initResetResult.data;
-              initVisualUpdateSuccess = await updateVisualMouse(initResult.tabId, {
-                x: actualPosition.x,
-                y: actualPosition.y,
-                action: 'move',
-                relative: false,
-              });
-            }
-            
-            console.log(`✅ [Tab Init] Session ${conversationId} initialized successfully (background)`);
+            console.log(`🚀 [Tab Init] Session ${conversationId} initialized with tab ${initResult.tabId}`);
             
             return {
               success: true,
-              message: `Session ${conversationId} initialized with ${command.url} (background, no tab activation)`,
+              message: `Session ${conversationId} initialized with ${command.url}`,
               data: {
                 tabId: initResult.tabId,
                 groupId: initResult.groupId,
                 url: initResult.url,
                 conversationId: conversationId,
                 isManaged: true,
-                mouseReset: initResetResult.success,
-                visualUpdateSuccess: initVisualUpdateSuccess,
               },
               timestamp: Date.now(),
             };
@@ -685,7 +156,6 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
               throw new Error('URL is required for open action');
             }
             const openResult = await tabs.openTab(command.url);
-            // Add tab to conversation's managed tabs
             if (openResult.tabId) {
               await tabManager.addTabToManagement(openResult.tabId, conversationId);
             }
@@ -704,7 +174,6 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
               throw new Error('tab_id is required for close action');
             }
             const closeResult = await tabs.closeTab(command.tab_id);
-            // Tab will be removed from managed tabs by event listener
             return {
               success: true,
               message: closeResult.message,
@@ -719,16 +188,9 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
             if (!command.tab_id) {
               throw new Error('tab_id is required for switch action');
             }
-            // Ensure tab is managed by tab manager for this conversation
-            await tabManager.ensureTabManaged(command.tab_id, conversationId);
-            // Update tab activity for status tracking
-            tabManager.updateTabActivity(command.tab_id, conversationId);
-            
-            // CRITICAL: Do NOT activate tab for switch operation
-            // switchToTab only updates internal state, does not need tab activation
-            console.log(`🔄 [Tab Switch] Switching internal state to tab ${command.tab_id} for ${conversationId} (background)`);
-            
             const switchResult = await tabs.switchToTab(command.tab_id);
+            await tabManager.ensureTabManaged(command.tab_id, conversationId);
+            tabManager.updateTabActivity(command.tab_id, conversationId);
             return {
               success: true,
               message: switchResult.message,
@@ -740,20 +202,15 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
             };
 
           case 'list':
-            // ✅ STRICT MODE: conversation_id is REQUIRED
-            if (!command.conversation_id) {
-              throw new Error('conversation_id is required for list action (strict mode)');
-            }
-            const listTabsConversationId = command.conversation_id;
+            // ✅ STRICT MODE: conversation_id already checked above
             const listResult = await tabs.getAllTabs();
-            // Filter tabs by conversation if needed
-            const conversationTabs = tabManager.getManagedTabs(listTabsConversationId);
+            const conversationTabs = tabManager.getManagedTabs(conversationId);
             return {
               success: true,
-              message: `Found ${listResult.count} tabs (${conversationTabs.length} in conversation ${listTabsConversationId})`,
+              message: `Found ${listResult.count} tabs (${conversationTabs.length} in conversation ${conversationId})`,
               data: {
                 ...listResult,
-                conversationId: listTabsConversationId,
+                conversationId: conversationId,
                 conversationTabs: conversationTabs
               },
               timestamp: Date.now(),
@@ -763,27 +220,15 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
             if (!command.tab_id) {
               throw new Error('tab_id is required for refresh action');
             }
-            // ✅ STRICT MODE: conversation_id is REQUIRED
-            if (!command.conversation_id) {
-              throw new Error('conversation_id is required for refresh action (strict mode)');
-            }
-            const refreshConversationId = command.conversation_id;
-            // Ensure tab is managed by tab manager for this conversation
-            await tabManager.ensureTabManaged(command.tab_id, refreshConversationId);
-            // Update tab activity for status tracking
-            tabManager.updateTabActivity(command.tab_id, refreshConversationId);
-            
-            // CRITICAL: Do NOT activate tab for refresh operation
-            // chrome.tabs.reload() works in background, no need to activate tab
-            console.log(`🔄 [Tab Refresh] Refreshing tab ${command.tab_id} for ${refreshConversationId} (background)`);
-            
+            await tabManager.ensureTabManaged(command.tab_id, conversationId);
+            tabManager.updateTabActivity(command.tab_id, conversationId);
             const refreshResult = await tabs.refreshTab(command.tab_id);
             return {
               success: true,
               message: refreshResult.message,
               data: {
                 ...refreshResult,
-                conversationId: refreshConversationId
+                conversationId: conversationId
               },
               timestamp: Date.now(),
             };
@@ -813,81 +258,74 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
 
       case 'get_tabs':
         // ✅ STRICT MODE: conversation_id is REQUIRED for managed_only=true
-        const getTabsManagedOnly = command.managed_only !== false; // true if undefined or true
+        const getTabsManagedOnly = command.managed_only !== false;
         
         if (getTabsManagedOnly) {
-          // Require conversation_id for managed tabs
           if (!command.conversation_id) {
             throw new Error('conversation_id is required for get_tabs with managed_only=true (strict mode)');
           }
-          const getTabsConversationId = command.conversation_id;
-          // Return only managed tabs for this conversation
-          const conversationTabs = tabManager.getManagedTabs(getTabsConversationId);
+          const conversationTabs = tabManager.getManagedTabs(command.conversation_id);
           return {
             success: true,
-            message: `Found ${conversationTabs.length} managed tabs in conversation ${getTabsConversationId}`,
+            message: `Found ${conversationTabs.length} managed tabs in conversation ${command.conversation_id}`,
             data: {
               tabs: conversationTabs,
               count: conversationTabs.length,
-              conversationId: getTabsConversationId
+              conversationId: command.conversation_id,
+              managed_only: true,
             },
             timestamp: Date.now(),
           };
         } else {
-          // Return all tabs (original behavior)
-          const getTabsResult = await tabs.getAllTabs(false);
+          // Get all tabs (no conversation filter)
+          const allTabsResult = await tabs.getAllTabs();
           return {
             success: true,
-            message: getTabsResult.message || `Found ${getTabsResult.count} tabs`,
-            data: getTabsResult,
+            message: `Found ${allTabsResult.count} tabs total`,
+            data: {
+              ...allTabsResult,
+              managed_only: false,
+            },
             timestamp: Date.now(),
           };
         }
 
       case 'javascript_execute':
-        const tabIdForJS = command.tab_id || await getCurrentTabId();
+        // ✅ STRICT MODE: conversation_id and tab_id are REQUIRED
+        if (!command.conversation_id) {
+          throw new Error('conversation_id is required for javascript_execute command (strict mode)');
+        }
+        if (!command.tab_id) {
+          throw new Error('tab_id is required for javascript_execute command (strict mode)');
+        }
+        const tabIdForJS = command.tab_id;
         
-        console.log(`📜 [JavaScript Command] Starting for tab ${tabIdForJS}`);
-        console.log(`📜 [JavaScript Command] Script: ${command.script?.substring(0, 100)}...`);
+        console.log(`📜 [JavaScript] Executing in tab ${tabIdForJS}, conversation: ${command.conversation_id}`);
         
-        // Ensure tab is managed by tab manager
-        await tabManager.ensureTabManaged(tabIdForJS);
-        // Update tab activity for status tracking
-        tabManager.updateTabActivity(tabIdForJS);
-        
-        // CRITICAL: Do NOT activate tab for JavaScript execution
-        // Runtime.evaluate works in background, no need to activate tab
-        // This prevents flashing during JavaScript execution
-        
-        console.log(`📜 [JavaScript Command] Executing WITHOUT activating tab`);
-        console.log(`📜 [JavaScript Command] Method: CDP Runtime.evaluate (background)`);
+        // Ensure tab is managed by tab manager for this conversation
+        await tabManager.ensureTabManaged(tabIdForJS, command.conversation_id);
+        tabManager.updateTabActivity(tabIdForJS, command.conversation_id);
         
         const jsStartTime = Date.now();
         
-        try {
-          const jsResult = await javascript.executeJavaScript(
-            tabIdForJS,
-            command.script,
-            command.return_by_value !== false, // default: true
-            command.await_promise === true,    // default: false
-            command.timeout || 30000           // default: 30000ms
-          );
-          
-          const jsDuration = Date.now() - jsStartTime;
-          console.log(`✅ [JavaScript Command] Execution completed in ${jsDuration}ms WITHOUT tab activation`);
-          
-          return {
-            success: true,
-            message: 'JavaScript executed successfully (background, no tab activation)',
-            data: jsResult,
-            timestamp: Date.now(),
-            duration: jsDuration,
-          };
-        } catch (jsError) {
-          const jsDuration = Date.now() - jsStartTime;
-          console.error(`❌ [JavaScript Command] Execution failed after ${jsDuration}ms:`, jsError);
-          throw jsError;
-        }
+        const jsResult = await javascript.executeJavaScript(
+          tabIdForJS,
+          command.script,
+          command.return_by_value !== false,
+          command.await_promise === true,
+          command.timeout || 30000
+        );
+        
+        const jsDuration = Date.now() - jsStartTime;
+        console.log(`✅ [JavaScript] Execution completed in ${jsDuration}ms`);
+        
+        return {
+          success: true,
+          message: 'JavaScript executed successfully',
+          data: jsResult,
+          timestamp: Date.now(),
+          duration: jsDuration,
+        };
 
       default:
         throw new Error(`Unknown command type: ${(command as any).type}`);
@@ -903,389 +341,4 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
   }
 }
 
-/**
- * Get current active tab ID
- */
-async function getCurrentTabId(): Promise<number> {
-  // First, try to get a managed tab if session is initialized
-  const managedTabs = tabManager.getManagedTabs();
-  if (managedTabs.length > 0) {
-    // Use the first managed tab as default
-    const defaultTabId = managedTabs[0].tabId;
-    console.log(`📌 Using default managed tab ID: ${defaultTabId} (${managedTabs.length} managed tabs available)`);
-    return defaultTabId;
-  }
-  
-  // No managed tabs - require explicit session initialization
-  throw new Error('No managed tabs available. Please initialize a session with "tabs init <url>" command first.');
-}
-
-/**
- * Send visual mouse update to content script
- */
-async function updateVisualMouse(tabId: number, data: any, skipActiveTabUpdate: boolean = false): Promise<boolean> {
-  try {
-    console.log(`🎯 Attempting to update visual mouse for tab ${tabId}:`, data, `skipActiveTabUpdate=${skipActiveTabUpdate}`);
-    
-    // For background operations (like screenshot), don't switch active tab state
-    if (!skipActiveTabUpdate) {
-      // Check if we're switching to a new tab
-      if (currentActiveTabId !== null && currentActiveTabId !== tabId) {
-        console.log(`🔄 Switching from tab ${currentActiveTabId} to tab ${tabId}, cleaning up old visual mouse`);
-        // Clean up visual mouse in the previously active tab
-        await cleanupVisualMouseInTab(currentActiveTabId).catch(err => {
-          console.log(`Non-critical error cleaning up old tab ${currentActiveTabId}:`, err);
-        });
-      }
-      
-      // Update current active tab
-      currentActiveTabId = tabId;
-      console.log(`📌 Current active tab set to: ${currentActiveTabId}`);
-    } else {
-      console.log(`⏩ Skipping active tab update for background operation, currentActiveTabId remains: ${currentActiveTabId}`);
-    }
-    
-    // Check if tab is accessible (not chrome:// page)
-    const tab = await chrome.tabs.get(tabId);
-    const url = tab.url || '';
-    
-    console.log(`🌐 Tab URL: ${url}`);
-    
-    if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) {
-      console.log('⚠️ Cannot update visual mouse on restricted URL:', url);
-      return false;
-    }
-    
-    // Enhanced content script detection with retries
-    let contentScriptLoaded = false;
-    let lastError: any = null;
-    
-    // Try up to 3 times with exponential backoff
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        console.log(`🔍 Checking content script in tab ${tabId} (attempt ${attempt}/3)...`);
-        const pingResponse = await chrome.tabs.sendMessage(tabId, {
-          type: 'ping',
-        });
-        
-        if (pingResponse?.pong === true) {
-          console.log(`✅ Content script is responsive in tab ${tabId}`);
-          contentScriptLoaded = true;
-          break;
-        } else {
-          console.warn(`⚠️ Content script responded but without pong:`, pingResponse);
-          lastError = new Error('Invalid ping response');
-        }
-      } catch (pingError) {
-        lastError = pingError;
-        const errorMessage = pingError instanceof Error ? pingError.message : String(pingError);
-        console.log(`❌ Content script check failed (attempt ${attempt}/3):`, errorMessage);
-        
-        if (attempt < 3) {
-          // Exponential backoff: 1s, 2s, 4s
-          const delay = Math.pow(2, attempt - 1) * 1000;
-          console.log(`⏳ Waiting ${delay}ms before retry...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-        }
-      }
-    }
-    
-    // If content script not loaded, try to inject it
-    if (!contentScriptLoaded) {
-      console.log('🔄 Content script not detected, attempting to auto-inject...');
-      
-      // First check if injection is even possible (not a chrome:// page)
-      if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) {
-        console.log('⚠️ Cannot inject content script into restricted URL:', url);
-        console.log('💡 This tab cannot be controlled. Try a normal webpage (http/https).');
-        return false;
-      }
-      
-      // Try to inject
-      contentScriptLoaded = await injectContentScript(tabId);
-      
-      if (!contentScriptLoaded) {
-        console.error(`❌ Failed to inject content script into tab ${tabId} after all attempts`);
-        console.log('📝 Possible solutions:');
-        console.log('  1. Reload the page to trigger content script injection');
-        console.log('  2. Check if the page has restrictive Content Security Policy (CSP)');
-        console.log('  3. Ensure extension is enabled and has required permissions');
-        console.log('  4. Try a different webpage (some sites block extensions)');
-        console.log(`💡 Last error: ${lastError?.message || lastError}`);
-        return false;
-      }
-      
-      console.log(`✅ Successfully injected content script into tab ${tabId}`);
-      
-      // Wait a bit for content script to initialize
-      await new Promise(resolve => setTimeout(resolve, 300));
-    }
-    
-    console.log(`📤 Sending visual_mouse_update to tab ${tabId}`);
-    const response = await chrome.tabs.sendMessage(tabId, {
-      type: 'visual_mouse_update',
-      data: data,
-    });
-    
-    console.log(`📥 Received response from content script:`, response);
-    return response?.success === true;
-  } catch (error) {
-    console.error('❌ Failed to update visual mouse:', error);
-    console.error('Full error details:', error instanceof Error ? error.stack : error);
-    return false;
-  }
-}
-
-/**
- * Get viewport info from content script
- */
-async function getViewportInfo(tabId: number): Promise<any> {
-  try {
-    const response = await chrome.tabs.sendMessage(tabId, {
-      type: 'get_viewport',
-    });
-    
-    if (response?.success) {
-      return response.data;
-    }
-    return null;
-  } catch (error) {
-    console.error('Failed to get viewport info:', error);
-    return null;
-  }
-}
-
-/**
- * Get visual mouse position from content script
- */
-async function getVisualMousePosition(tabId: number): Promise<{x: number, y: number} | null> {
-  try {
-    const response = await chrome.tabs.sendMessage(tabId, {
-      type: 'visual_mouse_position',
-    });
-    
-    if (response?.success) {
-      return response.data;
-    }
-    return null;
-  } catch (error) {
-    console.error('Failed to get visual mouse position:', error);
-    return null;
-  }
-}
-
-/**
- * Check if content script is injected in a tab
- */
-async function isContentScriptInjected(tabId: number): Promise<boolean> {
-  try {
-    const response = await chrome.tabs.sendMessage(tabId, {
-      type: 'ping',
-    });
-    return response?.pong === true;
-  } catch (error) {
-    return false;
-  }
-}
-
-/**
- * Attempt to inject content script into a tab
- */
-async function injectContentScript(tabId: number): Promise<boolean> {
-  try {
-    console.log(`🔄 Attempting to inject content script into tab ${tabId}`);
-    
-    const tab = await chrome.tabs.get(tabId);
-    const url = tab.url || '';
-    
-    if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) {
-      console.log('⚠️ Cannot inject content script into restricted URL:', url);
-      return false;
-    }
-    
-    // Check if we have scripting permission
-    if (!chrome.scripting) {
-      console.error('❌ chrome.scripting API not available');
-      return false;
-    }
-    
-    // Try to execute the content script
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: ['content.js'],
-    });
-    
-    console.log(`✅ Content script injected into tab ${tabId}`);
-    
-    // Wait a moment for script to initialize
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    // Verify injection worked
-    const isInjected = await isContentScriptInjected(tabId);
-    console.log(`✅ Content script verification: ${isInjected ? 'SUCCESS' : 'FAILED'}`);
-    
-    return isInjected;
-  } catch (error) {
-    console.error(`❌ Failed to inject content script into tab ${tabId}:`, error);
-    return false;
-  }
-}
-
-/**
- * Handle extension installation/update
- */
-chrome.runtime.onInstalled.addListener((details) => {
-  console.log(`Extension ${details.reason}:`, details);
-  
-  if (details.reason === 'install') {
-    // Show welcome page or instructions
-    chrome.tabs.create({
-      url: chrome.runtime.getURL('welcome.html'),
-    });
-  }
-});
-
-/**
- * Clean up visual mouse pointer in a specific tab
- */
-async function cleanupVisualMouseInTab(tabId: number): Promise<boolean> {
-  console.log(`🧹 Cleaning up visual mouse pointer in tab ${tabId}...`);
-  
-  try {
-    // Skip chrome:// and chrome-extension:// pages
-    const tab = await chrome.tabs.get(tabId);
-    if (tab.url?.startsWith('chrome://') || tab.url?.startsWith('chrome-extension://')) {
-      console.log(`⚠️ Skipping cleanup for restricted URL: ${tab.url}`);
-      return false;
-    }
-    
-    // Check if content script is loaded in this tab
-    const contentScriptLoaded = await isContentScriptInjected(tabId);
-    
-    if (contentScriptLoaded) {
-      // Send destroy command to visual mouse
-      await chrome.tabs.sendMessage(tabId, {
-        type: 'visual_mouse_destroy'
-      }).catch(() => {
-        // Content script might not respond (e.g., page reloaded)
-        console.log(`Tab ${tabId} content script not responsive for cleanup`);
-        return false;
-      });
-      
-      console.log(`✅ Cleaned up visual mouse pointer in tab ${tabId}`);
-      return true;
-    } else {
-      console.log(`Tab ${tabId} does not have content script loaded`);
-      return false;
-    }
-  } catch (error) {
-    console.error(`❌ Failed to clean up visual mouse in tab ${tabId}:`, error);
-    return false;
-  }
-}
-
-/**
- * Clean up visual mouse pointers in all tabs when extension disconnects
- */
-async function cleanupVisualMouseInAllTabs(): Promise<void> {
-  console.log('🧹 Cleaning up visual mouse pointers in all tabs...');
-  
-  try {
-    // Get all tabs in all windows
-    const tabs = await chrome.tabs.query({});
-    
-    let cleanupCount = 0;
-    
-    for (const tab of tabs) {
-      if (!tab.id) continue;
-      
-      // Skip chrome:// and chrome-extension:// pages
-      if (tab.url?.startsWith('chrome://') || tab.url?.startsWith('chrome-extension://')) {
-        continue;
-      }
-      
-      try {
-        // Check if content script is loaded in this tab
-        const contentScriptLoaded = await isContentScriptInjected(tab.id);
-        
-        if (contentScriptLoaded) {
-          // Send destroy command to visual mouse
-          await chrome.tabs.sendMessage(tab.id, {
-            type: 'visual_mouse_destroy'
-          }).catch(() => {
-            // Content script might not respond (e.g., page reloaded)
-            console.log(`Tab ${tab.id} content script not responsive for cleanup`);
-          });
-          
-          cleanupCount++;
-        }
-      } catch (error) {
-        // Tab might have been closed or content script not available
-        console.log(`Failed to clean up visual mouse in tab ${tab.id}:`, error);
-      }
-    }
-    
-    console.log(`✅ Cleaned up visual mouse pointers in ${cleanupCount} tab(s)`);
-  } catch (error) {
-    console.error('❌ Failed to cleanup visual mouse pointers:', error);
-  }
-}
-
-/**
- * Handle extension startup
- */
-chrome.runtime.onStartup.addListener(() => {
-  console.log('Extension starting up...');
-  // Reconnect WebSocket
-  wsClient.connect().catch(console.error);
-});
-
-/**
- * Keep Service Worker alive with alarms
- */
-chrome.alarms.create('keepAlive', { periodInMinutes: 0.1 }); // Every 6 seconds
-
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'keepAlive') {
-    // Just logging to keep service worker alive
-    console.log('⏰ Keep-alive alarm triggered');
-    
-    // Also check WebSocket connection
-    if (!wsClient.isConnected()) {
-      console.log('🌐 WebSocket disconnected in alarm, reconnecting...');
-      wsClient.connect().catch(console.error);
-    }
-  }
-});
-
-/**
- * Additional keep-alive: send periodic messages to keep service worker active
- */
-setInterval(() => {
-  // Send a message to ourselves to keep service worker alive
-  chrome.runtime.sendMessage({ type: 'keepalive' }).catch(() => {
-    // This is expected to fail when no listeners, but it keeps service worker alive
-  });
-}, 20000); // Every 20 seconds, less than Chrome's 30 second termination threshold
-
-/**
- * Keep WebSocket connection alive
- */
-setInterval(() => {
-  if (!wsClient.isConnected()) {
-    console.log('WebSocket disconnected, attempting to reconnect...');
-    wsClient.connect().catch(console.error);
-  }
-}, 10000); // Check every 10 seconds
-
-// Register disconnect handler to cleanup visual mouse pointers
-wsClient.onDisconnect(() => {
-  console.log('🔄 WebSocket disconnected, cleaning up visual mouse pointers...');
-  // Reset current active tab
-  currentActiveTabId = null;
-  console.log('📌 Current active tab reset to null');
-  // Clean up all visual mouse pointers
-  cleanupVisualMouseInAllTabs().catch(console.error);
-});
-
-console.log('✅ OpenBrowser extension ready');
+console.log('✅ OpenBrowser extension loaded (Strict Mode)');
