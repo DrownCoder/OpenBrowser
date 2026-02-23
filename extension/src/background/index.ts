@@ -265,12 +265,35 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
             throw new Error('conversation_id is required for get_tabs with managed_only=true (strict mode)');
           }
           const conversationTabs = tabManager.getManagedTabs(command.conversation_id);
+          
+          // ✅ FIX: Query Chrome API to get active status for each tab
+          const tabsWithActive = await Promise.all(
+            conversationTabs.map(async (managedTab) => {
+              try {
+                const chromeTab = await chrome.tabs.get(managedTab.tabId);
+                return {
+                  ...managedTab,
+                  active: chromeTab.active,  // Add active status from Chrome API
+                  index: chromeTab.index,    // Also add index for consistency
+                };
+              } catch (error) {
+                // Tab might have been closed, return with active=false
+                console.warn(`Tab ${managedTab.tabId} not found, marking as inactive`);
+                return {
+                  ...managedTab,
+                  active: false,
+                  index: -1,
+                };
+              }
+            })
+          );
+          
           return {
             success: true,
-            message: `Found ${conversationTabs.length} managed tabs in conversation ${command.conversation_id}`,
+            message: `Found ${tabsWithActive.length} managed tabs in conversation ${command.conversation_id}`,
             data: {
-              tabs: conversationTabs,
-              count: conversationTabs.length,
+              tabs: tabsWithActive,
+              count: tabsWithActive.length,
               conversationId: command.conversation_id,
               managed_only: true,
             },

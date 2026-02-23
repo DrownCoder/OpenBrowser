@@ -148,7 +148,33 @@ export async function executeJavaScript(
       // Execution threw an exception
       const exception = result.exceptionDetails.exception;
       response.success = false;
-      response.error = `JavaScript execution threw exception: ${exception?.description || exception?.value || 'Unknown error'}`;
+      
+      // Provide user-friendly error messages with suggestions
+      const errorDescription = exception?.description || exception?.value || 'Unknown error';
+      
+      if (errorDescription.includes('Illegal return statement')) {
+        response.error = 'JavaScript contains an invalid return statement. Wrap your code in an IIFE: (() => { return value; })()';
+        response.suggestions = [
+          'Use: (() => { const x = document.title; return {title: x}; })()',
+          'Avoid: return document.title (direct return outside function)'
+        ];
+      } else if (errorDescription.includes('is not a valid selector')) {
+        response.error = 'Invalid CSS selector. querySelector does not support jQuery-style selectors like :contains()';
+        response.suggestions = [
+          'Use: Array.from(document.querySelectorAll("button")).find(b => b.textContent.includes("SEND"))',
+          'Avoid: document.querySelector("button:contains(\\"SEND\\")")'
+        ];
+      } else if (errorDescription.includes('circular') || errorDescription.includes('Converting')) {
+        response.error = 'Return value cannot be serialized to JSON. Do not return DOM nodes or objects with circular references';
+        response.suggestions = [
+          'Use: element.textContent instead of element',
+          'Use: {count: document.querySelectorAll("button").length} instead of document.querySelectorAll("button")',
+          'Use: Array.from(elements).map(e => e.textContent) instead of elements'
+        ];
+      } else {
+        response.error = `JavaScript execution threw exception: ${errorDescription}`;
+      }
+      
       response.exceptionDetails = result.exceptionDetails;
       console.error(`❌ [JavaScript] JavaScript execution threw exception:`, result.exceptionDetails);
     } else if (result.result) {

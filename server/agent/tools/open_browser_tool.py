@@ -697,6 +697,54 @@ new Promise(resolve => {
 - Use explicit return values for debugging: `({success: true, clicked: true})` instead of `console.log('clicked')`
 - Chain operations with explicit return: `document.querySelector('#input').value = 'text'; document.querySelector('#submit').click(); return 'submitted'`
 - Always return data, not DOM nodes: Extract `element.textContent`, `element.href`, etc.
+- **Use IIFE for return statements**: Wrap code in `(() => { ... return value; })()` to use return
+- **Avoid jQuery selectors**: `:contains()` is not valid in `querySelector`; use `Array.from().find()` instead
+
+## Common Errors & Solutions
+
+### ❌ "Illegal return statement"
+**Cause**: `return` used outside a function, or code not wrapped in IIFE
+
+**Solution**:
+```javascript
+// ✅ CORRECT: Use IIFE (Immediately Invoked Function Expression)
+(() => {
+    const result = document.querySelector('button').textContent;
+    return {text: result};
+})()
+
+// ❌ WRONG: Direct return
+return document.title;
+```
+
+### ❌ "is not a valid selector"
+**Cause**: Using unsupported CSS selectors (like `:contains()`)
+
+**Solution**:
+```javascript
+// ❌ WRONG: jQuery selector
+document.querySelector('button:contains("SEND")')
+
+// ✅ CORRECT: Use JavaScript filtering
+Array.from(document.querySelectorAll('button'))
+    .find(btn => btn.textContent.includes('SEND'))
+```
+
+### ❌ "Converting circular structure to JSON"
+**Cause**: Return value contains circular references (like DOM nodes)
+
+**Solution**:
+```javascript
+// ✅ CORRECT: Return simplified objects
+({
+    title: document.title,
+    url: window.location.href,
+    buttonCount: document.querySelectorAll('button').length
+})
+
+// ❌ WRONG: Return complex objects
+document.querySelector('form')  // Contains circular references
+```
 
 ## 2. tab
 
