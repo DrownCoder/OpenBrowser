@@ -617,18 +617,22 @@
                 min-width: 280px;
                 border-right: none;
                 border-bottom: 1px solid #444444;
-                min-height: 40vh;
+                /* Take 40% of vertical space using flex */
+                flex: 4;
+                min-height: 0;
             }
             
             .right-panel {
-                min-width: 300px;
-                min-height: 60vh;
+                min-width: 280px;
+                /* Take 60% of vertical space using flex */
+                flex: 6;
+                min-height: 0;
             }
             
             .container {
                 flex-direction: column;
-                height: auto;
-                min-height: 100vh;
+                /* Keep flex behavior - critical for proper height calculation */
+                overflow-y: auto;
             }
             
             .sidebar {
@@ -640,33 +644,10 @@
             .input-area {
                 right: 0;
             }
-        }
-        
-        /* Responsive design for medium screens (tablets and small laptops) */
-        @media (max-width: 900px) {
-            .main-terminal {
-                min-width: 280px;
-            }
-            
-            .right-panel {
-                min-width: 280px;
-                min-height: 60vh;
-            }
-            
-            .container {
-                flex-direction: column;
-                overflow-y: auto;
-            }
-            
-            .main-terminal {
-                border-right: none;
-                border-bottom: 1px solid #444444;
-                min-height: 40vh;
-            }
             
             /* Ensure image viewer can display properly on small screens */
             .image-viewer {
-                min-height: 250px;
+                min-height: 200px;
             }
         }
         
