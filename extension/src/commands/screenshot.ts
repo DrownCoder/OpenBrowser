@@ -204,10 +204,29 @@ async function captureScreenshotWithCDP(
     }
     
     // ========================================
-    // STEP 3: Set up CDP screenshot parameters
+    // STEP 3: Get scroll position and set up CDP screenshot parameters
     // ========================================
-    const cssViewportX = 0;
-    const cssViewportY = 0;
+    // Get current scroll position to capture the current viewport
+    let scrollX = 0;
+    let scrollY = 0;
+    try {
+      const scrollResult = await cdpCommander.sendCommand<any>('Runtime.evaluate', {
+        expression: '({scrollX: window.scrollX, scrollY: window.scrollY})',
+        returnByValue: true,
+      });
+      
+      if (scrollResult?.result?.value) {
+        scrollX = scrollResult.result.value.scrollX || 0;
+        scrollY = scrollResult.result.value.scrollY || 0;
+        console.log(`📜 [Screenshot] Current scroll position: (${scrollX}, ${scrollY})`);
+      }
+    } catch (scrollError) {
+      console.warn(`⚠️ [Screenshot] Failed to get scroll position, using (0, 0): ${scrollError instanceof Error ? scrollError.message : scrollError}`);
+      // Continue with default (0, 0) if scroll position cannot be determined
+    }
+    
+    const cssViewportX = scrollX;
+    const cssViewportY = scrollY;
     const cssViewportWidth = viewportWidth;
     const cssViewportHeight = viewportHeight;
     
