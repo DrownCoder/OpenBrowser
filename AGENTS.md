@@ -147,17 +147,20 @@ Key modules in `extension/src/`:
 - **`commands/`**: CDP command implementations
   - `cdp-commander.ts`: Chrome DevTools Protocol wrapper
   - `debugger-manager.ts`: Debugger attachment management with auto-detach
-  - `computer.ts`: Mouse, keyboard, scroll operations using CDP
+  - `computer.ts`: Legacy mouse/keyboard operations (not used in current design)
   - `screenshot.ts`: Background screenshot capture with CDP
   - `tabs.ts`: Tab management operations
   - `tab-manager.ts`: Advanced tab group management for sessions
-  - `javascript.ts`: JavaScript execution in browser tabs
+  - `javascript.ts`: JavaScript execution in browser tabs (core functionality)
 - **`background/index.ts`**: Background script - main extension logic
   - Command routing and execution
-  - Tab activation management (now minimized)
+  - Tab group management
   - Global state tracking
   - Debug logging for troubleshooting
-- **`content/`**: Content script for web page interaction
+- **`content/index.ts`**: Content script for web page interaction
+  - Provides viewport information
+  - Image resizing utilities
+  - No visual mouse pointer (removed in favor of JavaScript-only automation)
 
 📖 **Detailed documentation**: [Chrome Extension Modules](docs/extension/modules.md)
 

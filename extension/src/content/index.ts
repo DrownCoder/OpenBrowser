@@ -1,20 +1,16 @@
 /**
  * Content Script - Runs in web pages
- * Handles visual mouse pointer and viewport information
+ * Provides viewport information and image resizing utilities
+ * 
+ * Note: Visual mouse pointer has been removed. All browser automation
+ * is now done via JavaScript execution (javascript_execute command).
  */
-
-import { VisualMousePointer } from './visual-mouse';
 
 console.log('🖥️ OpenBrowser content script loaded', {
   location: window.location.href,
   readyState: document.readyState,
   timestamp: Date.now()
 });
-
-// Initialize visual mouse pointer
-console.log('🖥️ Creating VisualMousePointer instance...');
-const visualMouse = new VisualMousePointer();
-console.log('🖥️ VisualMousePointer instance created');
 
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -27,33 +23,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       break;
       
     case 'get_viewport':
-      const viewportInfo = visualMouse.getViewportInfo();
+      // Return viewport information
+      const viewportInfo = {
+        width: window.innerWidth,
+        height: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio || 1,
+        scrollX: window.scrollX,
+        scrollY: window.scrollY,
+      };
       sendResponse({
         success: true,
         data: viewportInfo,
       });
-      break;
-      
-    case 'visual_mouse_update':
-      visualMouse.handleMouseUpdate(message.data);
-      sendResponse({ success: true });
-      break;
-      
-    case 'visual_mouse_toggle':
-      visualMouse.toggleVisibility();
-      sendResponse({ success: true, visible: visualMouse['isVisible'] });
-      break;
-      
-    case 'visual_mouse_position':
-      sendResponse({
-        success: true,
-        data: visualMouse.getPosition(),
-      });
-      break;
-      
-    case 'visual_mouse_destroy':
-      visualMouse.hidePointer();
-      sendResponse({ success: true });
       break;
       
     case 'get_device_pixel_ratio':
@@ -102,15 +83,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true; // Keep message channel open for async response
 });
 
-// Expose functions to background script
+// Expose utility functions to background script
 (window as any).chromeControl = {
-  getViewport: () => visualMouse.getViewportInfo(),
-  
-  getVisualMousePosition: () => visualMouse.getPosition(),
-  
-  updateVisualMouse: (data: any) => visualMouse.handleMouseUpdate(data),
-  
-  toggleVisualMouse: () => visualMouse.toggleVisibility(),
+  getViewport: () => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+    devicePixelRatio: window.devicePixelRatio || 1,
+    scrollX: window.scrollX,
+    scrollY: window.scrollY,
+  }),
 };
 
 /**
@@ -181,10 +162,4 @@ async function resizeImage(
   });
 }
 
-// Handle page unload
-window.addEventListener('beforeunload', () => {
-  // Clean up visual mouse
-  visualMouse.destroy();
-});
-
-console.log('✅ Content script initialized with visual mouse pointer');
+console.log('✅ Content script initialized (JavaScript-only automation mode)');
