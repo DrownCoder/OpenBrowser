@@ -5,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OpenBrowserAgent - Session Manager</title>
     <style>
+        html {
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+        }
+
         * {
             box-sizing: border-box;
             margin: 0;
@@ -17,8 +23,12 @@
             color: #cccccc;
             line-height: 1.6;
             height: 100vh;
+            width: 100vw;
+            margin: 0;
+            padding: 0;
             display: flex;
             flex-direction: column;
+            overflow: hidden;
         }
 
         .header {
@@ -43,6 +53,7 @@
             flex: 1;
             display: flex;
             overflow: hidden;
+            min-height: 0;
         }
 
         /* Session List Panel */
@@ -52,6 +63,8 @@
             border-right: 1px solid #444444;
             display: flex;
             flex-direction: column;
+            min-height: 0;
+            overflow: hidden;
         }
 
         .session-list-header {
@@ -488,11 +501,21 @@
         let sessions = [];
         let selectedSession = null;
         let currentFilter = 'all';
-        const API_BASE = 'http://127.0.0.1:8765';
+        
+        // Server URL configuration - same approach as index.html
+        const isFileProtocol = window.location.protocol === 'file:';
+        const serverBaseUrl = isFileProtocol ? 'http://127.0.0.1:8765' : '';
+        
+        // Helper function to build API URL
+        function apiUrl(path) {
+            // Remove leading slash if present to avoid double slashes
+            const cleanPath = path.startsWith('/') ? path.substring(1) : path;
+            return serverBaseUrl ? `${serverBaseUrl}/${cleanPath}` : `/${cleanPath}`;
+        }
 
         // API helper function
         async function apiCall(endpoint, options = {}) {
-            const response = await fetch(`${API_BASE}${endpoint}`, {
+            const response = await fetch(apiUrl(endpoint), {
                 headers: {
                     'Content-Type': 'application/json',
                 },

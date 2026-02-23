@@ -5,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OpenBrowserAgent - Terminal Interface</title>
     <style>
+        html {
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+        }
+
         * {
             box-sizing: border-box;
             margin: 0;
@@ -17,10 +23,13 @@
             color: #cccccc;
             line-height: 1.4;
             height: 100vh;
+            width: 100vw;
             padding: 0;
+            margin: 0;
             overflow: hidden;
             display: flex;
             flex-direction: column;
+            position: relative;
         }
 
         .terminal-header {
@@ -97,6 +106,7 @@
             width: 100%;
             flex: 1;
             overflow: hidden;
+            min-height: 0;
         }
 
         .main-terminal {
@@ -106,6 +116,8 @@
             background: #1a1a1a;
             border-right: 1px solid #444444;
             min-width: 300px;
+            min-height: 0;
+            overflow: hidden;
         }
         
         .right-panel {
@@ -114,6 +126,8 @@
             flex-direction: column;
             min-width: 350px;
             max-width: 700px;
+            min-height: 0;
+            overflow: hidden;
         }
         
         .image-viewer {
@@ -122,7 +136,8 @@
             border-bottom: 1px solid #444444;
             display: flex;
             flex-direction: column;
-            min-height: 300px;
+            min-height: 0;
+            overflow: hidden;
         }
         
         .image-viewer-title {
@@ -204,6 +219,7 @@
             font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
             font-size: 13px;
             line-height: 1.4;
+            min-height: 0;
         }
 
         .event-line {
@@ -584,22 +600,29 @@
             }
         }
         
-        /* Responsive design for screens smaller than 900px */
+        /* Responsive design for screens smaller than 900px (tablets and small laptops) */
         @media (max-width: 900px) {
             .event-image {
                 max-width: 500px;
                 max-height: 375px;
             }
             
+            .main-terminal {
+                min-width: 280px;
+                border-right: none;
+                border-bottom: 1px solid #444444;
+                min-height: 40vh;
+            }
+            
+            .right-panel {
+                min-width: 300px;
+                min-height: 60vh;
+            }
+            
             .container {
                 flex-direction: column;
                 height: auto;
                 min-height: 100vh;
-            }
-            
-            .main-terminal {
-                border-right: none;
-                border-bottom: 1px solid #444444;
             }
             
             .sidebar {
@@ -610,31 +633,6 @@
             
             .input-area {
                 right: 0;
-            }
-        }
-        
-        /* Responsive design for medium screens (tablets and small laptops) */
-        @media (max-width: 900px) {
-            .main-terminal {
-                min-width: 280px;
-            }
-            
-            .right-panel {
-                min-width: 300px;
-            }
-            
-            .container {
-                flex-direction: column;
-            }
-            
-            .main-terminal {
-                border-right: none;
-                border-bottom: 1px solid #444444;
-                min-height: 40vh;
-            }
-            
-            .right-panel {
-                min-height: 60vh;
             }
         }
         
@@ -865,7 +863,9 @@
             flex-direction: column;
             flex: 1;
             width: 100%;
+            height: 100%;
             overflow: hidden;
+            position: relative;
         }
         
         /* Session Sidebar Styles */
