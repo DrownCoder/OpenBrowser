@@ -2785,10 +2785,11 @@
             const configPage = document.getElementById('config-page');
             const mainInterface = document.getElementById('main-interface');
             if (configPage) configPage.style.display = 'none';
-            // Use flex with column direction to match CSS
+            // Remove inline styles - let CSS handle the layout
+            // This was causing conflicts with responsive media queries
             if (mainInterface) {
-                mainInterface.style.display = 'flex';
-                mainInterface.style.flexDirection = 'column';
+                mainInterface.style.display = '';
+                mainInterface.style.flexDirection = '';
             }
         }
         
