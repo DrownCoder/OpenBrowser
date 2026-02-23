@@ -598,6 +598,12 @@
                 max-width: 600px;
                 max-height: 450px;
             }
+            
+            /* Scale down ASCII title for medium screens */
+            .ascii-title {
+                font-size: 10px;
+                line-height: 1.1;
+            }
         }
         
         /* Responsive design for screens smaller than 900px (tablets and small laptops) */
@@ -636,6 +642,34 @@
             }
         }
         
+        /* Responsive design for medium screens (tablets and small laptops) */
+        @media (max-width: 900px) {
+            .main-terminal {
+                min-width: 280px;
+            }
+            
+            .right-panel {
+                min-width: 280px;
+                min-height: 60vh;
+            }
+            
+            .container {
+                flex-direction: column;
+                overflow-y: auto;
+            }
+            
+            .main-terminal {
+                border-right: none;
+                border-bottom: 1px solid #444444;
+                min-height: 40vh;
+            }
+            
+            /* Ensure image viewer can display properly on small screens */
+            .image-viewer {
+                min-height: 250px;
+            }
+        }
+        
         /* Responsive design for screens smaller than 600px */
         @media (max-width: 600px) {
             .event-image {
@@ -650,7 +684,8 @@
             }
             
             .ascii-title {
-                font-size: 10px;
+                font-size: 8px;
+                line-height: 1.1;
             }
             
             .status-bar {
@@ -660,6 +695,10 @@
             
             #cwd-input {
                 width: 100%;
+            }
+            
+            .image-viewer {
+                min-height: 200px;
             }
         }
         

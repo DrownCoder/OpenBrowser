@@ -195,19 +195,14 @@ await javascript.executeJavaScript(tabId,
 - Command routing to appropriate handlers
 - Response sending back to server
 - Extension lifecycle management
-- Visual mouse pointer coordination and single-tab display management
 
 **Key Functions**:
 - `handleCommand()`: Main command dispatcher for all automation operations
-- `cleanupVisualMouseInAllTabs()`: Destroys visual mouse pointers in all tabs on disconnect
-- `cleanupVisualMouseInTab()`: Destroys visual mouse pointer in a specific tab
-- `updateVisualMouse()`: Sends mouse position/action updates to content scripts with tab switching logic
 - `getViewportInfo()`: Retrieves viewport dimensions from content script
 - `injectContentScriptManually()`: Manually injects content script into tabs when needed
 
 **State Management**:
-- `currentActiveTabId`: Tracks the tab currently displaying visual mouse pointer
-- Tab switching automatically cleans up previous tab's visual mouse
+- Tab group management for visual isolation
 - Automatic cleanup on WebSocket disconnect and tab closure
 
 ### `src/content/index.ts`
@@ -215,36 +210,16 @@ await javascript.executeJavaScript(tabId,
 **Purpose**: Content script running in web pages
 
 **Current Functionality**: 
-- Initializes visual mouse pointer via `VisualMousePointer` class
-- Handles mouse position updates from background script
-- Provides viewport information with iframe detection and fallback
-- Manages visual feedback for mouse actions (clicks, moves, scrolls)
-- Responds to cleanup commands (`visual_mouse_destroy`)
+- Provides viewport information (width, height, device pixel ratio, scroll position)
+- Handles image resizing for screenshot standardization (1280x720)
+- Responds to utility requests from background script
 
 **Message Handlers**:
 - `get_viewport`: Returns viewport dimensions and device info
-- `visual_mouse_update`: Updates mouse position/action on screen
-- `visual_mouse_position`: Returns current visual mouse position
-- `visual_mouse_destroy`: Removes visual mouse pointer from page
+- `get_device_pixel_ratio`: Returns device pixel ratio
+- `resize_image`: Resizes images to standard dimensions
 
-### `src/content/visual-mouse.ts`
-
-**Purpose**: Visual mouse pointer overlay for operator feedback
-
-**Key Features**:
-- Traditional arrow-shaped pointer with drop shadow
-- Intelligent color coding: blue for clickable elements, green for text inputs
-- Visual animations for clicks (purple pulse), scrolls (blue movement), dragging (orange)
-- Automatic boundary checking and position tracking
-- Toggle visibility with Ctrl+Shift+M shortcut
-- Advanced viewport dimension detection with iframe handling
-
-**Key Methods**:
-- `getViewportInfo()`: Returns viewport dimensions, handles iframe cases, tries parent window
-- `handleMouseUpdate()`: Updates pointer position and triggers animations
-- `destroy()`: Removes pointer from DOM and cleans up event listeners
-
-**Integration**: Communicates with background script via Chrome messaging API
+**Note**: Content script does NOT include visual mouse pointer. All browser automation is performed via JavaScript execution (CDP Runtime.evaluate) for reliability and speed.
 
 ## Manifest Configuration
 

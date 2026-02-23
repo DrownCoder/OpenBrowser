@@ -4,11 +4,96 @@ This document contains technical implementation details, design decisions, and h
 
 ## Table of Contents
 
+- [Screenshot Resize Cover Mode (February 2026)](#screenshot-resize-cover-mode-february-2026)
+- [Frontend Responsive Layout Improvements (February 2026)](#frontend-responsive-layout-improvements-february-2026)
 - [Isolation Improvements (February 2026)](#isolation-improvements-february-2026)
 - [Tab Management and Screenshot Fixes (February 2026)](#tab-management-and-screenshot-fixes-february-2026)
 - [Screenshot Isolation using CDP (March 2025)](#screenshot-isolation-using-cdp-march-2025)
 - [Refresh Tab Functionality (February 2026)](#refresh-tab-functionality-february-2026)
 - [Debugging Guide](#debugging-guide)
+
+---
+
+## Screenshot Resize Cover Mode (February 2026)
+
+### Problem
+
+Screenshots using "contain" mode resize created white borders when the original viewport aspect ratio differed from the preset 1280x720:
+
+```
+Original: 1440x900 (16:10)
+→ Scale to 1280x720 (16:9) with contain mode
+→ Result: 1152x720 centered, with 64px white borders on left/right
+→ Problem: Lost image information, confusing for AI
+```
+
+### Solution: Cover Mode Resize
+
+Changed `resizeImage()` from contain mode to cover mode:
+
+1. **Cover mode scaling**: Use `Math.max(scaleX, scaleY)` instead of `Math.min()` to scale image to cover entire target
+2. **Center crop**: Calculate crop offsets to center the image, cropping overflow
+3. **Metadata tracking**: Record `cropOffsetX` and `cropOffsetY` in screenshot metadata
+
+### Example
+
+```
+Original: 1440x900 (16:10)
+→ Scale with cover mode: scale = max(1280/1440, 720/900) = 0.889
+→ Scaled: 1280x800
+→ Crop: 40px from top and bottom
+→ Result: Perfect 1280x720, no white borders ✅
+```
+
+### Benefits
+
+- **No white borders**: Full 1280x720 image area utilized
+- **Better for AI**: No confusion from empty borders
+- **Metadata preserved**: Crop offsets saved for potential coordinate mapping
+
+### Files Modified
+
+- `extension/src/commands/screenshot.ts`: Updated `resizeImage()` function
+- Screenshot metadata now includes `cropOffsetX` and `cropOffsetY` fields
+
+---
+
+## Frontend Responsive Layout Improvements (February 2026)
+
+### Problems
+
+On smaller screens (< 1200px width), the frontend displayed incorrectly:
+
+1. **ASCII art title too large**: OPENBROWSER ASCII art took up too much space
+2. **Right panel hidden**: Live view panel pushed off screen or not visible
+3. **No scrolling**: Vertical layout not scrollable
+
+### Solution: Three-Tier Responsive Design
+
+Added responsive breakpoints for different screen sizes:
+
+1. **Large screens (>1200px)**: Default layout, ASCII art at 12px
+2. **Medium screens (900-1200px)**: 
+   - ASCII art scaled down to 10px
+   - Side-by-side layout maintained
+3. **Small screens (<900px)**:
+   - ASCII art at 10px
+   - Vertical stack layout (terminal on top, live view below)
+   - Right panel min-width reduced from 350px to 280px
+   - Added `overflow-y: auto` to container for scrolling
+4. **Extra small screens (<600px)**:
+   - ASCII art further reduced to 8px
+   - Image viewer min-height adjusted to 200px
+
+### Files Modified
+
+- `frontend/index.html`: Added responsive CSS rules for ASCII title and layout
+
+### Benefits
+
+- **Small screen support**: Frontend usable on laptops and smaller displays
+- **No horizontal scrolling**: Content fits within viewport width
+- **Maintained readability**: ASCII art scales appropriately
 
 ---
 
@@ -50,13 +135,12 @@ Verify that `tabs init <url>` creates a tab in the background, and subsequent `r
 ### Problems
 
 1. **Screenshots captured user's active tab instead of managed AI tab**
-2. **Visual mouse pointer missing from screenshots**
+2. **Tab tracking was inconsistent across commands**
 
 ### Root Causes
 
 1. Server-side lacked current tab tracking - commands didn't specify which tab to target
 2. TypeScript and Python command schemas were misaligned (missing fields)
-3. Screenshot command missing `include_visual_mouse` field
 
 ### Solution: Unified Tab Management System
 
@@ -66,7 +150,6 @@ Verify that `tabs init <url>` creates a tab in the background, and subsequent `r
    - Auto-fills `tab_id` when not specified
    - Updates current tab on `init`, `open`, `switch` actions
 3. **Schema alignment**:
-   - Added `include_visual_mouse` to `ScreenshotCommand` (default: true)
    - Added `managed_only` to `GetTabsCommand` (default: true)
 4. **Prepared command flow**: All commands go through `_send_prepared_command()` which ensures proper `tab_id`
 
@@ -75,14 +158,10 @@ Verify that `tabs init <url>` creates a tab in the background, and subsequent `r
 ```
 tabs init https://example.com  # Creates managed tab, sets as current
 screenshot                      # Captures from current managed tab
-mouse_move 100 0               # Moves in current managed tab  
+javascript_execute             # Executes in current managed tab
 tabs switch <tab_id>           # Changes current tab
 screenshot                      # Now captures from new current tab
 ```
-
-### Visual Mouse Fix
-
-Screenshots now include visual mouse pointer by default (configurable via `include_visual_mouse` parameter).
 
 ### Backward Compatibility
 

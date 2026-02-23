@@ -15,13 +15,16 @@ import { debuggerManager } from './debugger-manager';
  * 
  * IMPORTANT: If OffscreenCanvas or createImageBitmap is not available, the function will 
  * throw an error instead of falling back to content script (which could cause tab activation).
+ * 
+ * Uses "cover" mode: scales image to cover target dimensions while maintaining aspect ratio,
+ * then crops the overflow. This ensures no white borders and maximizes image information.
  */
 async function resizeImage(
   dataUrl: string,
   targetWidth: number = 1280,
   targetHeight: number = 720,
-): Promise<string> {
-  console.log(`🖼️ [Screenshot] Resizing image to ${targetWidth}x${targetHeight}...`);
+): Promise<{ dataUrl: string; cropOffsetX: number; cropOffsetY: number }> {
+  console.log(`🖼️ [Screenshot] Resizing image to ${targetWidth}x${targetHeight} (cover mode)...`);
   
   // Check if OffscreenCanvas is available
   if (typeof OffscreenCanvas === 'undefined') {
@@ -65,26 +68,29 @@ async function resizeImage(
     ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, targetWidth, targetHeight);
     
-    // Calculate scaling to fit image in target dimensions while maintaining aspect ratio
+    // Calculate scaling to COVER target dimensions while maintaining aspect ratio
+    // Use Math.max instead of Math.min to ensure image covers the entire canvas
     const scaleX = targetWidth / imageBitmap.width;
     const scaleY = targetHeight / imageBitmap.height;
-    const scale = Math.min(scaleX, scaleY);
+    const scale = Math.max(scaleX, scaleY);  // Changed from Math.min to Math.max (cover mode)
     
-    const newWidth = Math.floor(imageBitmap.width * scale);
-    const newHeight = Math.floor(imageBitmap.height * scale);
+    const scaledWidth = Math.floor(imageBitmap.width * scale);
+    const scaledHeight = Math.floor(imageBitmap.height * scale);
     
-    if (newWidth <= 0 || newHeight <= 0) {
-      throw new Error(`[Screenshot] Invalid scaled dimensions: ${newWidth}x${newHeight}`);
+    if (scaledWidth <= 0 || scaledHeight <= 0) {
+      throw new Error(`[Screenshot] Invalid scaled dimensions: ${scaledWidth}x${scaledHeight}`);
     }
     
-    // Center the image in the canvas
-    const offsetX = Math.floor((targetWidth - newWidth) / 2);
-    const offsetY = Math.floor((targetHeight - newHeight) / 2);
+    // Calculate crop offset to center the image
+    // This will be negative when the scaled image is larger than target
+    const cropOffsetX = Math.floor((targetWidth - scaledWidth) / 2);
+    const cropOffsetY = Math.floor((targetHeight - scaledHeight) / 2);
     
-    console.log(`🖼️ [Screenshot] Scaling: scale=${scale.toFixed(3)}, new dimensions: ${newWidth}x${newHeight}, offset: (${offsetX}, ${offsetY})`);
+    console.log(`🖼️ [Screenshot] Scaling: scale=${scale.toFixed(3)}, scaled dimensions: ${scaledWidth}x${scaledHeight}, crop offset: (${cropOffsetX}, ${cropOffsetY})`);
     
     // Draw ImageBitmap to canvas with scaling and centering
-    ctx.drawImage(imageBitmap, offsetX, offsetY, newWidth, newHeight);
+    // Negative offsets will crop the overflow
+    ctx.drawImage(imageBitmap, cropOffsetX, cropOffsetY, scaledWidth, scaledHeight);
     
     // Convert to data URL (PNG format for lossless quality)
     const resizedBlob = await canvas.convertToBlob({ type: 'image/png' });
@@ -94,8 +100,12 @@ async function resizeImage(
       const reader = new FileReader();
       reader.onloadend = () => {
         const resizedDataUrl = reader.result as string;
-        console.log(`✅ [Screenshot] Image resized successfully: ${imageBitmap.width}x${imageBitmap.height} → ${targetWidth}x${targetHeight}`);
-        resolve(resizedDataUrl);
+        console.log(`✅ [Screenshot] Image resized successfully (cover mode): ${imageBitmap.width}x${imageBitmap.height} → ${targetWidth}x${targetHeight}`);
+        resolve({
+          dataUrl: resizedDataUrl,
+          cropOffsetX: cropOffsetX,  // Negative value indicates crop from left/top
+          cropOffsetY: cropOffsetY,
+        });
       };
       reader.onerror = () => reject(new Error('[Screenshot] Failed to read resized blob'));
       reader.readAsDataURL(resizedBlob);
@@ -308,6 +318,8 @@ async function captureScreenshotWithCDP(
     let finalImageData = dataUrl;
     let finalImageWidth = expectedDeviceWidth;
     let finalImageHeight = expectedDeviceHeight;
+    let cropOffsetX = 0;
+    let cropOffsetY = 0;
     
     if (resizeToPreset) {
       const PRESET_WIDTH = 1280;
@@ -316,13 +328,16 @@ async function captureScreenshotWithCDP(
       console.log(`🖼️ [Screenshot] Resizing image from ${expectedDeviceWidth}×${expectedDeviceHeight} to ${PRESET_WIDTH}×${PRESET_HEIGHT}`);
       
       try {
-        finalImageData = await resizeImage(
+        const resizeResult = await resizeImage(
           dataUrl,
           PRESET_WIDTH,
           PRESET_HEIGHT
         );
+        finalImageData = resizeResult.dataUrl;
         finalImageWidth = PRESET_WIDTH;
         finalImageHeight = PRESET_HEIGHT;
+        cropOffsetX = resizeResult.cropOffsetX;
+        cropOffsetY = resizeResult.cropOffsetY;
         console.log(`✅ [Screenshot] Image resized to preset coordinate system dimensions`);
       } catch (resizeError) {
         const errorMsg = `[Screenshot] Failed to resize image: ${resizeError instanceof Error ? resizeError.message : resizeError}`;
@@ -369,6 +384,9 @@ async function captureScreenshotWithCDP(
         resizedToPreset: resizeToPreset,
         captureMethod: 'cdp',
         devicePixelRatio: devicePixelRatio,
+        // Crop offset for cover mode resize (used for coordinate mapping if needed)
+        cropOffsetX: cropOffsetX,
+        cropOffsetY: cropOffsetY,
       },
     };
   } catch (error) {

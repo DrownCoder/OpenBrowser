@@ -130,8 +130,10 @@ Key modules in `server/`:
 
 - **`models/commands.py`**: Command schema definitions and validation using Pydantic
 - **`core/config.py`**: Configuration management with environment variable support
-- **`core/coordinates.py`**: Coordinate mapping between preset and actual screen resolutions
+- **`core/coordinates.py`**: Coordinate mapping utilities (primarily for screenshot metadata tracking)
 - **`core/processor.py`**: Command execution and routing with tab tracking
+- **`core/llm_config.py`**: LLM configuration management (model, API key, base URL)
+- **`core/session_manager.py`**: Session state management and persistence
 - **`websocket/manager.py`**: WebSocket server for extension communication
 - **`api/main.py`**: FastAPI application with REST and WebSocket endpoints
 - **`main.py`**: CLI entry point for server management
