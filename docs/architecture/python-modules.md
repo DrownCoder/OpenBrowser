@@ -10,23 +10,21 @@ This document provides detailed documentation for the Python server modules.
 
 **Key Components**:
 - `BaseCommand`: Base class for all commands
-- Command types: `MouseMoveCommand`, `MouseClickCommand`, `KeyboardTypeCommand`, `JavascriptExecuteCommand`, etc.
+- Command types: `JavascriptExecuteCommand`, `TabCommand`, `ScreenshotCommand`
 - `TabCommand`: Tab management command with `TabAction` enum (OPEN, CLOSE, LIST, SWITCH, INIT, REFRESH)
 - `parse_command()`: Factory function to create commands from JSON
 - **Validation**: Uses Pydantic for schema validation
 
-**Recent Updates**:
-- Added `JavascriptExecuteCommand` for executing JavaScript code in browser tabs
-- Added `INIT` action to `TabAction` enum for explicit session initialization
-- Added `REFRESH` action to `TabAction` enum for tab refresh functionality
-- Updated URL validator to support both `OPEN` and `INIT` actions
-- `INIT` action requires URL parameter and creates managed tab group
-
-**JavaScript Execution Support**:
-- `JavascriptExecuteCommand`: Executes JavaScript code with options for return value serialization and Promise handling
+**JavaScript-First Design**:
+- `JavascriptExecuteCommand`: Core command for all browser interactions (clicking, typing, scrolling, data extraction)
 - Parameters: `script` (required), `return_by_value` (default: true), `await_promise` (default: false), `timeout` (default: 30000ms)
 - Returns: CDP result object with value or exception details
-- Integrated with tab management system for isolated execution in managed tabs
+- All page interactions are performed via JavaScript execution for reliability and speed
+
+**Tab Management**:
+- `TabAction` enum supports INIT, OPEN, CLOSE, SWITCH, LIST, REFRESH operations
+- `INIT` action requires URL parameter and creates managed tab group
+- Tab commands ensure proper isolation and background operation
 
 ### `server/core/config.py`
 
@@ -37,7 +35,7 @@ This document provides detailed documentation for the Python server modules.
 - Configuration sources: Environment variables, defaults
 
 **Settings**:
-- Host, port, preset resolution, timeouts, etc.
+- Host, port, timeouts, log level, etc.
 
 ### `server/core/llm_config.py`
 
@@ -69,16 +67,6 @@ This document provides detailed documentation for the Python server modules.
 - Configuration file stored in user's home directory
 - No environment variable support (web UI only)
 
-### `server/core/coordinates.py`
-
-**Purpose**: Coordinate mapping between different resolutions
-
-**Key Components**:
-- `CoordinateMapping`: Maps between preset and actual screen resolutions
-- `CoordinateManager`: Manages mappings for multiple tabs
-
-**Algorithm**: Linear scaling with boundary clamping
-
 ### `server/core/processor.py`
 
 **Purpose**: Command execution and routing
@@ -86,6 +74,7 @@ This document provides detailed documentation for the Python server modules.
 **Key Components**:
 - `CommandProcessor`: Dispatches commands to appropriate handlers
 - Integration with WebSocket manager for extension communication
+- JavaScript-first command routing
 
 **Tab Tracking**:
 - Maintains `_current_tab_id` state
@@ -150,8 +139,8 @@ The server maintains a unified tab management system:
 **Workflow**:
 ```
 tabs init https://example.com  # Creates managed tab, sets as current
-screenshot                      # Captures from current managed tab
-mouse_move 100 0               # Moves in current managed tab  
+screenshot                      # Captures from current managed tab (WYSIWYG)
+javascript_execute "document.querySelector('button').click()"  # Interact via JavaScript
 tabs switch <tab_id>           # Changes current tab
 screenshot                      # Now captures from new current tab
 ```

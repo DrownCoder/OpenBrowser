@@ -109,7 +109,7 @@ All operations run completely in background tabs without switching user's view:
 
 | Operation | Implementation | Flash-Free | Notes |
 |-----------|---------------|------------|-------|
-| **Screenshot** | CDP `Page.captureScreenshot` | ✅ | Captures background tabs |
+| **Screenshot** | CDP `Page.captureScreenshot` | ✅ | WYSIWYG mode - captures actual viewport dimensions |
 | **JavaScript Execute** | CDP `Runtime.evaluate` | ✅ | Runs in background context |
 | **Tab Init** | CDP + Tab Management | ✅ | Initializes managed session |
 | **Tab Switch** | Internal state only | ✅ | No visible tab change |
@@ -130,7 +130,6 @@ Key modules in `server/`:
 
 - **`models/commands.py`**: Command schema definitions and validation using Pydantic
 - **`core/config.py`**: Configuration management with environment variable support
-- **`core/coordinates.py`**: Coordinate mapping utilities (primarily for screenshot metadata tracking)
 - **`core/processor.py`**: Command execution and routing with tab tracking
 - **`core/llm_config.py`**: LLM configuration management (model, API key, base URL)
 - **`core/session_manager.py`**: Session state management and persistence
@@ -149,7 +148,6 @@ Key modules in `extension/src/`:
 - **`commands/`**: CDP command implementations
   - `cdp-commander.ts`: Chrome DevTools Protocol wrapper
   - `debugger-manager.ts`: Debugger attachment management with auto-detach
-  - `computer.ts`: Legacy mouse/keyboard operations (not used in current design)
   - `screenshot.ts`: Background screenshot capture with CDP
   - `tabs.ts`: Tab management operations
   - `tab-manager.ts`: Advanced tab group management for sessions
@@ -162,7 +160,7 @@ Key modules in `extension/src/`:
 - **`content/index.ts`**: Content script for web page interaction
   - Provides viewport information
   - Image resizing utilities
-  - No visual mouse pointer (removed in favor of JavaScript-only automation)
+  - No visual mouse pointer - all automation via JavaScript execution
 
 📖 **Detailed documentation**: [Chrome Extension Modules](docs/extension/modules.md)
 
@@ -172,7 +170,7 @@ Key modules in `extension/src/`:
 
 Commands:
 - `status`: Check server health
-- `screenshot capture`: Screenshot capture
+- `screenshot capture`: Screenshot capture (WYSIWYG mode - actual viewport dimensions)
 - `tabs list/open/close/switch/refresh/init`: Tab management
 - `interactive`: Interactive REPL mode
 - `script`: Execute commands from JSON file
@@ -237,8 +235,9 @@ uv run pytest tests/ --cov=server --cov-report=html
 
 ### 1. JavaScript-First Automation
 - **Primary Method**: JavaScript execution for all page interactions
-- **No Visual Operations**: No mouse coordinates or keyboard simulation needed
-- **Reliable & Fast**: Direct DOM access is more reliable than visual-based methods
+- **No Visual Operations**: All browser interactions via JavaScript execution (no mouse/keyboard simulation)
+- **Reliable & Fast**: Direct DOM access is more reliable and faster than visual-based methods
+- **Core Principle**: Click buttons, fill forms, scroll pages, extract data - all through JavaScript execution
 
 ### 2. Dual Communication Channels
 - **REST API**: For simple, synchronous command execution
@@ -256,7 +255,7 @@ Key implementation details and historical notes:
 
 - **Isolation Improvements (February 2026)**: Background automation mode to prevent focus stealing
 - **Tab Management Fixes (February 2026)**: Unified tab tracking system
-- **Screenshot Isolation (March 2025)**: CDP-based screenshot capture for background tabs
+- **Screenshot WYSIWYG Mode (March 2025)**: CDP-based screenshot capture without resizing, preserving actual viewport dimensions
 - **Refresh Functionality (February 2026)**: Added tab refresh action
 - **Heartbeat Frequency Increase (February 2026)**: Increased ping-pong signal frequency from 20s to 5s for faster connection health detection
 - **Heartbeat Reliability Improvements (February 2026)**: 

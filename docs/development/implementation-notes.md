@@ -4,7 +4,8 @@ This document contains technical implementation details, design decisions, and h
 
 ## Table of Contents
 
-- [Screenshot Resize Cover Mode (February 2026)](#screenshot-resize-cover-mode-february-2026)
+- [Screenshot WYSIWYG Mode (March 2025)](#screenshot-wysiwyg-mode-march-2025)
+- [JavaScript-First Automation (March 2025)](#javascript-first-automation-march-2025)
 - [Frontend Responsive Layout Improvements (February 2026)](#frontend-responsive-layout-improvements-february-2026)
 - [Isolation Improvements (February 2026)](#isolation-improvements-february-2026)
 - [Tab Management and Screenshot Fixes (February 2026)](#tab-management-and-screenshot-fixes-february-2026)
@@ -14,47 +15,79 @@ This document contains technical implementation details, design decisions, and h
 
 ---
 
-## Screenshot Resize Cover Mode (February 2026)
+## Screenshot WYSIWYG Mode (March 2025)
 
 ### Problem
 
-Screenshots using "contain" mode resize created white borders when the original viewport aspect ratio differed from the preset 1280x720:
+Screenshots were being resized to 1280x720 (720p), which caused issues:
+- Loss of detail on high-DPI displays
+- Incorrect representation of actual viewport dimensions
+- Confusion between screenshot coordinates and actual page coordinates
 
-```
-Original: 1440x900 (16:10)
-→ Scale to 1280x720 (16:9) with contain mode
-→ Result: 1152x720 centered, with 64px white borders on left/right
-→ Problem: Lost image information, confusing for AI
-```
+### Solution: WYSIWYG Screenshot Mode
 
-### Solution: Cover Mode Resize
+Changed screenshot capture to preserve actual dimensions:
 
-Changed `resizeImage()` from contain mode to cover mode:
+1. **No Resizing**: Screenshots capture actual viewport dimensions (no preset coordinate system)
+2. **Device Pixel Ratio**: Properly handles high-DPI displays (Retina screens)
+3. **Metadata Tracking**: Screenshot metadata includes actual width, height, viewport dimensions, and device pixel ratio
+4. **No Coordinate Mapping**: All interactions via JavaScript execution - no coordinate system needed
 
-1. **Cover mode scaling**: Use `Math.max(scaleX, scaleY)` instead of `Math.min()` to scale image to cover entire target
-2. **Center crop**: Calculate crop offsets to center the image, cropping overflow
-3. **Metadata tracking**: Record `cropOffsetX` and `cropOffsetY` in screenshot metadata
+### Benefits
 
-### Example
+- **Accurate Representation**: Screenshots show exactly what the user sees
+- **High-DPI Support**: Properly captures Retina and other high-density displays
+- **Simpler Architecture**: No coordinate mapping or resizing needed
+- **JavaScript-First**: All page interactions via JavaScript, no coordinate-based operations
 
-```
-Original: 1440x900 (16:10)
-→ Scale with cover mode: scale = max(1280/1440, 720/900) = 0.889
-→ Scaled: 1280x800
-→ Crop: 40px from top and bottom
-→ Result: Perfect 1280x720, no white borders ✅
+### Files Modified
+
+- `extension/src/commands/screenshot.ts`: Removed image resizing, capture actual dimensions
+- Screenshot metadata now includes: `width`, `height`, `viewportWidth`, `viewportHeight`, `devicePixelRatio`, `cropOffsetX: 0`, `cropOffsetY: 0`
+
+---
+
+## JavaScript-First Automation (March 2025)
+
+### Design Decision
+
+**All browser interactions are now performed via JavaScript execution**, not visual/cursor-based operations.
+
+### Key Changes
+
+1. **Removed Mouse/Keyboard Simulation**: No more mouse movements, clicks, or keyboard typing
+2. **JavaScript Execution**: All interactions (clicking, typing, scrolling) via `JavascriptExecuteCommand`
+3. **No Coordinate System**: No preset coordinate system or coordinate mapping
+4. **Direct DOM Access**: Faster, more reliable than cursor-based operations
+
+### Examples
+
+```javascript
+// Click a button
+document.querySelector('#submit-button').click();
+
+// Fill form field
+document.querySelector('#email').value = 'test@example.com';
+
+// Scroll page
+window.scrollTo(0, document.body.scrollHeight);
+
+// Extract data
+const title = document.title;
 ```
 
 ### Benefits
 
-- **No white borders**: Full 1280x720 image area utilized
-- **Better for AI**: No confusion from empty borders
-- **Metadata preserved**: Crop offsets saved for potential coordinate mapping
+- **Faster**: Direct DOM access is faster than visual operations
+- **More Reliable**: No coordinate mapping issues
+- **Simpler**: No need for cursor position tracking
+- **Better Error Handling**: JavaScript exceptions provide clear error messages
 
 ### Files Modified
 
-- `extension/src/commands/screenshot.ts`: Updated `resizeImage()` function
-- Screenshot metadata now includes `cropOffsetX` and `cropOffsetY` fields
+- `server/models/commands.py`: Removed mouse/keyboard command classes
+- `extension/src/commands/javascript.ts`: Core functionality for all interactions
+- Removed coordinate mapping utilities
 
 ---
 
@@ -102,17 +135,17 @@ Added responsive breakpoints for different screen sizes:
 ### Problem
 
 AI-managed tabs were interfering with user browsing:
-1. AI operations (e.g., `reset_mouse`) activated managed tabs, stealing focus from user's active tab
+1. AI operations activated managed tabs, stealing focus from user's active tab
 2. When user switched back to their tab, AI commands could target the wrong tab (user's active tab)
 
 ### Solution: Background Automation Mode
 
 Implemented background automation mode to prevent focus stealing:
 
-1. **No tab activation**: Modified `activateTabForAutomation()` to prepare tabs without activating them
-2. **Managed tab priority**: Updated `getCurrentTabId()` to prefer managed tabs over active tab
-3. **Background tab creation**: Changed `initializeSession()`, `openManagedTab()`, and `openTab()` to create tabs as non-active (`active: false`)
-4. **Visual mouse handling**: Visual mouse pointers remain in managed tabs but are hidden when user switches away
+1. **No tab activation**: Modified operations to prepare tabs without activating them
+2. **Managed tab priority**: Updated tab selection to prefer managed tabs over active tab
+3. **Background tab creation**: Changed tab operations to create tabs as non-active (`active: false`)
+4. **JavaScript execution**: All interactions via JavaScript, no visual cursor needed
 
 ### Benefits
 
@@ -126,7 +159,7 @@ All changes are enabled by default. No configuration needed.
 
 ### Testing
 
-Verify that `tabs init <url>` creates a tab in the background, and subsequent `reset_mouse` or `mouse_move` commands do not switch tabs.
+Verify that `tabs init <url>` creates a tab in the background, and subsequent JavaScript commands execute without switching tabs.
 
 ---
 
@@ -157,8 +190,8 @@ Verify that `tabs init <url>` creates a tab in the background, and subsequent `r
 
 ```
 tabs init https://example.com  # Creates managed tab, sets as current
-screenshot                      # Captures from current managed tab
-javascript_execute             # Executes in current managed tab
+screenshot                      # Captures from current managed tab (WYSIWYG)
+javascript_execute "document.querySelector('button').click()"  # Interact via JavaScript
 tabs switch <tab_id>           # Changes current tab
 screenshot                      # Now captures from new current tab
 ```
@@ -194,9 +227,10 @@ Implemented CDP-based screenshot capture with background tab support:
 ### Technical Implementation
 
 - Added imports for `CdpCommander` and `debuggerManager` in `screenshot.ts`
-- CDP screenshot flow: attach debugger → enable Page domain → get layout metrics → capture screenshot → resize to preset coordinate system (1280×720)
-- Preset coordinate system maintained for consistent mapping between screenshots and mouse positions
+- CDP screenshot flow: attach debugger → enable Page domain → get layout metrics → capture screenshot (actual dimensions)
+- **WYSIWYG Mode**: No resizing - screenshots capture actual viewport dimensions
 - Added metadata field `captureMethod` to distinguish between CDP and legacy captures
+- **No Coordinate Mapping**: All interactions via JavaScript execution
 
 ### Isolation Benefits
 

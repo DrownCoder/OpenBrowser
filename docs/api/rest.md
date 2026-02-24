@@ -89,13 +89,9 @@ Error responses:
 ```
 
 **Command Types**:
-- `mouse_move`: Move mouse
-- `mouse_click`: Click mouse
-- `mouse_scroll`: Scroll at mouse position
-- `keyboard_type`: Type text
-- `keyboard_press`: Press key with modifiers
-- `screenshot`: Capture screenshot
-- `tab`: Tab operations (init, open, close, switch, list)
+- `javascript_execute`: Execute JavaScript code in browser tab (core functionality)
+- `screenshot`: Capture screenshot (WYSIWYG mode - actual dimensions)
+- `tab`: Tab operations (init, open, close, switch, list, refresh)
 - `get_tabs`: Get list of all tabs (shows only managed tabs when session initialized)
 
 **Response**:
@@ -109,197 +105,78 @@ Error responses:
 }
 ```
 
-## Mouse Commands
+## JavaScript Execution
 
-### POST `/mouse/move`
-**Description**: Move mouse relative to current position
+### POST `/javascript/execute`
+**Description**: Execute JavaScript code in browser tab (primary interaction method)
 
 **Request Body**:
 ```json
 {
-  "dx": 100,
-  "dy": 50,
-  "duration": 0.1,
-  "tab_id": 123,  // optional, uses current tab if not specified
-  "command_id": "move-1"
+  "script": "document.querySelector('#button').click()",
+  "return_by_value": true,
+  "await_promise": false,
+  "timeout": 30000,
+  "tab_id": 123,  // optional, uses current managed tab if not specified
+  "command_id": "js-1"
 }
 ```
 
 **Parameters**:
-- `dx` (number): Horizontal movement in pixels (relative to preset resolution)
-- `dy` (number): Vertical movement in pixels (relative to preset resolution)
-- `duration` (number, optional): Movement duration in seconds (default: 0.1)
-- `tab_id` (number, optional): Target tab ID (uses current tab if not specified)
+- `script` (string): JavaScript code to execute (required)
+- `return_by_value` (boolean, optional): Return result as serializable JSON (default: true)
+- `await_promise` (boolean, optional): Wait for Promise resolution (default: false)
+- `timeout` (number, optional): Execution timeout in milliseconds (default: 30000)
+- `tab_id` (number, optional): Target tab ID (uses current managed tab if not specified)
 
 **Response**:
 ```json
 {
   "success": true,
-  "message": "Mouse moved by (100, 50) pixels",
+  "message": "JavaScript executed successfully",
   "data": {
-    "dx": 100,
-    "dy": 50,
-    "duration": 0.1,
+    "result": {/* JavaScript return value */},
     "tab_id": 123
   },
-  "command_id": "move-1",
+  "command_id": "js-1",
   "timestamp": 1678886400.123
 }
 ```
 
-### POST `/mouse/click`
-**Description**: Click at current mouse position
+**Usage Examples**:
+```javascript
+// Click a button
+{"script": "document.querySelector('#submit').click()"}
 
-**Request Body**:
-```json
+// Fill form field
+{"script": "document.querySelector('#email').value = 'test@example.com'"}
+
+// Scroll page
+{"script": "window.scrollTo(0, document.body.scrollHeight)"}
+
+// Extract data with return value
 {
-  "button": "left",  // "left", "right", "middle"
-  "double": false,   // true for double-click
-  "count": 1,        // number of clicks (overrides double)
-  "tab_id": 123,
-  "command_id": "click-1"
+  "script": "({title: document.title, url: window.location.href})",
+  "return_by_value": true
 }
-```
 
-**Parameters**:
-- `button` (string): Mouse button ("left", "right", "middle")
-- `double` (boolean, optional): Double click (default: false)
-- `count` (number, optional): Number of clicks (default: 1, 2 for double)
-- `tab_id` (number, optional): Target tab ID
-
-**Response**:
-```json
+// Handle async operations
 {
-  "success": true,
-  "message": "Mouse clicked with left button",
-  "data": {
-    "button": "left",
-    "count": 1,
-    "tab_id": 123
-  },
-  "command_id": "click-1",
-  "timestamp": 1678886400.123
-}
-```
-
-### POST `/mouse/scroll`
-**Description**: Scroll at current mouse position
-
-**Request Body**:
-```json
-{
-  "direction": "down",  // "up", "down"
-  "amount": 100,        // scroll amount in pixels
-  "tab_id": 123,
-  "command_id": "scroll-1"
-}
-```
-
-**Parameters**:
-- `direction` (string): Scroll direction ("up", "down")
-- `amount` (number): Scroll amount in pixels
-- `tab_id` (number, optional): Target tab ID
-
-**Response**:
-```json
-{
-  "success": true,
-  "message": "Scrolled down by 100 pixels",
-  "data": {
-    "direction": "down",
-    "amount": 100,
-    "tab_id": 123
-  },
-  "command_id": "scroll-1",
-  "timestamp": 1678886400.123
-}
-```
-
-## Keyboard Commands
-
-### POST `/keyboard/type`
-**Description**: Type text at current focus
-
-**Request Body**:
-```json
-{
-  "text": "Hello, World!",
-  "tab_id": 123,
-  "command_id": "type-1"
-}
-```
-
-**Parameters**:
-- `text` (string): Text to type
-- `tab_id` (number, optional): Target tab ID
-
-**Response**:
-```json
-{
-  "success": true,
-  "message": "Typed: Hello, World!",
-  "data": {
-    "text": "Hello, World!",
-    "length": 13,
-    "tab_id": 123
-  },
-  "command_id": "type-1",
-  "timestamp": 1678886400.123
-}
-```
-
-### POST `/keyboard/press`
-**Description**: Press special key with modifiers
-
-**Request Body**:
-```json
-{
-  "key": "Enter",  // Key name
-  "modifiers": ["Control", "Shift"],  // Optional modifiers
-  "tab_id": 123,
-  "command_id": "press-1"
-}
-```
-
-**Common Key Names**:
-- `Enter`, `Tab`, `Escape`, `Backspace`, `Delete`
-- `ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight`
-- `Home`, `End`, `PageUp`, `PageDown`
-- `F1` through `F12`
-- Letters: `A`, `B`, `C`, etc.
-- Digits: `0` through `9`
-
-**Modifiers**:
-- `Control` (or `Ctrl`)
-- `Shift`
-- `Alt` (or `Option` on macOS)
-- `Meta` (or `Command` on macOS)
-
-**Response**:
-```json
-{
-  "success": true,
-  "message": "Pressed Enter with modifiers Control,Shift",
-  "data": {
-    "key": "Enter",
-    "modifiers": ["Control", "Shift"],
-    "tab_id": 123
-  },
-  "command_id": "press-1",
-  "timestamp": 1678886400.123
+  "script": "fetch('/api/data').then(r => r.json())",
+  "await_promise": true
 }
 ```
 
 ## Screenshot Command
 
 ### POST `/screenshot`
-**Description**: Capture screenshot of current tab
+**Description**: Capture screenshot of current tab (WYSIWYG mode - actual viewport dimensions)
 
 **Request Body**:
 ```json
 {
   "include_cursor": true,
-  "quality": 85,
+  "quality": 90,
   "tab_id": 123,
   "command_id": "screenshot-1"
 }
@@ -307,8 +184,8 @@ Error responses:
 
 **Parameters**:
 - `include_cursor` (boolean, optional): Include mouse cursor in screenshot (default: true)
-- `quality` (number, optional): JPEG quality 1-100 (default: 85)
-- `tab_id` (number, optional): Target tab ID (uses current tab if not specified)
+- `quality` (number, optional): JPEG quality 1-100 (default: 90, PNG ignores this parameter)
+- `tab_id` (number, optional): Target tab ID (uses current managed tab if not specified)
 
 **Response**:
 ```json
@@ -316,13 +193,17 @@ Error responses:
   "success": true,
   "message": "Screenshot captured",
   "data": {
-    "imageData": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ...",
-    "format": "jpeg",
+    "imageData": "data:image/png;base64,iVBORw0KGgo...",
+    "format": "png",
     "width": 1920,
     "height": 1080,
-    "quality": 85,
+    "viewportWidth": 1920,
+    "viewportHeight": 1080,
+    "devicePixelRatio": 2,
+    "quality": 90,
     "includeCursor": true,
     "tab_id": 123,
+    "captureMethod": "cdp",
     "timestamp": 1678886400.123
   },
   "command_id": "screenshot-1",
@@ -499,11 +380,18 @@ Error responses:
 curl http://127.0.0.1:8765/health
 ```
 
-**Move mouse**:
+**Execute JavaScript (click button)**:
 ```bash
-curl -X POST http://127.0.0.1:8765/mouse/move \
+curl -X POST http://127.0.0.1:8765/command \
   -H "Content-Type: application/json" \
-  -d '{"dx": 100, "dy": 50}'
+  -d '{"type": "javascript_execute", "script": "document.querySelector(\"#submit-button\").click()"}'
+```
+
+**Execute JavaScript (fill form)**:
+```bash
+curl -X POST http://127.0.0.1:8765/command \
+  -H "Content-Type: application/json" \
+  -d '{"type": "javascript_execute", "script": "document.querySelector(\"#email\").value = \"test@example.com\""}'
 ```
 
 **Take screenshot**:
@@ -539,18 +427,25 @@ base_url = "http://127.0.0.1:8765"
 response = requests.get(f"{base_url}/health")
 print(response.json())
 
-# Move mouse
-response = requests.post(f"{base_url}/mouse/move", json={
-    "dx": 100,
-    "dy": 50,
-    "command_id": "test-move"
+# Execute JavaScript to click a button
+response = requests.post(f"{base_url}/command", json={
+    "type": "javascript_execute",
+    "script": "document.querySelector('#submit-button').click()",
+    "tab_id": 123  # optional
+})
+print(response.json())
+
+# Execute JavaScript to fill form
+response = requests.post(f"{base_url}/command", json={
+    "type": "javascript_execute",
+    "script": "document.querySelector('#email').value = 'test@example.com'"
 })
 print(response.json())
 
 # Take screenshot and save
 response = requests.post(f"{base_url}/screenshot", json={
     "include_cursor": True,
-    "quality": 85
+    "quality": 90
 })
 data = response.json()
 if data["success"]:
@@ -560,7 +455,7 @@ if data["success"]:
     if image_data.startswith('data:image/'):
         image_data = image_data.split(',', 1)[1]
     
-    with open('screenshot.jpg', 'wb') as f:
+    with open('screenshot.png', 'wb') as f:
         f.write(base64.b64decode(image_data))
     print("Screenshot saved")
 ```

@@ -12,7 +12,6 @@ The project has planned test organization for validating browser automation func
 tests/
 ├── unit/                    # Unit tests (planned)
 │   ├── test_commands.py    # Command model tests
-│   ├── test_coordinates.py # Coordinate mapping tests
 │   ├── test_processor.py   # Command processor tests
 │   └── test_websocket.py   # WebSocket manager tests
 ├── integration/            # Integration tests (planned)
@@ -108,14 +107,14 @@ Test that all command types are properly validated and executed.
 3. Missing required fields are caught
 4. Type conversions work correctly
 
-### Coordinate Mapping Tests
-Test coordinate mapping between different resolutions.
+### JavaScript Execution Tests
+Test JavaScript execution in browser tabs.
 
 **Test Cases**:
-1. Mapping from preset to actual resolution
-2. Boundary conditions (edges of screen)
-3. Multiple display configurations
-4. Viewport vs window dimensions
+1. Basic JavaScript execution with return values
+2. Promise handling and async operations
+3. Error handling for invalid scripts
+4. Timeout handling for long-running scripts
 
 ### WebSocket Communication Tests
 Test WebSocket connection and message handling.

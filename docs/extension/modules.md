@@ -70,31 +70,24 @@ extension/
 - Auto-detach to prevent browser lock
 - Tab debugging state management
 
-#### `computer.ts`
-
-**Purpose**: Mouse, keyboard, scroll operations (adapted from AIPex)
-
-**Key Features**:
-- Mouse movements, clicks, scrolling
-- Keyboard typing and key presses
-- Coordinate handling for CDP
-
 #### `screenshot.ts`
 
 **Purpose**: Screenshot capture with metadata caching
 
 **Key Features**:
 - Screenshot capture via CDP
-- Metadata caching (dimensions, viewport)
+- **WYSIWYG Mode**: Captures actual viewport dimensions without resizing
+- Device pixel ratio handling for high-DPI displays
 - Base64 encoding and optimization
-- Default quality: 85
-- Default format: jpeg
+- Default quality: 90 (JPEG only, PNG ignores quality parameter)
+- Default format: Based on browser settings (typically PNG)
 
 **CDP Screenshot Support**:
 - Uses `Page.captureScreenshot` for background tab capture
 - `Page.getLayoutMetrics` for precise viewport dimensions
-- Falls back to legacy `captureVisibleTab` if CDP fails
-- Metadata field `captureMethod` distinguishes between CDP and legacy captures
+- **No Resizing**: Captures actual dimensions - no preset coordinate system
+- Metadata includes: `width`, `height`, `viewportWidth`, `viewportHeight`, `devicePixelRatio`
+- Metadata field `captureMethod` is set to 'cdp'
 
 #### `tabs.ts`
 
@@ -171,20 +164,29 @@ extension/
 // Get page title
 await javascript.executeJavaScript(tabId, "document.title");
 
-// Execute complex script with return value
-const result = await javascript.executeJavaScript(tabId, 
-  "({title: document.title, url: window.location.href})");
+// Click a button
+await javascript.executeJavaScript(tabId, 
+  "document.querySelector('#submit-button').click()");
   
-// Handle Promise
+// Fill form field
 await javascript.executeJavaScript(tabId,
-  "fetch('/api/data').then(r => r.json())", true, true);
+  "document.querySelector('#email').value = 'test@example.com'");
+
+// Scroll page
+await javascript.executeJavaScript(tabId,
+  "window.scrollTo(0, document.body.scrollHeight)");
+
+// Extract data
+const result = await javascript.executeJavaScript(tabId,
+  "({title: document.title, url: window.location.href})");
 ```
 
 **Integration**: 
-- Added as new command type `javascript_execute` to command system
+- Core command type for all browser interactions
 - Integrated into background script command handler
 - Available via CLI, API, and AI agent tools
 - Supports managed tab isolation and background execution
+- **Replaces all mouse/keyboard operations** - no coordinate-based automation needed
 
 ### `src/background/index.ts`
 
@@ -211,15 +213,15 @@ await javascript.executeJavaScript(tabId,
 
 **Current Functionality**: 
 - Provides viewport information (width, height, device pixel ratio, scroll position)
-- Handles image resizing for screenshot standardization (1280x720)
+- Handles image resizing for screenshot optimization
 - Responds to utility requests from background script
 
 **Message Handlers**:
 - `get_viewport`: Returns viewport dimensions and device info
 - `get_device_pixel_ratio`: Returns device pixel ratio
-- `resize_image`: Resizes images to standard dimensions
+- `resize_image`: Resizes images for optimization
 
-**Note**: Content script does NOT include visual mouse pointer. All browser automation is performed via JavaScript execution (CDP Runtime.evaluate) for reliability and speed.
+**Note**: Content script focuses on utility functions. All browser automation is performed via JavaScript execution (CDP Runtime.evaluate) - no visual mouse pointer or coordinate-based operations.
 
 ## Manifest Configuration
 

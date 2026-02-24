@@ -79,13 +79,13 @@ Local Chrome Server is a distributed system for browser automation that uses vis
 
 ### 2. Server Processing
 - **Command Validation**: Pydantic models validate command structure
-- **Coordinate Mapping**: Commands with coordinates are mapped from preset to actual resolution
 - **Command Routing**: Command processor routes to appropriate handler
+- **JavaScript Execution**: All browser interactions via JavaScript execution
 
 ### 3. Extension Communication
 - **WebSocket Forwarding**: Server sends command to connected extension via WebSocket
 - **Extension Reception**: Background script receives and parses command
-- **Command Execution**: Extension executes command using CDP (mouse movement, keyboard, etc.)
+- **Command Execution**: Extension executes command using CDP (JavaScript execution, tab management)
 
 ### 4. Response Handling
 - **Extension Response**: Extension sends success/error response back via WebSocket
@@ -94,9 +94,10 @@ Local Chrome Server is a distributed system for browser automation that uses vis
 
 ## Key Design Decisions
 
-### 1. Visual-Only Automation
-- **No HTML Selectors**: Operations use pixel coordinates only
-- **Resolution Independence**: Coordinate mapping handles different screen sizes
+### 1. JavaScript-First Automation
+- **No Visual Operations**: All browser interactions via JavaScript execution (no mouse/keyboard simulation)
+- **Reliable & Fast**: Direct DOM access is more reliable and faster than visual-based methods
+- **Core Principle**: Click buttons, fill forms, scroll pages, extract data - all through JavaScript execution
 - **Browser Agnostic**: In principle, works with any browser supporting CDP
 
 ### 2. Dual Communication Channels
@@ -104,11 +105,11 @@ Local Chrome Server is a distributed system for browser automation that uses vis
 - **WebSocket**: For real-time, bidirectional communication
 - **Independent WebSocket Server**: Dedicated server for extension communication
 
-### 3. Coordinate System
-- **Preset Resolution**: Default 1280x720 (720p) as reference coordinate system
-- **Actual Resolution**: User's actual screen/window dimensions
-- **Linear Mapping**: Simple proportional scaling between coordinate systems
-- **Viewport Awareness**: Accounts for CSS viewport vs window differences
+### 3. Screenshot WYSIWYG Mode
+- **Actual Dimensions**: Screenshots capture actual viewport dimensions without resizing
+- **Device Pixel Ratio**: Accounts for high-DPI displays
+- **Background Capture**: CDP-based capture works on background tabs
+- **No Coordinate Mapping**: No preset coordinate system - use JavaScript for all interactions
 
 ### 4. Extension Architecture
 - **Background Script**: Main logic, WebSocket communication, command routing
@@ -147,13 +148,9 @@ Browser → CDP → Extension → Screenshot Capture → Base64 Encoding → Web
 - Environment variable support
 - Default values for development
 
-#### `server/core/coordinates.py`
-- Coordinate mapping between preset and actual resolutions
-- Linear scaling algorithm
-- Viewport dimension handling
-
 #### `server/core/processor.py`
 - Command execution and routing
+- JavaScript-first command dispatching
 - Integration with WebSocket manager
 - Response formatting
 
@@ -187,9 +184,9 @@ Browser → CDP → Extension → Screenshot Capture → Base64 Encoding → Web
 #### `extension/src/commands/`
 - **cdp-commander.ts**: Chrome DevTools Protocol wrapper
 - **debugger-manager.ts**: Debugger attachment management
-- **computer.ts**: Mouse, keyboard, scroll operations (adapted from AIPex)
 - **screenshot.ts**: Screenshot capture with metadata caching
 - **tabs.ts**: Tab management operations
+- **javascript.ts**: JavaScript execution (core functionality)
 
 #### `extension/src/background/index.ts`
 - Main extension background script
@@ -199,7 +196,7 @@ Browser → CDP → Extension → Screenshot Capture → Base64 Encoding → Web
 #### `extension/src/content/index.ts`
 - Content script for web page interaction
 - Viewport information gathering
-- Future: Mouse position tracking
+- No mouse position tracking - all automation via JavaScript
 
 ### CLI Module
 
@@ -241,7 +238,7 @@ Browser → CDP → Extension → Screenshot Capture → Base64 Encoding → Web
 1. **Network**: Localhost WebSocket communication (<1ms)
 2. **CDP**: Chrome DevTools Protocol execution (10-100ms)
 3. **Screenshot Processing**: Image capture and encoding (100-500ms)
-4. **Coordinate Mapping**: Simple arithmetic (<1ms)
+4. **JavaScript Execution**: DOM operations (<10ms typically)
 
 ### Optimization Opportunities
 - **Command Batching**: Group multiple operations
