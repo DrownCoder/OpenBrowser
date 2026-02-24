@@ -258,6 +258,12 @@ Key implementation details and historical notes:
 - **Tab Management Fixes (February 2026)**: Unified tab tracking system
 - **Screenshot Isolation (March 2025)**: CDP-based screenshot capture for background tabs
 - **Refresh Functionality (February 2026)**: Added tab refresh action
+- **Heartbeat Frequency Increase (February 2026)**: Increased ping-pong signal frequency from 20s to 5s for faster connection health detection
+- **Heartbeat Reliability Improvements (February 2026)**: 
+  - Changed from setInterval to recursive setTimeout to prevent callback stacking
+  - Added active command tracking and heartbeat priority management
+  - Reduced timeouts (JavaScript: 30s→10s, CDP: 15s→8s, WebSocket: 30s→15s, Server: 30s→15s)
+  - Added long-running command warnings and heartbeat emergency checks
 
 📖 **Detailed documentation**: [Implementation Notes](docs/development/implementation-notes.md)
 

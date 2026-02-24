@@ -158,27 +158,7 @@ export function presetToActualCoords(
   };
 }
 
-/**
- * Convert actual screen coordinates to preset coordinates
- * @param actualX X in actual screen coordinates (top-left based)
- * @param actualY Y in actual screen coordinates (top-left based)
- * @param viewport Actual viewport size
- * @returns Preset coordinates (top-left based, 0-1280, 0-720)
- */
-function actualToPresetCoords(
-  actualX: number,
-  actualY: number,
-  viewport: {width: number, height: number}
-): {presetX: number, presetY: number} {
-  // Scale to preset coordinate system (already top-left based)
-  const presetX = (actualX / viewport.width) * PRESET_WIDTH;
-  const presetY = (actualY / viewport.height) * PRESET_HEIGHT;
-  
-  return {
-    presetX: Math.max(0, Math.min(presetX, PRESET_WIDTH)),
-    presetY: Math.max(0, Math.min(presetY, PRESET_HEIGHT))
-  };
-}
+
 
 /**
  * Initialize or get mouse position for a tab
@@ -191,55 +171,7 @@ function getOrInitializeMousePosition(tabId: number): {x: number, y: number} {
   return mousePositions.get(tabId)!;
 }
 
-/**
- * Convert screenshot pixel coordinates to viewport CSS pixels
- * Handles both resized screenshots (1280x720) and original screenshots
- */
-function screenshotToCssPixels(
-  x: number,
-  y: number,
-  metadata: ScreenshotMetadata,
-): { xCss: number; yCss: number } {
-  const { imageWidth, imageHeight, viewportWidth, viewportHeight } = metadata;
-  
-  // Check if screenshot is already resized to preset coordinate system dimensions
-  const isResizedToPreset = imageWidth === PRESET_WIDTH && imageHeight === PRESET_HEIGHT;
-  
-  let screenshotX: number;
-  let screenshotY: number;
-  
-  if (isResizedToPreset) {
-    // Screenshot is already 1280x720 - use direct mapping from simulated coordinates
-    // Convert from simulated coordinates (center-based) to screenshot pixel coordinates (top-left based)
-    // Simulated: (-1280, -720) to (1280, 720), center at (0, 0)
-    // Screenshot pixels: (0, 0) to (2559, 1439), top-left at (0, 0)
-    screenshotX = x + PRESET_WIDTH / 2;
-    screenshotY = y + PRESET_HEIGHT / 2;
-    
-    console.log(`🖼️ [Computer] Screenshot is preset size (${PRESET_WIDTH}×${PRESET_HEIGHT}), using direct mapping`);
-  } else {
-    // Original screenshot with different dimensions - need to convert
-    // First, convert simulated coordinates to preset coordinate system pixels
-    const presetX = x + PRESET_WIDTH / 2;
-    const presetY = y + PRESET_HEIGHT / 2;
-    
-    // Then scale from preset dimensions to actual screenshot dimensions
-    screenshotX = Math.round((presetX / PRESET_WIDTH) * imageWidth);
-    screenshotY = Math.round((presetY / PRESET_HEIGHT) * imageHeight);
-    
-    console.log(`🖼️ [Computer] Screenshot is ${imageWidth}×${imageHeight}, scaling from preset coordinates`);
-  }
-  
-  // Now scale screenshot pixel coordinates to viewport CSS pixels
-  const xCss = Math.round((screenshotX / imageWidth) * viewportWidth);
-  const yCss = Math.round((screenshotY / imageHeight) * viewportHeight);
 
-  // Clamp to viewport bounds
-  return {
-    xCss: Math.max(0, Math.min(xCss, viewportWidth - 1)),
-    yCss: Math.max(0, Math.min(yCss, viewportHeight - 1)),
-  };
-}
 
 /**
  * Perform a click action

@@ -49,6 +49,7 @@ export default defineConfig({
       input: {
         background: resolve(__dirname, 'src/background/index.ts'),
         content: resolve(__dirname, 'src/content/index.ts'),
+        'workers/image-processor.worker': resolve(__dirname, 'src/workers/image-processor.worker.ts'),
       },
       output: {
         entryFileNames: '[name].js',
@@ -59,5 +60,13 @@ export default defineConfig({
     sourcemap: process.env.NODE_ENV === 'development',
     minify: process.env.NODE_ENV === 'production',
     emptyOutDir: true,
+  },
+  worker: {
+    format: 'es',
+    rollupOptions: {
+      output: {
+        entryFileNames: '[name].js',
+      },
+    },
   },
 });

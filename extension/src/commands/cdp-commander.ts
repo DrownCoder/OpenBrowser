@@ -3,7 +3,7 @@
  * Based on AIPex implementation
  */
 
-const DEFAULT_CDP_TIMEOUT = 15000; // Increased from 10 to 15 seconds for background tabs
+const DEFAULT_CDP_TIMEOUT = 8000; // Reduced from 15000 to 8000ms (8 seconds) for better heartbeat responsiveness
 const MAX_RETRIES = 2;
 const RETRY_DELAY = 500; // ms
 

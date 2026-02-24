@@ -12,7 +12,6 @@ from server.models.commands import (
     TabCommand, GetTabsCommand, JavascriptExecuteCommand
 )
 from server.websocket.manager import ws_manager
-from server.core.coordinates import coord_manager
 from server.core.config import config
 
 
@@ -40,7 +39,8 @@ class CommandProcessor:
     def _prepare_command_dict(self, command: Command) -> dict:
         """
         Prepare command dictionary for sending to extension.
-        Adds tab_id if not specified and current tab is set.
+        For screenshot and javascript_execute commands, always use current active tab (ignore provided tab_id).
+        For other commands, auto-fill tab_id if not specified.
         """
         command_dict = command.dict()
         
@@ -55,12 +55,18 @@ class CommandProcessor:
         # Get conversation_id for multi-session support
         conversation_id = command.conversation_id
         
-        # Check if we should auto-fill tab_id
-        should_fill_tab_id = False
-        
         current_tab_id = self._get_current_tab_id(conversation_id)
         
-        if hasattr(command, 'tab_id') and command.tab_id is None and current_tab_id is not None:
+        # Special handling for screenshot and javascript_execute commands
+        # These commands ALWAYS use current active tab, ignoring any provided tab_id
+        if isinstance(command, (ScreenshotCommand, JavascriptExecuteCommand)):
+            if current_tab_id is not None:
+                command_dict['tab_id'] = current_tab_id
+                logger.debug(f"Forced use of current tab {current_tab_id} for {command.type} command in conversation {conversation_id} (ignoring provided tab_id)")
+            else:
+                logger.warning(f"No current tab set for {command.type} command in conversation {conversation_id}")
+        # For other command types, auto-fill tab_id only if not specified
+        elif hasattr(command, 'tab_id') and command.tab_id is None and current_tab_id is not None:
             # Check command type to decide if we should fill tab_id
             if isinstance(command, TabCommand):
                 # For tab commands, only fill tab_id for certain actions
@@ -68,18 +74,15 @@ class CommandProcessor:
                 # close and switch need specific tab_id - don't fill if not specified
                 # list gets all tabs - don't fill
                 # So generally don't auto-fill for TabCommand
-                should_fill_tab_id = False
+                pass
             elif isinstance(command, GetTabsCommand):
                 # GetTabsCommand gets all tabs, doesn't need tab_id
-                should_fill_tab_id = False
+                pass
             else:
-                # For other commands (mouse, keyboard, screenshot, reset_mouse)
+                # For other commands (mouse, keyboard, reset_mouse)
                 # auto-fill tab_id to target current managed tab
-                should_fill_tab_id = True
-        
-        if should_fill_tab_id:
-            command_dict['tab_id'] = current_tab_id
-            logger.debug(f"Auto-filled tab_id {current_tab_id} for {command.type} command in conversation {conversation_id}")
+                command_dict['tab_id'] = current_tab_id
+                logger.debug(f"Auto-filled tab_id {current_tab_id} for {command.type} command in conversation {conversation_id}")
             
         return command_dict
     

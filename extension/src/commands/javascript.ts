@@ -50,7 +50,7 @@ interface ConsoleOutputEntry {
  * @param script JavaScript code to execute
  * @param returnByValue If true, returns result as serializable JSON value (default: true)
  * @param awaitPromise If true, waits for Promise resolution (default: false)
- * @param timeout Maximum execution time in milliseconds (default: 30000)
+ * @param timeout Maximum execution time in milliseconds (default: 10000)
  * @returns Execution result with success status, data, and console output
  */
 export async function executeJavaScript(
@@ -58,7 +58,7 @@ export async function executeJavaScript(
   script: string,
   returnByValue: boolean = true,
   awaitPromise: boolean = false,
-  timeout: number = 30000,
+  timeout: number = 10000, // Reduced from 30000 to 10000ms (10 seconds) for better heartbeat responsiveness
 ): Promise<any> {
   console.log(`📜 [JavaScript] Executing JavaScript in tab ${tabId}:`, script.substring(0, 100) + (script.length > 100 ? '...' : ''));
 
@@ -214,7 +214,7 @@ export async function executeJavaScript(
 export async function evaluateJavaScript(
   tabId: number,
   script: string,
-  timeout: number = 30000,
+  timeout: number = 10000,
 ): Promise<any> {
   const result = await executeJavaScript(tabId, script, true, false, timeout);
   

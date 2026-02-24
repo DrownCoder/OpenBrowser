@@ -53,7 +53,6 @@ def serve(host, port, websocket_port, log_level):
     click.echo(f"🚀 Starting Local Chrome Server...")
     click.echo(f"   HTTP API: http://{host}:{port}")
     click.echo(f"   WebSocket: ws://{host}:{websocket_port}")
-    click.echo(f"   Preset Resolution: {config.preset_resolution[0]}x{config.preset_resolution[1]}")
     click.echo(f"   Log Level: {log_level}")
     click.echo("")
     click.echo("📚 Endpoints:")

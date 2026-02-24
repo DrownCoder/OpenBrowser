@@ -99,6 +99,7 @@ export interface CommandResponse {
   error?: string;
   data?: any;
   timestamp: number;
+  duration?: number;
 }
 
 export interface ScreenshotMetadata {

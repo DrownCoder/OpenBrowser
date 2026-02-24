@@ -6,6 +6,7 @@
 import { cacheScreenshotMetadata } from './computer';
 import { CdpCommander } from './cdp-commander';
 import { debuggerManager } from './debugger-manager';
+import { workerManager } from '../workers/worker-manager';
 
 /**
  * Resize image using OffscreenCanvas and createImageBitmap
@@ -118,6 +119,31 @@ async function resizeImage(
 }
 
 /**
+ * Resize image using Web Worker to prevent main thread blocking
+ * Falls back to main thread resize if worker is unavailable
+ */
+export async function resizeImageWithWorker(
+  dataUrl: string,
+  targetWidth: number = 1280,
+  targetHeight: number = 720,
+): Promise<{ dataUrl: string; cropOffsetX: number; cropOffsetY: number }> {
+  console.log(`🖼️ [Screenshot] Resizing image using worker to ${targetWidth}x${targetHeight}...`);
+  
+  try {
+    // Try to use worker first
+    const result = await workerManager.resizeImage(dataUrl, targetWidth, targetHeight);
+    console.log(`✅ [Screenshot] Image resized successfully using worker`);
+    return result;
+  } catch (workerError) {
+    console.warn(`⚠️ [Screenshot] Worker resize failed: ${workerError instanceof Error ? workerError.message : workerError}`);
+    console.log(`🖼️ [Screenshot] Falling back to main thread resize...`);
+    
+    // Fallback to main thread resize
+    return resizeImage(dataUrl, targetWidth, targetHeight);
+  }
+}
+
+/**
  * Capture screenshot using CDP (Chrome DevTools Protocol)
  * This captures the specified tab even if it's in the background
  * 
@@ -128,10 +154,10 @@ async function captureScreenshotWithCDP(
   tabId: number,
   _includeCursor: boolean = true,
   quality: number = 90,
-  resizeToPreset: boolean = true,
+  _resizeToPreset: boolean = true, // 已忽略，不再进行缩放
   waitForRender: number = 500,
 ): Promise<any> {
-  console.log(`📸 [Screenshot] Capturing screenshot via CDP for tab ${tabId}`);
+  console.log(`📸 [Screenshot] Capturing screenshot via CDP for tab ${tabId} (所见即所得模式)`);
   
   // Ensure debugger is attached
   const attached = await debuggerManager.safeAttachDebugger(tabId);
@@ -252,7 +278,7 @@ async function captureScreenshotWithCDP(
     }
     
     // ========================================
-    // STEP 5: Capture screenshot
+    // STEP 5: Capture screenshot - "所见即所得"方案
     // ========================================
     // CDP captureScreenshot parameters:
     // - clip.x, clip.y: starting position in CSS pixels
@@ -260,35 +286,97 @@ async function captureScreenshotWithCDP(
     // - clip.scale: device pixel ratio (e.g., 2 for Retina displays)
     // The returned image will be in device pixels (width * scale, height * scale)
     
+    // 使用实际设备像素比，不限制
     const clipScale = devicePixelRatio;
     
-    console.log(`🎯 [Screenshot] Capturing with clip: (${cssViewportX}, ${cssViewportY}) ${cssViewportWidth}x${cssViewportHeight} CSS pixels, scale=${clipScale}`);
+    console.log(`🎯 [Screenshot] Capturing with clip: (${cssViewportX}, ${cssViewportY}) ${cssViewportWidth}x${cssViewportHeight} CSS pixels, scale=${clipScale} (实际DPI)`);
     
+    // 最大允许的base64数据大小：10MB
+    const MAX_BASE64_SIZE = 10 * 1024 * 1024; // 10MB in bytes
+    
+    // 先尝试PNG格式（无损）
     let screenshot: any;
-    try {
-      screenshot = await cdpCommander.sendCommand<any>('Page.captureScreenshot', {
-        format: quality < 90 ? 'jpeg' : 'png',
-        quality: quality < 90 ? quality / 100 : undefined,
-        fromSurface: true,
-        clip: {
-          x: cssViewportX,
-          y: cssViewportY,
-          width: cssViewportWidth,
-          height: cssViewportHeight,
-          scale: clipScale,
-        },
-      });
-    } catch (captureError) {
-      const errorMsg = `[Screenshot] Page.captureScreenshot failed: ${captureError instanceof Error ? captureError.message : captureError}`;
-      console.error(`❌ ${errorMsg}`);
-      throw new Error(errorMsg);
+    let format = 'png';
+    let finalQuality = quality;
+    let attempts = 0;
+    const maxAttempts = 5; // PNG + JPEG质量递减尝试
+    
+    while (attempts < maxAttempts) {
+      attempts++;
+      
+      try {
+        console.log(`🎯 [Screenshot] Attempt ${attempts}: capturing with format=${format}, quality=${finalQuality}`);
+        
+        screenshot = await cdpCommander.sendCommand<any>('Page.captureScreenshot', {
+          format: format as 'png' | 'jpeg',
+          quality: format === 'jpeg' ? finalQuality : undefined, // PNG忽略quality参数
+          fromSurface: true,
+          clip: {
+            x: cssViewportX,
+            y: cssViewportY,
+            width: cssViewportWidth,
+            height: cssViewportHeight,
+            scale: clipScale,
+          },
+        });
+        
+        if (!screenshot?.data) {
+          throw new Error('[Screenshot] Page.captureScreenshot returned no data');
+        }
+        
+        // 检查数据大小
+        console.log(`📊 [Screenshot] Captured ${format.toUpperCase()} data size: ${screenshot.data.length} bytes`);
+        
+        // 如果数据大小在限制内，使用此截图
+        if (screenshot.data.length <= MAX_BASE64_SIZE) {
+          console.log(`✅ [Screenshot] Screenshot size within limit (${screenshot.data.length} bytes <= ${MAX_BASE64_SIZE} bytes)`);
+          break;
+        }
+        
+        // 数据太大，需要调整
+        console.warn(`⚠️ [Screenshot] Screenshot too large (${screenshot.data.length} bytes > ${MAX_BASE64_SIZE} bytes)`);
+        
+        // 如果当前是PNG，切换到JPEG格式（使用传入的质量）
+        if (format === 'png') {
+          format = 'jpeg';
+          finalQuality = quality; // 使用用户指定的质量
+          console.log(`🔄 [Screenshot] Switching from PNG to JPEG, starting with quality=${finalQuality}`);
+          continue;
+        }
+        
+        // 如果已经是JPEG但太大，降低质量
+        if (format === 'jpeg') {
+          if (finalQuality > 50) {
+            finalQuality = Math.max(50, finalQuality - 10); // 每次降低10%，最低50%
+            console.log(`🔄 [Screenshot] Reducing JPEG quality to ${finalQuality}`);
+            continue;
+          } else {
+            // 质量已经降到最低，但仍然太大
+            console.warn(`⚠️ [Screenshot] JPEG quality at minimum (50%) but still too large, using anyway`);
+            break;
+          }
+        }
+      } catch (captureError) {
+        const errorMsg = `[Screenshot] Page.captureScreenshot failed: ${captureError instanceof Error ? captureError.message : captureError}`;
+        console.error(`❌ ${errorMsg}`);
+        
+        // 如果是第一次尝试PNG失败，尝试JPEG
+        if (attempts === 1 && format === 'png') {
+          format = 'jpeg';
+          finalQuality = quality; // 使用用户指定的质量
+          console.log(`🔄 [Screenshot] PNG capture failed, trying JPEG with quality=${finalQuality}`);
+          continue;
+        }
+        
+        throw new Error(errorMsg);
+      }
     }
     
     if (!screenshot?.data) {
-      throw new Error('[Screenshot] Page.captureScreenshot returned no data');
+      throw new Error('[Screenshot] Failed to capture screenshot after all attempts');
     }
     
-    const dataUrl = `data:image/${quality < 90 ? 'jpeg' : 'png'};base64,${screenshot.data}`;
+    const dataUrl = `data:image/${format};base64,${screenshot.data}`;
     
     if (!dataUrl.startsWith('data:image/')) {
       throw new Error('[Screenshot] Invalid image data format from CDP');
@@ -301,62 +389,32 @@ async function captureScreenshotWithCDP(
     const expectedDeviceWidth = cssViewportWidth * devicePixelRatio;
     const expectedDeviceHeight = cssViewportHeight * devicePixelRatio;
     
-    console.log(`📊 [Screenshot] Expected image dimensions (device pixels): ${expectedDeviceWidth}x${expectedDeviceHeight}`);
+    console.log(`📊 [Screenshot] Final image: ${format.toUpperCase()} ${expectedDeviceWidth}x${expectedDeviceHeight}, quality=${finalQuality}, size=${screenshot.data.length} bytes`);
     
     // Basic validation: screenshot data should exist and be reasonably sized
-    // PNG compression is very effective, so don't validate based on expected size
-    // Just ensure we got some data back
     if (!screenshot.data || screenshot.data.length < 1000) {
       throw new Error(`[Screenshot] Screenshot data too small or missing (${screenshot.data?.length || 0} bytes)`);
     }
     
-    console.log(`✅ [Screenshot] Screenshot captured successfully, data size: ${screenshot.data.length} bytes`);
+    console.log(`✅ [Screenshot] Screenshot captured successfully, format=${format}, quality=${finalQuality}, size=${screenshot.data.length} bytes`);
     
     // ========================================
-    // STEP 7: Resize image (optional)
+    // STEP 7: 验证最终图像数据并返回结果
     // ========================================
-    let finalImageData = dataUrl;
-    let finalImageWidth = expectedDeviceWidth;
-    let finalImageHeight = expectedDeviceHeight;
-    let cropOffsetX = 0;
-    let cropOffsetY = 0;
+    // 不再进行缩放，直接使用原始截图
+    const finalImageData = dataUrl;
+    const finalImageWidth = expectedDeviceWidth;
+    const finalImageHeight = expectedDeviceHeight;
     
-    if (resizeToPreset) {
-      const PRESET_WIDTH = 1280;
-      const PRESET_HEIGHT = 720;
-      
-      console.log(`🖼️ [Screenshot] Resizing image from ${expectedDeviceWidth}×${expectedDeviceHeight} to ${PRESET_WIDTH}×${PRESET_HEIGHT}`);
-      
-      try {
-        const resizeResult = await resizeImage(
-          dataUrl,
-          PRESET_WIDTH,
-          PRESET_HEIGHT
-        );
-        finalImageData = resizeResult.dataUrl;
-        finalImageWidth = PRESET_WIDTH;
-        finalImageHeight = PRESET_HEIGHT;
-        cropOffsetX = resizeResult.cropOffsetX;
-        cropOffsetY = resizeResult.cropOffsetY;
-        console.log(`✅ [Screenshot] Image resized to preset coordinate system dimensions`);
-      } catch (resizeError) {
-        const errorMsg = `[Screenshot] Failed to resize image: ${resizeError instanceof Error ? resizeError.message : resizeError}`;
-        console.error(`❌ ${errorMsg}`);
-        throw new Error(errorMsg);
-      }
-    }
-    
-    // ========================================
-    // STEP 8: Verify final image data
-    // ========================================
-    // After resize, the image should be at least 10KB for a 1280x720 image
-    const minFinalSize = resizeToPreset ? 10000 : 30000;
+    // 基本验证：图像数据应合理大小
+    // 对于大尺寸截图，最小值应更高
+    const minFinalSize = 10000; // 至少10KB
     if (finalImageData.length < minFinalSize) {
       throw new Error(`[Screenshot] Final image data too small (${finalImageData.length} bytes), likely blank or corrupted`);
     }
     
     // ========================================
-    // STEP 9: Cache metadata and return result
+    // STEP 8: 缓存元数据并返回结果
     // ========================================
     cacheScreenshotMetadata(
       tabId,
@@ -368,7 +426,7 @@ async function captureScreenshotWithCDP(
     
     const tab = await chrome.tabs.get(tabId);
     
-    console.log(`✅ [Screenshot] Screenshot complete: ${finalImageWidth}x${finalImageHeight} (${resizeToPreset ? 'resized' : 'original'})`);
+    console.log(`✅ [Screenshot] Screenshot complete: ${finalImageWidth}x${finalImageHeight}, format=${format}, quality=${finalQuality}, size=${screenshot.data.length} bytes`);
     
     return {
       success: true,
@@ -381,12 +439,13 @@ async function captureScreenshotWithCDP(
         viewportHeight: viewportHeight,
         url: tab?.url || '',
         title: tab?.title || '',
-        resizedToPreset: resizeToPreset,
+        format: format, // 图像格式 (png/jpeg)
+        quality: finalQuality, // 图像质量 (JPEG only)
         captureMethod: 'cdp',
         devicePixelRatio: devicePixelRatio,
-        // Crop offset for cover mode resize (used for coordinate mapping if needed)
-        cropOffsetX: cropOffsetX,
-        cropOffsetY: cropOffsetY,
+        // 不再有裁剪偏移，因为不进行缩放
+        cropOffsetX: 0,
+        cropOffsetY: 0,
       },
     };
   } catch (error) {
@@ -442,8 +501,8 @@ function _captureScreenshotLegacy(): never {
 export async function captureScreenshot(
   tabId?: number,
   includeCursor: boolean = true,
-  quality: number = 90,
-  resizeToPreset: boolean = true,
+  quality: number = 90, // 提高默认质量，PNG忽略此参数，JPEG使用
+  resizeToPreset: boolean = false, // 默认不缩放，使用"所见即所得"方案
   waitForRender: number = 500,
 ): Promise<any> {
   // Resolve tab ID if not provided
@@ -456,8 +515,8 @@ export async function captureScreenshot(
     targetTabId = tab.id;
   }
   
-  console.log(`📸 [Screenshot] Starting screenshot capture for tab ${targetTabId}`);
-  console.log(`📸 [Screenshot] Parameters: quality=${quality}, resizeToPreset=${resizeToPreset}, waitForRender=${waitForRender}`);
+  console.log(`📸 [Screenshot] Starting screenshot capture for tab ${targetTabId} (所见即所得模式)`);
+  console.log(`📸 [Screenshot] Parameters: quality=${quality}, resizeToPreset=${resizeToPreset} (已忽略), waitForRender=${waitForRender}`);
   
   // Validate parameters
   if (quality < 1 || quality > 100) {

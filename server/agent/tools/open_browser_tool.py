@@ -569,272 +569,213 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
 
 # --- Tool Definition ---
 
-_OPEN_BROWSER_DESCRIPTION = """Browser automation tool for controlling Chrome via JavaScript execution.
-
-This tool provides two core capabilities:
-1. **Execute JavaScript** - Interact with web pages, extract data, manipulate DOM
-2. **Manage Tabs** - Open, close, switch, and list browser tabs
+_OPEN_BROWSER_DESCRIPTION = """
+Browser automation tool for controlling Chrome via JavaScript execution.
 
 After each operation, you will receive:
+- A screenshot of the browser window (1280x720 pixels)
 - Textual summary of the operation result
 - List of current browser tabs with their titles and URLs
-- A screenshot of the browser window (1280x720 pixels) for verification
 
-**Supported Operations:**
+You can **see the page**. This is your superpower. You know what text is on screen — button labels, link text, headings, file names — even though you don't know the underlying HTML structure. The methodology below bridges this gap.
+
+---
 
 ## 1. javascript_execute
-
-Execute JavaScript code in the current tab. This is your primary method for all browser interactions.
 
 ```json
 {
   "type": "javascript_execute",
-  "script": "document.querySelector('button').click()"
+  "script": "your JavaScript code here"
 }
 ```
 
-**CRITICAL Requirements:**
-- ⏱️ **Timeout**: Script execution has a 30-second timeout limit
-- 📦 **Serialization**: Return values MUST be JSON-serializable (strings, numbers, booleans, objects, arrays)
-  - ❌ Cannot return: Functions, Symbols, DOM nodes, circular references
-  - ✅ Can return: `document.title`, `{url: location.href}`, `Array.from(elements).map(...)`
-- ✂️ **Data Size**: Results larger than 50KB will be truncated
-- 📝 **Console Output**: `console.log()` outputs are captured and visible to AI agent ✅
-  - All console methods supported: log, warn, error, info, debug, table, trace, dir
-  - Console output appears in "Console Output" section of results
+**Rules:**
+- 30-second timeout
+- Return values must be JSON-serializable (strings, numbers, plain objects, arrays). **Never return DOM nodes.**
+- Use IIFE `(() => { ... })()` when you need `return` statements
+- `console.log()` output is captured and visible
+- Results over 50KB will be truncated
 
-**Capabilities:**
-- DOM Manipulation: Click elements, fill forms, modify content
-- Data Extraction: Get text, attributes, page content
-- Navigation: Change URLs, interact with links
-- Scrolling: Control page scroll position
-- API Access: Call page functions, fetch data
+---
 
-**Common Patterns:**
+## Universal Templates
 
-**Click elements:**
+### Click by visible text
+
+See something on screen? Click it. Replace `YOUR_TEXT` with any text you can see (partial match):
+
 ```javascript
-document.querySelector('button.submit').click();
-document.querySelector('a[href="/about"]').click();
+(() => {
+    const text = 'YOUR_TEXT';
+    const leaf = Array.from(document.querySelectorAll('*'))
+        .find(el => el.children.length === 0 && el.textContent.includes(text));
+    if (!leaf) return 'not found';
+    const target = leaf.closest('a, button, [role="button"], [onclick], [tabindex], tr, li') 
+        || leaf.parentElement || leaf;
+    target.click();
+    return 'clicked: ' + target.tagName + ' | ' + target.textContent.trim().substring(0, 50);
+})()
 ```
 
-**Fill forms:**
+This single pattern handles ~90% of click tasks. It finds the innermost element containing your text, walks up to the nearest interactive ancestor, and clicks it.
+
+### Fill an input field
+
+Locate by nearby label or placeholder text, set value, and **trigger events for framework compatibility**:
+
 ```javascript
-document.querySelector('#username').value = 'testuser';
-document.querySelector('#password').value = 'password123';
-document.querySelector('input[name="email"]').value = 'user@example.com';
+(() => {
+    // Find the label, then find its associated input
+    const label = Array.from(document.querySelectorAll('label'))
+        .find(l => l.textContent.includes('LABEL_TEXT'));
+    const input = label?.querySelector('input,textarea,select')
+        || label?.nextElementSibling
+        || document.querySelector('input[placeholder*="PLACEHOLDER_TEXT"]');
+    if (!input) return 'input not found';
+    input.focus();
+    input.value = 'YOUR_VALUE';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    return 'filled';
+})()
 ```
 
-**Extract data:**
+For checkboxes/radios: set `.checked = true`, then dispatch `change`.
+For `<select>`: set `.value`, then dispatch `change`.
+
+### Scroll the page
+
+`window.scrollBy()` often fails because the real scroll container is an inner `<div>`, not `window`. Use this instead:
+
 ```javascript
-// Page info (returns string)
-document.title
-
-// URL (returns string)
-window.location.href
-
-// Page text (returns string)
-document.body.innerText
-
-// Links (returns array of objects - ✅ JSON-serializable)
-Array.from(document.links).map(link => ({text: link.textContent, href: link.href}))
-
-// Form data (returns array of objects - ✅ JSON-serializable)
-Array.from(document.forms).map(form => ({id: form.id, elements: form.elements.length}))
-
-// ❌ WRONG: Returning DOM nodes or functions (not serializable)
-// document.querySelector('button')  // Returns DOM node - will fail!
-// document.querySelector.bind        // Returns function - will fail!
-
-// ✅ CORRECT: Extract needed data from DOM nodes
-({
-  buttonCount: document.querySelectorAll('button').length,
-  firstButtonText: document.querySelector('button')?.textContent
-})
+(() => {
+    // Find the actual scrollable container
+    const el = Array.from(document.querySelectorAll('*'))
+        .filter(e => e.scrollHeight > e.clientHeight
+            && getComputedStyle(e).overflowY !== 'visible'
+            && e.scrollHeight - e.clientHeight > 100)
+        .sort((a, b) => (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight))[0];
+    if (el) { el.scrollBy(0, 400); return 'scrolled'; }
+    // Fallback to window
+    window.scrollBy(0, 400);
+    return 'scrolled window';
+})()
 ```
+
+---
+
+## When Templates Don't Work
+
+### Click has no effect → Dispatch full event sequence
+
+Some frameworks (React, Vue) ignore `.click()`. Simulate the real mouse interaction:
+
+```javascript
+(() => {
+    const text = 'YOUR_TEXT';
+    const leaf = Array.from(document.querySelectorAll('*'))
+        .find(el => el.children.length === 0 && el.textContent.includes(text));
+    if (!leaf) return 'not found';
+    const target = leaf.closest('a, button, [role="button"], [onclick], tr, li')
+        || leaf.parentElement || leaf;
+    ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(type => {
+        target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true }));
+    });
+    return 'events dispatched: ' + target.tagName;
+})()
+```
+
+Also try `dblclick` for file explorers, tree views, or items that open on double-click.
+
+### Same text appears multiple times → Inspect first, then act
+
+Scan the page to understand the structure, then build a precise selector:
+
+```javascript
+(() => {
+    const keyword = 'YOUR_TEXT';
+    return Array.from(document.querySelectorAll('*'))
+        .filter(el => el.children.length === 0 && el.textContent.includes(keyword))
+        .map(el => ({
+            tag: el.tagName,
+            text: el.textContent.trim().substring(0, 60),
+            id: el.id,
+            class: el.className?.toString?.().substring(0, 60),
+            parentTag: el.parentElement?.tagName,
+            parentClass: el.parentElement?.className?.toString?.().substring(0, 60)
+        }));
+})()
+```
+
+### Element not found → Diagnostic checklist
+
+1. **Page still loading?** Check `document.readyState`
+2. **Inside an iframe?** Access via `document.querySelector('iframe').contentDocument`
+3. **Inside Shadow DOM?** Access via `element.shadowRoot`
+4. **Need to scroll first?** Content may be lazy-loaded — scroll down, wait, retry
+5. **Text mismatch?** Check for extra whitespace, different casing, or special characters
+
+---
+
+## Other Operations
 
 **Navigate:**
 ```javascript
 window.location.href = "https://example.com";
 ```
 
-**Scroll:**
+**Extract data:**
 ```javascript
-// Scroll down one page
-window.scrollBy({
-  top: window.innerHeight,
-  left: 0
-});
-
-// Scroll by pixels
-window.scrollBy(0, 500);
-
-// Scroll element into view
-document.querySelector('#section').scrollIntoView();
+({ title: document.title, url: location.href })
 ```
 
-**Wait for elements:**
+**Wait for content (requires await_promise):**
 ```javascript
-// ⚠️ NOTE: Promise support requires await_promise parameter to be enabled
-// By default, this returns the Promise object immediately, not its result
 new Promise(resolve => {
-  const check = () => {
-    const el = document.querySelector('.loaded-content');
-    if (el) resolve(el.textContent);
-    else setTimeout(check, 100);
-  };
-  check();
+    const check = () => {
+        const el = document.querySelector('.loaded');
+        if (el) resolve(el.textContent); else setTimeout(check, 100);
+    };
+    check();
 })
 ```
 
-**Returns:**
-- JSON-serializable result of JavaScript evaluation
-- `undefined` for operations without explicit return value
-- Error details for invalid JavaScript or non-serializable values
+---
 
-**Tips:**
-- Highlight elements before operating: `document.querySelector('#myElement').style.border = '3px solid red'`
-- Use explicit return values for debugging: `({success: true, clicked: true})` instead of `console.log('clicked')`
-- Chain operations with explicit return: `document.querySelector('#input').value = 'text'; document.querySelector('#submit').click(); return 'submitted'`
-- Always return data, not DOM nodes: Extract `element.textContent`, `element.href`, etc.
-- **Use IIFE for return statements**: Wrap code in `(() => { ... return value; })()` to use return
-- **Avoid jQuery selectors**: `:contains()` is not valid in `querySelector`; use `Array.from().find()` instead
+## Common Errors
 
-## Common Errors & Solutions
+| Error | Fix |
+|-------|-----|
+| `Illegal return statement` | Wrap in IIFE: `(() => { return value; })()` |
+| `:contains()` is not valid | That's jQuery-only. Use `.textContent.includes()` instead |
+| Circular structure to JSON | Return `.textContent` / `.href` / `.value`, not the element itself |
 
-### ❌ "Illegal return statement"
-**Cause**: `return` used outside a function, or code not wrapped in IIFE
-
-**Solution**:
-```javascript
-// ✅ CORRECT: Use IIFE (Immediately Invoked Function Expression)
-(() => {
-    const result = document.querySelector('button').textContent;
-    return {text: result};
-})()
-
-// ❌ WRONG: Direct return
-return document.title;
-```
-
-### ❌ "is not a valid selector"
-**Cause**: Using unsupported CSS selectors (like `:contains()`)
-
-**Solution**:
-```javascript
-// ❌ WRONG: jQuery selector
-document.querySelector('button:contains("SEND")')
-
-// ✅ CORRECT: Use JavaScript filtering
-Array.from(document.querySelectorAll('button'))
-    .find(btn => btn.textContent.includes('SEND'))
-```
-
-### ❌ "Converting circular structure to JSON"
-**Cause**: Return value contains circular references (like DOM nodes)
-
-**Solution**:
-```javascript
-// ✅ CORRECT: Return simplified objects
-({
-    title: document.title,
-    url: window.location.href,
-    buttonCount: document.querySelectorAll('button').length
-})
-
-// ❌ WRONG: Return complex objects
-document.querySelector('form')  // Contains circular references
-```
+---
 
 ## 2. tab
-
-Manage browser tabs.
 
 ```json
 {
   "type": "tab",
-  "action": "open",    // "init", "open", "close", "switch", "list", "refresh"
-  "url": "https://example.com",  // Required for "init" and "open"
-  "tab_id": 123        // Required for "close", "switch", and "refresh"
+  "action": "open",
+  "url": "https://example.com",
+  "tab_id": 123
 }
 ```
 
-**Actions:**
-- `init` - Initialize session with URL
-- `open` - Open new tab with URL
-- `close` - Close tab by ID
-- `switch` - Switch to tab by ID
-- `list` - List all tabs
-- `refresh` - Refresh tab by ID
+**Actions:** `init` | `open` | `close` | `switch` | `list` | `refresh`
+- `init` / `open` require `url`
+- `close` / `switch` / `refresh` require `tab_id`
 
-**Example Workflow:**
+---
 
-**Scenario: Login and extract dashboard data**
+## Workflow Summary
 
-1. Initialize session:
-```json
-{"type": "tab", "action": "init", "url": "https://example.com/login"}
-```
-
-2. Understand page structure:
-```json
-{"type": "javascript_execute", "script": "({title: document.title, url: window.location.href, forms: Array.from(document.forms).map(f => f.id)})"}
-```
-
-3. Fill and submit form:
-```json
-{"type": "javascript_execute", "script": "document.querySelector('#username').value = 'testuser'; document.querySelector('#password').value = 'password123'; document.querySelector('#loginForm').submit(); 'Form submitted'"}
-```
-
-4. Extract data after navigation:
-```json
-{"type": "javascript_execute", "script": "({title: document.title, url: window.location.href, userInfo: document.querySelector('.user-info')?.innerText})"}
-```
-
-5. Open new page:
-```json
-{"type": "tab", "action": "open", "url": "https://example.com/profile"}
-```
-
-**Common Mistakes to Avoid:**
-
-❌ **Don't return DOM nodes:**
-```javascript
-// WRONG - Returns DOM node (not serializable)
-document.querySelector('button')
-
-// CORRECT - Extract serializable data
-document.querySelector('button')?.textContent
-```
-
-✅ **Console logging is now supported:**
-```javascript
-// ✅ GOOD - Console output is visible to AI
-console.log('Button found:', button.textContent);
-console.warn('Warning: slow operation');
-console.error('Error: element not found');
-
-// ✅ ALSO GOOD - Combine console.log with return values
-console.log('Processing data...');
-return {success: true, data: result};
-```
-
-❌ **Don't return functions or methods:**
-```javascript
-// WRONG - Returns function reference (not serializable)
-document.querySelector.bind
-
-// CORRECT - Call the function and return result
-document.querySelector('body')?.textContent
-```
-
-**Key Points:**
-- Use JavaScript for all page interactions (clicking, typing, scrolling, data extraction)
-- Use tab action for URL navigation when you know the URL
-- Screenshots help verify results and understand page structure
-- JavaScript execution is fast and reliable - use it for virtually everything!
-- Always return JSON-serializable values: strings, numbers, booleans, objects, arrays
-- Avoid returning DOM nodes, functions, or complex objects with circular references
+1. **Look** at the screenshot — identify the text of your target
+2. **Click** using the universal template with that text
+3. **Verify** via the next screenshot
+4. **Escalate** only if needed: full events → inspect structure → check iframes/shadow DOM
 """
 
 

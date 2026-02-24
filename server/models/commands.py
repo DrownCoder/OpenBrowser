@@ -124,10 +124,10 @@ class ScreenshotCommand(BaseCommand):
         description="Whether to include visual mouse pointer in screenshot"
     )
     quality: int = Field(
-        default=90,
+        default=90,  # 保持与扩展一致，PNG忽略此参数，JPEG使用
         ge=1,
         le=100,
-        description="JPEG quality (1-100)"
+        description="JPEG quality (1-100), PNG format ignores this parameter"
     )
 
 

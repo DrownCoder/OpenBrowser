@@ -7,13 +7,14 @@ import { tabManager } from './tab-manager';
 /**
  * Get all tabs across all windows
  * @param managedOnly If true, only returns tabs in the managed tab group
+ * @param conversationId Optional conversation ID for managed tabs filtering
  */
-export async function getAllTabs(managedOnly: boolean = true): Promise<any> {
-  let tabs;
+export async function getAllTabs(managedOnly: boolean = true, conversationId?: string): Promise<any> {
+  let tabs: chrome.tabs.Tab[];
   
   if (managedOnly) {
-    // Only get managed tabs
-    const managedTabs = tabManager.getManagedTabs();
+    // Only get managed tabs for specific conversation
+    const managedTabs = conversationId ? tabManager.getManagedTabs(conversationId) : [];
     const managedTabIds = managedTabs.map(t => t.tabId);
     
     if (managedTabIds.length > 0) {
@@ -38,14 +39,15 @@ export async function getAllTabs(managedOnly: boolean = true): Promise<any> {
       })),
       count: tabs.length,
       managedOnly: true,
-      message: `Found ${tabs.length} managed tab(s)`,
+      conversationId: conversationId,
+      message: `Found ${tabs.length} managed tab(s)` + (conversationId ? ` in conversation ${conversationId}` : ''),
     };
   } else {
     // Get all tabs (backward compatibility)
     tabs = await chrome.tabs.query({});
     
-    // Get managed tabs for info
-    const managedTabs = tabManager.getManagedTabs();
+    // Get managed tabs for info (need conversationId to know which tabs are managed)
+    const managedTabs = conversationId ? tabManager.getManagedTabs(conversationId) : [];
     const managedTabIds = new Set(managedTabs.map(t => t.tabId));
     
     return {
@@ -62,47 +64,69 @@ export async function getAllTabs(managedOnly: boolean = true): Promise<any> {
       count: tabs.length,
       managedCount: managedTabs.length,
       managedOnly: false,
-      message: `Found ${tabs.length} tab(s) (${managedTabs.length} managed)`,
+      conversationId: conversationId,
+      message: `Found ${tabs.length} tab(s) (${managedTabs.length} managed)` + (conversationId ? ` in conversation ${conversationId}` : ''),
     };
   }
 }
 
 /**
  * Open new tab
+ * @param url URL to open
+ * @param conversationId Optional conversation ID to manage the tab
  */
-export async function openTab(url: string): Promise<any> {
+export async function openTab(url: string, conversationId?: string): Promise<any> {
   // Ensure URL has protocol
   let targetUrl = url;
   if (!url.match(/^https?:\/\//)) {
     targetUrl = `https://${url}`;
   }
   
-  // Use tab manager to open managed tab
-  try {
-    const managedTab = await tabManager.openManagedTab(targetUrl, false);
-    
-    return {
-      success: true,
-      tabId: managedTab.tabId,
-      groupId: managedTab.groupId,
-      url: targetUrl,
-      message: `Opened new managed tab: ${targetUrl}`,
-      isManaged: true,
-    };
-  } catch (error) {
-    console.error('Failed to open managed tab, falling back to regular tab:', error);
-    
-    // Fallback to regular tab creation
-    const tab = await chrome.tabs.create({ url: targetUrl, active: false });
-    
-    return {
-      success: true,
-      tabId: tab.id,
-      url: tab.url,
-      message: `Opened new tab: ${targetUrl} (not managed)`,
-      isManaged: false,
-    };
+  // Use tab manager to open managed tab if conversationId provided
+  if (conversationId) {
+    try {
+      const managedTab = await tabManager.openManagedTab(targetUrl, false, conversationId);
+      
+      return {
+        success: true,
+        tabId: managedTab.tabId,
+        groupId: managedTab.groupId,
+        url: targetUrl,
+        message: `Opened new managed tab: ${targetUrl}`,
+        isManaged: true,
+      };
+    } catch (error) {
+      console.error('Failed to open managed tab, falling back to regular tab:', error);
+      // Fall through to regular tab creation
+    }
   }
+  
+  // Fallback to regular tab creation (or no conversationId provided)
+  const tab = await chrome.tabs.create({ url: targetUrl, active: false });
+  
+  // If conversationId provided, try to add to management even after fallback
+  if (conversationId && tab.id) {
+    try {
+      await tabManager.addTabToManagement(tab.id, conversationId);
+      return {
+        success: true,
+        tabId: tab.id,
+        url: tab.url,
+        message: `Opened new tab and added to management: ${targetUrl}`,
+        isManaged: true,
+      };
+    } catch (error) {
+      console.warn('Could not add tab to management:', error);
+    }
+  }
+  
+  return {
+    success: true,
+    tabId: tab.id,
+    url: tab.url,
+    message: `Opened new tab: ${targetUrl} (not managed)`,
+    isManaged: false,
+  };
 }
 
 /**

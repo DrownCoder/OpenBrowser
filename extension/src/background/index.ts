@@ -14,6 +14,326 @@ import type { Command, CommandResponse } from '../types';
 
 console.log('🚀 OpenBrowser extension starting (Strict Mode)...');
 
+// ============================================================================
+// Command Queue Management System
+// ============================================================================
+
+/**
+ * Command queue item interface
+ */
+interface QueuedCommand {
+  data: any;
+  resolve: (value: any) => void;
+  reject: (error: Error) => void;
+  addedAt: number;
+}
+
+/**
+ * Command Queue Manager
+ * Prevents command stacking and ensures proper flow control
+ */
+class CommandQueueManager {
+  private queue: QueuedCommand[] = [];
+  private isProcessing = false;
+  private commandCooldown = 1000; // 1 second cooldown between commands
+  private lastCommandEndTime = 0;
+  private performanceHistory: Array<{type: string; duration: number; timestamp: number}> = [];
+  private readonly maxHistory = 20;
+
+  /**
+   * Add command to queue
+   */
+  async enqueue(data: any): Promise<any> {
+    return new Promise((resolve, reject) => {
+      this.queue.push({
+        data,
+        resolve,
+        reject,
+        addedAt: Date.now(),
+      });
+      
+      // Start processing if not already processing
+      if (!this.isProcessing) {
+        this.processQueue();
+      }
+      
+      // Log queue status
+      if (this.queue.length > 3) {
+        console.warn(`⚠️ Command queue growing: ${this.queue.length} commands pending`);
+      }
+    });
+  }
+
+  /**
+   * Process the command queue
+   */
+  private async processQueue(): Promise<void> {
+    if (this.isProcessing || this.queue.length === 0) {
+      return;
+    }
+
+    this.isProcessing = true;
+
+    while (this.queue.length > 0) {
+      const queuedCommand = this.queue.shift()!;
+      const waitTime = Date.now() - queuedCommand.addedAt;
+      
+      // Warn about long wait times
+      if (waitTime > 5000) {
+        console.warn(`⌛ Command waited ${waitTime}ms in queue before processing`);
+      }
+
+      try {
+        // Apply cooldown between commands if needed
+        const timeSinceLastCommand = Date.now() - this.lastCommandEndTime;
+        if (timeSinceLastCommand < this.commandCooldown) {
+          const cooldownDelay = this.commandCooldown - timeSinceLastCommand;
+          console.log(`⏸️ Command cooldown: waiting ${cooldownDelay}ms`);
+          await new Promise(resolve => setTimeout(resolve, cooldownDelay));
+        }
+
+        // Process the command
+        const result = await this.processCommand(queuedCommand.data);
+        queuedCommand.resolve(result);
+        
+        // Update last command end time
+        this.lastCommandEndTime = Date.now();
+        
+      } catch (error) {
+        queuedCommand.reject(error as Error);
+        this.lastCommandEndTime = Date.now();
+      }
+    }
+
+    this.isProcessing = false;
+  }
+
+  /**
+   * Process individual command (original command handling logic)
+   * Public method so watchdog can wrap it
+   */
+  public async processCommand(data: any): Promise<any> {
+    // This is the original command handling logic from wsClient.onMessage
+    const commandId = data.command_id || `unknown_${Date.now()}`;
+    const commandType = data.type || 'unknown';
+    const commandStartTime = Date.now();
+
+    // Track command execution
+    wsClient.trackCommandStart(commandId, commandType, {
+      conversation_id: data.conversation_id,
+      action: data.action,
+      tab_id: data.tab_id,
+      url: data.url
+    });
+
+    try {
+      const response = await handleCommand(data as Command);
+      const commandDuration = Date.now() - commandStartTime;
+
+      // Record performance
+      this.recordPerformance(commandType, commandDuration);
+
+      // Warn about long-running commands
+      if (commandDuration > 10000) {
+        console.warn(`⚠️ Long command execution: ${commandType} took ${commandDuration}ms`);
+      }
+
+      // Send response back to server
+      if (wsClient.isConnected()) {
+        const responseWithId = {
+          ...response,
+          command_id: data.command_id,
+          timestamp: Date.now(),
+        };
+
+        wsClient.sendCommand(responseWithId as any).catch((error) => {
+          console.error('Failed to send response:', error);
+        });
+      }
+
+      return response;
+    } catch (error) {
+      console.error('Error handling command:', error);
+      const commandDuration = Date.now() - commandStartTime;
+
+      // Send error response
+      const errorResponse: CommandResponse = {
+        success: false,
+        command_id: data.command_id,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: Date.now(),
+      };
+
+      if (wsClient.isConnected()) {
+        wsClient.sendCommand(errorResponse as any).catch(console.error);
+      }
+
+      if (commandDuration > 10000) {
+        console.warn(`⚠️ Long failed command: ${commandType} failed after ${commandDuration}ms`);
+      }
+
+      throw error;
+    } finally {
+      // End command tracking
+      wsClient.trackCommandEnd(commandId);
+    }
+  }
+
+  /**
+   * Record command performance for monitoring
+   */
+  private recordPerformance(type: string, duration: number): void {
+    this.performanceHistory.push({
+      type,
+      duration,
+      timestamp: Date.now(),
+    });
+
+    if (this.performanceHistory.length > this.maxHistory) {
+      this.performanceHistory.shift();
+    }
+
+    // Detect performance degradation
+    if (this.performanceHistory.length >= 5) {
+      const recent = this.performanceHistory.slice(-5);
+      const avgDuration = recent.reduce((sum, cmd) => sum + cmd.duration, 0) / recent.length;
+      
+      if (avgDuration > 5000) {
+        console.warn(`📉 Performance degradation detected: avg command time ${avgDuration.toFixed(0)}ms`);
+        
+        // Adaptive cooldown adjustment
+        if (avgDuration > 10000) {
+          this.commandCooldown = 2000; // Increase to 2 seconds
+          console.log(`⚙️ Increased command cooldown to ${this.commandCooldown}ms`);
+        }
+      } else if (avgDuration < 1000 && this.commandCooldown > 1000) {
+        // Reset cooldown if performance improves
+        this.commandCooldown = 1000;
+        console.log(`⚙️ Reset command cooldown to ${this.commandCooldown}ms`);
+      }
+    }
+  }
+
+  /**
+   * Get queue status
+   */
+  getStatus() {
+    return {
+      queueLength: this.queue.length,
+      isProcessing: this.isProcessing,
+      lastCommandEndTime: this.lastCommandEndTime,
+      performanceHistory: [...this.performanceHistory],
+    };
+  }
+
+  /**
+   * Clear queue (emergency cleanup)
+   */
+  clearQueue(): void {
+    console.warn(`🧹 Clearing command queue with ${this.queue.length} pending commands`);
+    
+    for (const queuedCommand of this.queue) {
+      queuedCommand.reject(new Error('Command queue cleared'));
+    }
+    
+    this.queue = [];
+    this.isProcessing = false;
+  }
+}
+
+// Initialize command queue manager
+const commandQueue = new CommandQueueManager();
+
+// ============================================================================
+// Watchdog Timer for Main Thread Freeze Detection
+// ============================================================================
+
+/**
+ * Watchdog timer detects when main thread is frozen
+ */
+class WatchdogTimer {
+  private lastCheckTime = Date.now();
+  private watchdogInterval: number | null = null;
+  private readonly CHECK_INTERVAL = 3000; // Check every 3 seconds
+  private readonly FREEZE_THRESHOLD = 5000; // 5 seconds without check = frozen
+
+  start(): void {
+    console.log('🔍 Watchdog timer started');
+    
+    if (this.watchdogInterval) {
+      clearInterval(this.watchdogInterval);
+    }
+    
+    this.lastCheckTime = Date.now();
+    
+    this.watchdogInterval = setInterval(() => {
+      const now = Date.now();
+      const timeSinceLastCheck = now - this.lastCheckTime;
+      
+      if (timeSinceLastCheck > this.FREEZE_THRESHOLD) {
+        console.error(`🚨 WATCHDOG: Main thread may be frozen! No check for ${timeSinceLastCheck}ms`);
+        
+        // Emergency cleanup if main thread appears frozen
+        this.emergencyCleanup();
+      }
+      
+      this.lastCheckTime = now;
+    }, this.CHECK_INTERVAL) as unknown as number;
+  }
+
+  stop(): void {
+    if (this.watchdogInterval) {
+      clearInterval(this.watchdogInterval);
+      this.watchdogInterval = null;
+      console.log('🔍 Watchdog timer stopped');
+    }
+  }
+
+  tick(): void {
+    this.lastCheckTime = Date.now();
+  }
+
+  private emergencyCleanup(): void {
+    console.warn('🆘 Watchdog emergency cleanup initiated');
+    
+    // Clear command queue to free up resources
+    commandQueue.clearQueue();
+    
+    // Try to send heartbeat if WebSocket is still connected
+    if (wsClient.isConnected()) {
+      try {
+        // Try to send immediate ping
+        wsClient.sendCommand({ type: 'ping' } as any).catch(() => {
+          // Ignore errors during emergency
+        });
+      } catch (error) {
+        // Ignore errors during emergency cleanup
+      }
+    }
+  }
+
+  getStatus() {
+    return {
+      lastCheckTime: this.lastCheckTime,
+      timeSinceLastCheck: Date.now() - this.lastCheckTime,
+      isRunning: this.watchdogInterval !== null,
+    };
+  }
+}
+
+// Initialize watchdog timer
+const watchdog = new WatchdogTimer();
+watchdog.start();
+
+// Update watchdog on each command processing - wrap the processCommand method
+const originalProcessCommand = commandQueue.processCommand.bind(commandQueue);
+commandQueue.processCommand = async function(data: any) {
+  watchdog.tick();
+  return originalProcessCommand(data);
+};
+
+// ============================================================================
+
 // Initialize tab manager
 tabManager.initialize().then(() => {
   console.log('✅ Tab manager initialized');
@@ -46,32 +366,26 @@ wsClient.onMessage(async (data) => {
       return;
     }
     
+    // Log command receipt
+    const commandType = data.type || 'unknown';
+    const commandId = data.command_id || `unknown_${Date.now()}`;
+    console.log(`📨 Received command: ${commandType} (ID: ${commandId})`);
+    
+    // Add command to queue for processing
     try {
-      const response = await handleCommand(data as Command);
-      // Send response back to server
+      await commandQueue.enqueue(data);
+      console.log(`✅ Command ${commandType} (ID: ${commandId}) processed successfully`);
+    } catch (error) {
+      console.error(`❌ Command ${commandType} (ID: ${commandId}) failed:`, error);
+      
+      // Send error response if still connected
       if (wsClient.isConnected()) {
-        const responseWithId = {
-          ...response,
+        const errorResponse: CommandResponse = {
+          success: false,
           command_id: data.command_id,
+          error: error instanceof Error ? error.message : 'Unknown error',
           timestamp: Date.now(),
         };
-        
-        wsClient.sendCommand(responseWithId as any).catch((error) => {
-          console.error('Failed to send response:', error);
-        });
-      }
-    } catch (error) {
-      console.error('Error handling command:', error);
-      
-      // Send error response
-      const errorResponse: CommandResponse = {
-        success: false,
-        command_id: data.command_id,
-        error: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: Date.now(),
-      };
-      
-      if (wsClient.isConnected()) {
         wsClient.sendCommand(errorResponse as any).catch(console.error);
       }
     }
@@ -87,32 +401,38 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
 
   try {
     switch (command.type) {
-      case 'screenshot':
-        // ✅ STRICT MODE: conversation_id and tab_id are REQUIRED
+      case 'screenshot': {
+        // ✅ STRICT MODE: conversation_id is REQUIRED
         if (!command.conversation_id) {
           throw new Error('conversation_id is required for screenshot command (strict mode)');
         }
-        if (!command.tab_id) {
-          throw new Error('tab_id is required for screenshot command (strict mode)');
-        }
-        const tabIdForScreenshot = command.tab_id;
         
-        console.log(`📸 [Screenshot] Starting for tab ${tabIdForScreenshot}, conversation: ${command.conversation_id}`);
+        const conversationId = command.conversation_id;
+        
+        // Always use current active tab for the conversation (ignore tab_id if provided)
+        const activeTabId = tabManager.getCurrentActiveTabId(conversationId);
+        if (!activeTabId) {
+          throw new Error(`No active tab found for conversation ${conversationId}. Use tab init or specify tab_id.`);
+        }
+        
+        console.log(`📸 [Screenshot] Using active tab ${activeTabId} for conversation ${conversationId} (ignoring provided tab_id: ${command.tab_id || 'none'})`);
+        
+        console.log(`📸 [Screenshot] Starting for tab ${activeTabId}, conversation: ${conversationId}`);
         
         // Ensure tab is managed by tab manager for this conversation
-        await tabManager.ensureTabManaged(tabIdForScreenshot, command.conversation_id);
-        tabManager.updateTabActivity(tabIdForScreenshot, command.conversation_id);
+        await tabManager.ensureTabManaged(activeTabId, conversationId);
+        tabManager.updateTabActivity(activeTabId, conversationId);
         
         // Take screenshot in background (no tab activation)
         const screenshotResult = await captureScreenshot(
-          tabIdForScreenshot,
+          activeTabId,
           command.include_cursor !== false,
           command.quality || 90,
-          true, // resizeToPreset
+          false, // resizeToPreset: false for WYSIWYG mode
           0    // waitForRender
         );
         
-        console.log(`✅ [Screenshot] Completed for tab ${tabIdForScreenshot}`);
+        console.log(`✅ [Screenshot] Completed for tab ${activeTabId}`);
         
         return {
           success: true,
@@ -120,8 +440,9 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
           data: screenshotResult,
           timestamp: Date.now(),
         };
+      }
 
-      case 'tab':
+      case 'tab': {
         // ✅ STRICT MODE: conversation_id is REQUIRED
         if (!command.conversation_id) {
           throw new Error('conversation_id is required for tab command (strict mode)');
@@ -137,6 +458,9 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
             const initResult = await tabManager.initializeSession(command.url, conversationId);
             
             console.log(`🚀 [Tab Init] Session ${conversationId} initialized with tab ${initResult.tabId}`);
+            
+            // Set the newly created tab as active
+            tabManager.setCurrentActiveTabId(conversationId, initResult.tabId);
             
             return {
               success: true,
@@ -155,10 +479,13 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
             if (!command.url) {
               throw new Error('URL is required for open action');
             }
-            const openResult = await tabs.openTab(command.url);
+            const openResult = await tabs.openTab(command.url, conversationId);
+            
+            // Set the newly opened tab as active if it has a tabId
             if (openResult.tabId) {
-              await tabManager.addTabToManagement(openResult.tabId, conversationId);
+              tabManager.setCurrentActiveTabId(conversationId, openResult.tabId);
             }
+            
             return {
               success: true,
               message: openResult.message,
@@ -191,6 +518,10 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
             const switchResult = await tabs.switchToTab(command.tab_id);
             await tabManager.ensureTabManaged(command.tab_id, conversationId);
             tabManager.updateTabActivity(command.tab_id, conversationId);
+            
+            // Set the switched-to tab as active
+            tabManager.setCurrentActiveTabId(conversationId, command.tab_id);
+            
             return {
               success: true,
               message: switchResult.message,
@@ -203,7 +534,7 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
 
           case 'list':
             // ✅ STRICT MODE: conversation_id already checked above
-            const listResult = await tabs.getAllTabs();
+            const listResult = await tabs.getAllTabs(true, conversationId);
             const conversationTabs = tabManager.getManagedTabs(conversationId);
             return {
               success: true,
@@ -236,8 +567,9 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
           default:
             throw new Error(`Unknown tab action: ${command.action}`);
         }
+      }
 
-      case 'cleanup_session':
+      case 'cleanup_session': {
         // ✅ STRICT MODE: conversation_id is REQUIRED
         if (!command.conversation_id) {
           throw new Error('conversation_id is required for cleanup_session (strict mode)');
@@ -255,8 +587,9 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
           },
           timestamp: Date.now(),
         };
+      }
 
-      case 'get_tabs':
+      case 'get_tabs': {
         // ✅ STRICT MODE: conversation_id is REQUIRED for managed_only=true
         const getTabsManagedOnly = command.managed_only !== false;
         
@@ -301,7 +634,7 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
           };
         } else {
           // Get all tabs (no conversation filter)
-          const allTabsResult = await tabs.getAllTabs();
+          const allTabsResult = await tabs.getAllTabs(false, command.conversation_id);
           return {
             success: true,
             message: `Found ${allTabsResult.count} tabs total`,
@@ -312,27 +645,33 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
             timestamp: Date.now(),
           };
         }
+      }
 
-      case 'javascript_execute':
-        // ✅ STRICT MODE: conversation_id and tab_id are REQUIRED
+      case 'javascript_execute': {
+        // ✅ STRICT MODE: conversation_id is REQUIRED
         if (!command.conversation_id) {
           throw new Error('conversation_id is required for javascript_execute command (strict mode)');
         }
-        if (!command.tab_id) {
-          throw new Error('tab_id is required for javascript_execute command (strict mode)');
-        }
-        const tabIdForJS = command.tab_id;
         
-        console.log(`📜 [JavaScript] Executing in tab ${tabIdForJS}, conversation: ${command.conversation_id}`);
+        const conversationId = command.conversation_id;
+        
+        // Determine which tab to execute JavaScript in
+        // Always use current active tab for the conversation (ignore tab_id if provided)
+        const activeTabId = tabManager.getCurrentActiveTabId(conversationId);
+        if (!activeTabId) {
+          throw new Error(`No active tab found for conversation ${conversationId}. Use tab init or specify tab_id.`);
+        }
+        
+        console.log(`📜 [JavaScript] Executing in active tab ${activeTabId}, conversation: ${conversationId} (ignoring provided tab_id: ${command.tab_id || 'none'})`);
         
         // Ensure tab is managed by tab manager for this conversation
-        await tabManager.ensureTabManaged(tabIdForJS, command.conversation_id);
-        tabManager.updateTabActivity(tabIdForJS, command.conversation_id);
+        await tabManager.ensureTabManaged(activeTabId, conversationId);
+        tabManager.updateTabActivity(activeTabId, conversationId);
         
         const jsStartTime = Date.now();
         
         const jsResult = await javascript.executeJavaScript(
-          tabIdForJS,
+          activeTabId,
           command.script,
           command.return_by_value !== false,
           command.await_promise === true,
@@ -349,6 +688,7 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
           timestamp: Date.now(),
           duration: jsDuration,
         };
+      }
 
       default:
         throw new Error(`Unknown command type: ${(command as any).type}`);
@@ -363,5 +703,38 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
     };
   }
 }
+
+/**
+ * Send tab switched event to server
+ */
+async function sendTabSwitchedEvent(conversationId: string, tabId: number): Promise<void> {
+  try {
+    if (!wsClient.isConnected()) {
+      console.warn(`⚠️ Cannot send tab_switched event: WebSocket not connected`);
+      return;
+    }
+    
+    const event = {
+      type: 'event',
+      event_type: 'tab_switched',
+      conversation_id: conversationId,
+      tab_id: tabId,
+      timestamp: Date.now(),
+    };
+    
+    console.log(`🔄 [TabEvent] Sending tab_switched event: ${conversationId} -> ${tabId}`);
+    await wsClient.sendCommand(event as any);
+    console.log(`✅ [TabEvent] Tab switched event sent successfully`);
+  } catch (error) {
+    console.error('❌ [TabEvent] Failed to send tab switched event:', error);
+  }
+}
+
+// Register tab switched listener with tab manager
+tabManager.addTabSwitchedListener((conversationId: string, tabId: number) => {
+  console.log(`🔄 [Background] Tab switched listener called: ${conversationId} -> ${tabId}`);
+  // Send event to server asynchronously (don't await)
+  sendTabSwitchedEvent(conversationId, tabId).catch(console.error);
+});
 
 console.log('✅ OpenBrowser extension loaded (Strict Mode)');

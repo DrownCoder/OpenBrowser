@@ -29,8 +29,8 @@ class WebSocketManager:
             self._handle_connection,
             host,
             port,
-            ping_interval=30,
-            ping_timeout=10,
+            ping_interval=5,
+            ping_timeout=3,
             # Add additional options for better compatibility
             origins=None,  # Allow all origins for local development
             compression=None,
@@ -125,7 +125,29 @@ class WebSocketManager:
         """Handle event from extension"""
         event_type = data.get("event_type")
         logger.info(f"Received event: {event_type}")
-        # TODO: Implement event handlers
+        
+        if event_type == "tab_switched":
+            await self._handle_tab_switched_event(data)
+    
+    async def _handle_tab_switched_event(self, data: dict):
+        """Handle tab switched event from extension"""
+        try:
+            conversation_id = data.get("conversation_id")
+            tab_id = data.get("tab_id")
+            
+            if not conversation_id or not tab_id:
+                logger.warning(f"Invalid tab_switched event: missing conversation_id or tab_id: {data}")
+                return
+            
+            # Import here to avoid circular imports
+            from server.core.processor import command_processor
+            
+            # Update processor's current tab for this conversation
+            command_processor.set_current_tab(tab_id, conversation_id)
+            logger.info(f"Updated current tab for conversation {conversation_id}: {tab_id}")
+            
+        except Exception as e:
+            logger.error(f"Error handling tab_switched event: {e}")
         
     async def _send_pong(self, websocket: WebSocketServerProtocol):
         """Send pong response"""
