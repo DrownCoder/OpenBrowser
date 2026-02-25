@@ -581,6 +581,14 @@ You can **see the page**. This is your superpower. You know what text is on scre
 
 ---
 
+## ⚠️ Important Notes Before You Start
+
+- **React/Vue Applications**: Modern frameworks often ignore `.click()`. If a click doesn't work, immediately use [Full Event Sequence](#when-templates-dont-work).
+- **2-Strike Rule**: If the same operation fails twice, switch to diagnostic mode immediately.
+- **URL Navigation**: When UI interaction is complex (e.g., region switching), consider direct URL navigation as a faster alternative.
+
+---
+
 ## 1. javascript_execute
 
 ```json
@@ -667,7 +675,7 @@ For `<select>`: set `.value`, then dispatch `change`.
 
 ## When Templates Don't Work
 
-### Click has no effect → Dispatch full event sequence
+### Step 1: Dispatch Full Event Sequence (React/Vue Required)
 
 Some frameworks (React, Vue) ignore `.click()`. Simulate the real mouse interaction:
 
@@ -688,9 +696,9 @@ Some frameworks (React, Vue) ignore `.click()`. Simulate the real mouse interact
 
 Also try `dblclick` for file explorers, tree views, or items that open on double-click.
 
-### Same text appears multiple times → Inspect first, then act
+### Step 2: Inspect Structure First
 
-Scan the page to understand the structure, then build a precise selector:
+When text appears multiple times or element not found, scan the page first:
 
 ```javascript
 (() => {
@@ -708,7 +716,9 @@ Scan the page to understand the structure, then build a precise selector:
 })()
 ```
 
-### Element not found → Diagnostic checklist
+### Step 3: Diagnostic Checklist
+
+If still not working, check these in order:
 
 1. **Page still loading?** Check `document.readyState`
 2. **Inside an iframe?** Access via `document.querySelector('iframe').contentDocument`
@@ -716,14 +726,22 @@ Scan the page to understand the structure, then build a precise selector:
 4. **Need to scroll first?** Content may be lazy-loaded — scroll down, wait, retry
 5. **Text mismatch?** Check for extra whitespace, different casing, or special characters
 
+### Step 4: Alternative - Direct URL Navigation
+
+When UI interaction is complex or unreliable, navigate directly via URL:
+
+```javascript
+window.location.href = "https://example.com/target-page";
+```
+
+**Common use cases:**
+- Region/zone switching (e.g., `.../rdsList/cn-shanghai`)
+- Page navigation when menus are complex
+- Bypassing multi-step wizards
+
 ---
 
 ## Other Operations
-
-**Navigate:**
-```javascript
-window.location.href = "https://example.com";
-```
 
 **Extract data:**
 ```javascript
@@ -775,7 +793,10 @@ new Promise(resolve => {
 1. **Look** at the screenshot — identify the text of your target
 2. **Click** using the universal template with that text
 3. **Verify** via the next screenshot
-4. **Escalate** only if needed: full events → inspect structure → check iframes/shadow DOM
+4. **Escalate** if needed (follow the 2-Strike Rule):
+   - **1st failure**: Try full event sequence
+   - **2nd failure**: Inspect structure, check iframes/Shadow DOM
+   - **Still failing**: Consider direct URL navigation
 """
 
 
