@@ -3,8 +3,6 @@
 **OpenBrowser** is a visual AI assistant powered by **Qwen3.5-Plus** that bridges the gap between frontend and backend development. By combining coding capabilities with visual browser perception, OpenBrowser enables seamless full-stack debugging and automation.
 
 > **Note**: OpenBrowser currently supports **Chrome only** (via Chrome extension) and has been tested exclusively with **Qwen3.5-Plus**. Other models are not officially supported.
->
-> **Limitation**: OpenBrowser currently supports **single-session only**. All operations share a global conversation context; multi-session management is not yet implemented.
 
 ## Why Qwen3.5-Plus?
 
@@ -94,6 +92,11 @@ uv sync
 
 # Or using pip
 pip install -e .
+
+# For development (includes dev dependencies like pytest, black, ruff)
+uv sync --group dev
+# Or with pip
+pip install -e ".[dev]"
 ```
 
 ### 2. Start the Server
@@ -178,9 +181,6 @@ npm run dev
 
 # TypeScript type checking
 npm run typecheck
-
-# Run tests
-pytest
 ```
 
 ### Project Structure

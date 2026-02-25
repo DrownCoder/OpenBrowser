@@ -88,7 +88,6 @@ uv run local-chrome-server serve --log-level DEBUG
 ```bash
 # Python development
 uv sync --group dev          # Install dev dependencies
-uv run pytest tests/         # Run tests
 uv run black .               # Format code
 uv run ruff check .          # Lint code
 
@@ -181,7 +180,7 @@ Commands:
 
 ### Test Structure
 
-The project includes test infrastructure for validating browser automation functionality. Tests are planned to be organized as follows:
+The project has test infrastructure planned for validating browser automation functionality, but tests are not yet implemented. When implemented, tests will be organized as follows:
 
 ```
 tests/
@@ -192,6 +191,8 @@ tests/
 ```
 
 ### Running Tests
+
+When tests are implemented, they can be run with:
 
 ```bash
 # Run tests (when implemented)
