@@ -17,9 +17,8 @@ FastAPI backend handling REST API, WebSocket communication with Chrome extension
 | Session state | `core/session_manager.py` | `SessionManager`, SQLite |
 | WebSocket | `websocket/manager.py` | `ws_manager`, `send_command()` |
 | LLM config | `core/llm_config.py` | `llm_config_manager` |
-| Command models | `models/commands.py` | `Command`, `parse_command()` |
-| Browser tool | `agent/tools/open_browser_tool.py` | `OpenBrowserTool` |
-
+| Command models | `models/commands.py` | `Command`, `HandleDialogCommand`, `DialogAction` |
+| Browser tool | `agent/tools/open_browser_tool.py` | `OpenBrowserTool`, `handle_dialog` |
 ## STRUCTURE
 
 ```
@@ -68,15 +67,53 @@ server/
 | `screenshot` | `ScreenshotCommand` | Extension CDP |
 | `tab` | `TabCommand` | Extension tab API |
 | `get_tabs` | `GetTabsCommand` | Extension tab API |
+| `handle_dialog` | `HandleDialogCommand` | Extension CDP |
+
+## DIALOG HANDLING
+
+When JavaScript triggers a dialog (alert/confirm/prompt), the browser pauses.
+OpenBrowser detects dialogs and handles them gracefully.
+
+### Key Components
+| Component | File | Role |
+|-----------|------|------|
+| `HandleDialogCommand` | models/commands.py | `action` (accept/dismiss), `prompt_text` |
+| `OpenBrowserAction` | tools/open_browser_tool.py | `dialog_action`, `prompt_text` fields |
+| `OpenBrowserObservation` | tools/open_browser_tool.py | `dialog_opened`, `dialog` fields |
+| `CommandProcessor` | core/processor.py | Routes handle_dialog to extension |
+
+### Dialog Types
+| Type | Needs Decision | AI Action |
+|------|----------------|----------|
+| alert | No | Auto-accepted |
+| confirm | Yes | Must call handle_dialog |
+| prompt | Yes | Must call handle_dialog with text |
+| beforeunload | Yes | Must call handle_dialog |
+
+### Flow
+1. `javascript_execute` triggers dialog
+2. Extension returns `dialog_opened: true` with dialog info
+3. AI sees "Dialog Opened" in observation
+4. AI calls `handle_dialog` with `accept` or `dismiss`
+5. Extension handles, checks for cascade, returns result
+
+### Cascading Dialogs
+After handling one dialog, another may open (e.g., confirm → alert).
+The extension:
+- Auto-accepts alerts
+- Returns info for new confirm/prompt
 
 ## NOTES
 
 - WebSocket runs on port 8766, HTTP on 8765
 - `conversation_id` links all commands to session context
 - Agent uses OpenHands SDK with custom `OpenBrowserTool`
+- Dialogs block screenshot/JS until handled
+
 ## ANTI-PATTERNS
 
 - **NEVER skip conversation_id** - Required for multi-session isolation
 - **NEVER suppress type errors** - `disallow_untyped_defs = true` enforced
 - **NEVER access WebSocket directly** - Use `ws_manager` singleton
 - **NEVER hardcode ports** - Use `config.port` / `config.websocket_port`
+- **NEVER ignore dialog_opened** - AI must handle dialogs before continuing

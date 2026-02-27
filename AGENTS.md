@@ -25,15 +25,16 @@ OpenBrowser/
 |------|----------|-------|
 | Agent orchestration | `server/agent/manager.py` | Conversation lifecycle, LLM config |
 | Browser commands | `server/core/processor.py` | Command routing, multi-session |
+| Dialog handling | `server/models/commands.py` | HandleDialogCommand, DialogAction |
 | REST API routes | `server/api/routes/` | FastAPI endpoints |
 | WebSocket handling | `server/websocket/manager.py` | Extension communication |
 | Command models | `server/models/commands.py` | Pydantic command/response types |
-| Extension entry | `extension/src/background/index.ts` | Command handler, queue manager |
-| JavaScript execution | `extension/src/commands/javascript.ts` | CDP Runtime.evaluate |
+| Extension entry | `extension/src/background/index.ts` | Command handler, dialog processing |
+| Dialog manager | `extension/src/commands/dialog.ts` | CDP dialog events, cascading |
+| JavaScript execution | `extension/src/commands/javascript.ts` | CDP Runtime.evaluate, dialog race |
 | Screenshot capture | `extension/src/commands/screenshot.ts` | CDP Page.captureScreenshot |
 | Tab management | `extension/src/commands/tab-manager.ts` | Session isolation, tab groups |
 | CLI implementation | `cli/main.py` | Interactive mode, shortcuts |
-
 ## ARCHITECTURE
 
 ```
@@ -46,15 +47,49 @@ OpenBrowser/
 │   - REST API (port 8765)                │
 │   - WebSocket (port 8766)               │
 │   - OpenHands SDK integration           │
+│   - handle_dialog action                │
 └────────────────────┬────────────────────┘
                      │
 ┌────────────────────▼────────────────────┐
 │   Chrome Extension (CDP)                │
-│   - JavaScript execution                │
+│   - JavaScript execution (with race)    │
+│   - Dialog detection & handling         │
 │   - Screenshots (1280x720)              │
 │   - Tab management with groups          │
 └─────────────────────────────────────────┘
 ```
+
+## DIALOG HANDLING
+
+When JavaScript triggers a dialog (alert/confirm/prompt), the browser pauses.
+OpenBrowser uses Promise.race to detect dialogs gracefully.
+
+### Flow
+```
+1. javascript_execute runs
+2. Promise.race([
+     jsExecution,    // Runtime.evaluate
+     dialogEvent,    // Page.javascriptDialogOpening
+     timeout         // User timeout
+   ])
+3. If dialog opens:
+   - Alert → Auto-accept
+   - Confirm/Prompt → Return dialog info
+4. AI calls handle_dialog(accept/dismiss)
+5. Extension handles, checks cascade
+```
+
+### Dialog Types
+| Type | Needs Decision | AI Action |
+|------|----------------|----------|
+| alert | No | Auto-accepted |
+| confirm | Yes | handle_dialog(accept/dismiss) |
+| prompt | Yes | handle_dialog(accept, text) |
+| beforeunload | Yes | handle_dialog(accept/dismiss) |
+
+### Cascading Dialogs
+Dialog → Dialog → Dialog chain supported. After handling one dialog,
+the system checks for new dialogs within 150ms.
 
 ## CONVENTIONS
 
@@ -78,7 +113,7 @@ OpenBrowser/
 - **NEVER return DOM nodes from JavaScript** - Must be JSON-serializable
 - **NEVER use `.click()` for React/Vue** - Dispatch full event sequence instead
 - **NEVER suppress type errors** - `as any`, `@ts-ignore` forbidden
-
+- **NEVER ignore dialog_opened** - AI must handle dialogs before continuing
 ## UNIQUE PATTERNS
 
 ### JavaScript-First Automation

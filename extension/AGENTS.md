@@ -4,15 +4,17 @@
 
 ## OVERVIEW
 
-Chrome extension providing browser control via Chrome DevTools Protocol. Handles JavaScript execution, screenshot capture, and tab management with session isolation via tab groups.
+Chrome extension providing browser control via Chrome DevTools Protocol. Handles JavaScript execution, screenshot capture, tab management with session isolation via tab groups.
 
 ## COMPLEXITY HOTSPOTS (>500 lines)
 
 | File | Lines | Purpose |
-|------|-------|---------|
+|------|-------|----------|
 | `src/commands/tab-manager.ts` | 1010 | Tab lifecycle, multi-session, tab groups |
+| `src/commands/dialog.ts` | 378 | Dialog event handling, cascading dialogs |
+| `src/commands/javascript.ts` | 429 | JS execution with dialog detection |
 | `src/commands/computer.ts` | 817 | Computer/browser automation actions |
-| `src/background/index.ts` | 746 | Command queue, CDP flow orchestration |
+| `src/background/index.ts` | 890 | Command queue, CDP flow, dialog handling |
 | `src/commands/screenshot.ts` | 605 | CDP capture, image processing pipeline |
 | `src/workers/worker-manager.ts` | 635 | Web worker lifecycle, image resizing |
 | `src/helpers/browser-helpers.ts` | 542 | DOM utilities, wait helpers |
@@ -22,15 +24,14 @@ Chrome extension providing browser control via Chrome DevTools Protocol. Handles
 | Task | File | Key Exports |
 |------|------|-------------|
 | Background entry | `src/background/index.ts` | `handleCommand()`, `CommandQueueManager` |
+| Dialog handling | `src/commands/dialog.ts` | `dialogManager`, `DialogManager` |
 | Tab management | `src/commands/tab-manager.ts` | `tabManager`, `TabSessionManager` |
-| Computer actions | `src/commands/computer.ts` | Coordinate translation, CDP actions |
-| JavaScript exec | `src/commands/javascript.ts` | `executeJavaScript()` |
-| Screenshot | `src/commands/screenshot.ts` | `captureScreenshot()` (CDP, not captureVisibleTab) |
+| JavaScript exec | `src/commands/javascript.ts` | `executeJavaScript()` (with dialog racing) |
+| Screenshot | `src/commands/screenshot.ts` | `captureScreenshot()` |
 | CDP commands | `src/commands/cdp-commander.ts` | `CDPCommander` |
 | Debugger | `src/commands/debugger-manager.ts` | `debuggerSessionManager` |
-| Types | `src/types.ts` | `Command`, `CommandResponse` |
+| Types | `src/types.ts` | `Command`, `HandleDialogCommand` |
 | WebSocket client | `src/websocket/client.ts` | `wsClient` |
-| Worker manager | `src/workers/worker-manager.ts` | Image processing fallback |
 
 ## STRUCTURE
 
@@ -87,8 +88,53 @@ npm run typecheck    # Type check only
 |-------|----------|------|
 | `CommandQueueManager` | background/index.ts:35 | Serializes command execution |
 | `WatchdogTimer` | background/index.ts:254 | Detects main thread freezes |
+| `DialogManager` | commands/dialog.ts | Dialog event detection, cascading |
 | `TabManager` | commands/tab-manager.ts | Session-to-tab mapping |
 | `DebuggerSessionManager` | commands/debugger-manager.ts | CDP session lifecycle |
+
+## DIALOG HANDLING
+
+When JavaScript triggers a dialog (alert/confirm/prompt), the browser pauses execution.
+The extension uses Promise.race to detect dialogs and handle them gracefully.
+
+### Design Flow
+```
+1. executeJavaScript() enables Page domain for dialog events
+2. Promise.race([
+     jsExecutionPromise,    // CDP Runtime.evaluate
+     dialogEventPromise,    // Page.javascriptDialogOpening
+     timeoutPromise         // User timeout
+   ])
+3. If dialog wins:
+   - Alert: Auto-accept, return result
+   - Confirm/Prompt: Return dialog info, wait for handle_dialog
+```
+
+### Key Components
+- **dialog.ts**: Listens to `Page.javascriptDialogOpening` CDP events
+- **javascript.ts**: Races JS execution vs dialog detection
+- **background/index.ts**: Handles `handle_dialog` command with cascade detection
+
+### Dialog Types
+| Type | Needs Decision | Handling |
+|------|----------------|----------|
+| alert | No | Auto-accept |
+| confirm | Yes | AI must use handle_dialog |
+| prompt | Yes | AI must use handle_dialog with prompt_text |
+| beforeunload | Yes | AI must use handle_dialog |
+
+### Cascading Dialogs
+After handling one dialog, another may appear (e.g., confirm → alert).
+The system:
+1. Detects cascade via 150ms wait window
+2. Auto-accepts alerts
+3. Returns info for confirm/prompt requiring another handle_dialog
+
+### Blocking State
+During dialog state:
+- `javascript_execute` returns error: "Dialog is open"
+- `screenshot` returns error: "Dialog is open"
+- Only `handle_dialog` works
 
 ## UNIQUE PATTERNS
 

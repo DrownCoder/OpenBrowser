@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 class OpenBrowserAction(Action):
     """Browser automation action with unified parameter system"""
-    type: str = Field(description="Type of browser operation")
+    type: str = Field(description="Type of browser operation: 'javascript_execute', 'tab', 'handle_dialog', 'view'")
     # JavaScript execution parameters
     script: Optional[str] = Field(default=None, description="JavaScript code to execute for javascript_execute")
     # Tab operation parameters
@@ -50,6 +50,7 @@ class OpenBrowserAction(Action):
         default=None,
         description="Text to enter for prompt dialogs (only for handle_dialog with prompt)"
     )
+    # Note: 'view' action requires no additional parameters
 
 # --- Supported Action Types and Their Parameters ---
 """
@@ -57,14 +58,21 @@ Supported action types and their parameters:
 
 1. javascript_execute - Execute JavaScript code in current tab
    Parameters: {
+     "type": "javascript_execute",
      "script": str  # JavaScript code to execute
    }
 
 2. tab - Tab management operations
    Parameters: {
+     "type": "tab",
      "action": str,  # "init", "open", "close", "switch", "list", "refresh"
      "url": str (optional),  # URL for open/init actions
      "tab_id": int (optional)  # Tab ID for close, switch, and refresh actions
+   }
+
+3. view - Capture screenshot to see current page state
+   Parameters: {
+     "type": "view"  # No additional parameters needed
    }
 """
 
@@ -452,6 +460,12 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 
                 message = f"Dialog handled: {dialog_action_str}"
                 
+            elif action_type == "view":
+                # View action: capture screenshot to see current page state
+                # No server command needed - just capture screenshot
+                result_dict = None
+                message = "Captured page view"
+                
             else:
                 raise ValueError(f"Unknown action type: {action_type}")
             
@@ -460,33 +474,34 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
             mouse_position = None
             screenshot_data_url = None
             
-            # 1. Always collect screenshot for visual feedback (but don't include in text)
-            logger.debug(f"DEBUG: Getting screenshot after action (sync)...")
-            # FIXME: temp method to let chrome render for 1 sec.
-            time.sleep(1)
-            screenshot_result = self._get_screenshot_sync()
-            logger.debug(f"DEBUG: screenshot_result: success={screenshot_result.get('success')}, data keys={list(screenshot_result.get('data', {}).keys()) if screenshot_result.get('data') else 'None'}")
-            
-            if screenshot_result.get('success') and screenshot_result.get('data'):
-                # Try to extract image data
-                image_data = None
-                data = screenshot_result['data']
-                if 'imageData' in data:
-                    image_data = data['imageData']
-                elif 'image_data' in data:
-                    image_data = data['image_data']
+            # Only capture screenshot for 'view' action
+            if action_type == "view":
+                logger.debug(f"DEBUG: Getting screenshot for view action (sync)...")
+                # Wait for page to render
+                time.sleep(1)
+                screenshot_result = self._get_screenshot_sync()
+                logger.debug(f"DEBUG: screenshot_result: success={screenshot_result.get('success')}, data keys={list(screenshot_result.get('data', {}).keys()) if screenshot_result.get('data') else 'None'}")
                 
-                if image_data:
-                    # Ensure it's a data URL
-                    if isinstance(image_data, str) and image_data.startswith('data:image/'):
-                        screenshot_data_url = image_data
-                    elif isinstance(image_data, str):
-                        # Convert base64 to data URL
-                        screenshot_data_url = f"data:image/png;base64,{image_data}"
-                    else:
-                        logger.debug(f"DEBUG: Unexpected image_data type: {type(image_data)}")
+                if screenshot_result.get('success') and screenshot_result.get('data'):
+                    # Try to extract image data
+                    image_data = None
+                    data = screenshot_result['data']
+                    if 'imageData' in data:
+                        image_data = data['imageData']
+                    elif 'image_data' in data:
+                        image_data = data['image_data']
+                    
+                    if image_data:
+                        # Ensure it's a data URL
+                        if isinstance(image_data, str) and image_data.startswith('data:image/'):
+                            screenshot_data_url = image_data
+                        elif isinstance(image_data, str):
+                            # Convert base64 to data URL
+                            screenshot_data_url = f"data:image/png;base64,{image_data}"
+                        else:
+                            logger.debug(f"DEBUG: Unexpected image_data type: {type(image_data)}")
             
-            # 2. Collect tabs data only for tab operations
+            # Collect tabs data only for tab operations
             if action_type == "tab":
                 logger.debug(f"DEBUG: Getting tabs after tab action (sync)...")
                 tabs_result = self._get_tabs_sync()
@@ -494,13 +509,9 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 
                 if tabs_result.get('success') and tabs_result.get('data') and 'tabs' in tabs_result['data']:
                     tabs_data = tabs_result['data']['tabs']
-            elif action_type == "javascript_execute":
-                pass
-            
-# 3. javascript_result is already set in javascript_execute branch
             
             # Extract success and dialog info from result_dict
-            success = False
+            success = True  # Default to True for view action
             error = None
             dialog_opened = None
             dialog = None
@@ -533,7 +544,7 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 screenshot_data_url=screenshot_data_url,
                 javascript_result=javascript_result,
                 console_output=console_output,
-dialog_opened=dialog_opened,
+                dialog_opened=dialog_opened,
                 dialog=dialog
             )
             
@@ -649,12 +660,20 @@ dialog_opened=dialog_opened,
 _OPEN_BROWSER_DESCRIPTION = """
 Browser automation tool for controlling Chrome via JavaScript execution.
 
-After each operation, you will receive:
-- A screenshot of the browser window (1280x720 pixels)
-- Textual summary of the operation result
-- List of current browser tabs with their titles and URLs
+## Text-First, Visual-On-Demand Philosophy
 
-You can **see the page**. This is your superpower. You know what text is on screen — button labels, link text, headings, file names — even though you don't know the underlying HTML structure. The methodology below bridges this gap.
+Most browser operations can be done with text-only feedback:
+- **javascript_execute**: Returns execution result and console output (no screenshot)
+- **tab**: Returns current tab list (no screenshot)
+- **handle_dialog**: Returns dialog status (no screenshot)
+
+Use **view** action when you need visual context:
+- After navigation to verify page loaded correctly
+- When UI structure is unknown and you need to "see" the page
+- After multiple operations to verify final state
+- When you encounter unexpected behavior
+
+This approach is **more efficient**: text operations are faster and cheaper than visual analysis.
 
 ---
 
@@ -663,8 +682,6 @@ You can **see the page**. This is your superpower. You know what text is on scre
 - **React/Vue Applications**: Modern frameworks often ignore `.click()`. If a click doesn't work, immediately use [Full Event Sequence](#when-templates-dont-work).
 - **2-Strike Rule**: If the same operation fails twice, switch to diagnostic mode immediately.
 - **URL Navigation**: When UI interaction is complex (e.g., region switching), consider direct URL navigation as a faster alternative.
-
----
 
 ## 1. javascript_execute
 
@@ -899,16 +916,48 @@ After handling one dialog, another may appear (e.g., confirm → alert). OpenBro
 
 ---
 
+## 4. view
+
+Capture a screenshot to see the current page state.
+
+```json
+{
+  "type": "view"
+}
+```
+
+**When to use:**
+- After navigation (`tab init` / `tab open`) to verify page loaded correctly
+- When UI structure is unknown and you need to "see" the page before interacting
+- After multiple operations to verify the final state
+- When you encounter unexpected behavior and need visual debugging
+
+**When NOT to use:**
+- After every single operation (wasteful)
+- When JavaScript can extract the information you need (use `javascript_execute` instead)
+
+**Example workflow:**
+```json
+{"type": "tab", "action": "init", "url": "https://example.com"}  // Text result only
+{"type": "view"}  // Now see the page
+{"type": "javascript_execute", "script": "...click..."}  // Text result
+{"type": "view"}  // Verify the result
+```
+
+---
+
 ## Workflow Summary
 
-1. **Look** at the screenshot — identify the text of your target
-2. **Click** using the universal template with that text
-3. **Verify** via the next screenshot
-4. **Escalate** if needed (follow the 2-Strike Rule):
+1. **Navigate** to the page using `tab init` or `tab open` (text result)
+2. **View** the page to understand its structure: `{"type": "view"}`
+3. **Interact** using `javascript_execute` with the universal templates (text result)
+4. **Verify** with another `view` when needed
+5. **Escalate** if operations fail (follow the 2-Strike Rule):
    - **1st failure**: Try full event sequence
    - **2nd failure**: Inspect structure, check iframes/Shadow DOM
    - **Still failing**: Consider direct URL navigation
-"""
+
+**Efficiency Tip**: Use `view` sparingly. Most operations can be verified with JavaScript result checks or console output."""
 
 
 class OpenBrowserTool(ToolDefinition[OpenBrowserAction, OpenBrowserObservation]):
