@@ -10,8 +10,8 @@ import { captureScreenshot } from '../commands/screenshot';
 import { tabs } from '../commands/tabs';
 import { tabManager } from '../commands/tab-manager';
 import { javascript } from '../commands/javascript';
+import { debuggerSessionManager } from '../commands/debugger-manager';
 import type { Command, CommandResponse } from '../types';
-
 console.log('🚀 OpenBrowser extension starting (Strict Mode)...');
 
 // ============================================================================
@@ -426,6 +426,7 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
         // Take screenshot in background (no tab activation)
         const screenshotResult = await captureScreenshot(
           activeTabId,
+          conversationId,
           command.include_cursor !== false,
           command.quality || 90,
           false, // resizeToPreset: false for WYSIWYG mode
@@ -577,7 +578,11 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
         const cleanupConversationId = command.conversation_id;
         console.log(`🧹 [Cleanup Session] Cleaning up session ${cleanupConversationId}`);
         
+        // 清理 tab manager 会话
         await tabManager.cleanupSession(cleanupConversationId);
+        
+        // 清理 debugger 会话（detach 所有相关 tabs）
+        await debuggerSessionManager.cleanupSession(cleanupConversationId);
         
         return {
           success: true,
@@ -672,6 +677,7 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
         
         const jsResult = await javascript.executeJavaScript(
           activeTabId,
+          conversationId,
           command.script,
           command.return_by_value !== false,
           command.await_promise === true,

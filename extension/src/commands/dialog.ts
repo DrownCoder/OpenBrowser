@@ -14,9 +14,21 @@
  */
 
 import { CdpCommander } from './cdp-commander';
-import { debuggerManager } from './debugger-manager';
+import { debuggerSessionManager } from './debugger-manager';
 import { wsClient } from '../websocket/client';
-import type { DialogOpenedEvent, DialogType, DialogAction } from '../types';
+// Note: DialogType and DialogAction types need to be added to types.ts if dialog handling is needed
+type DialogType = 'alert' | 'confirm' | 'prompt' | 'beforeunload';
+type DialogAction = 'accept' | 'dismiss';
+interface DialogOpenedEvent {
+  tabId: number;
+  dialogType: DialogType;
+  message: string;
+  url?: string;
+  timestamp: number;
+}
+
+// Default conversation ID for legacy operations
+const LEGACY_CONVERSATION_ID = '__legacy_dialog__';
 
 /**
  * Dialog information stored when a dialog opens
@@ -51,8 +63,8 @@ export class DialogManager {
       return;
     }
 
-    // Attach debugger
-    const attached = await debuggerManager.safeAttachDebugger(tabId);
+    // Attach debugger using session manager
+    const attached = await debuggerSessionManager.attachDebugger(tabId, LEGACY_CONVERSATION_ID);
     if (!attached) {
       throw new Error(`Failed to attach debugger for dialog handling on tab ${tabId}`);
     }

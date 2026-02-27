@@ -5,8 +5,21 @@
  */
 
 import { CdpCommander } from './cdp-commander';
-import { debuggerManager } from './debugger-manager';
+import { debuggerSessionManager } from './debugger-manager';
 import type { ScreenshotMetadata } from '../types';
+
+// Default conversation ID for legacy operations (not actively used in WebSocket flow)
+const LEGACY_CONVERSATION_ID = '__legacy_computer__';
+
+// Legacy attach wrapper (computer.ts is deprecated, not used in active WebSocket flow)
+async function legacyAttach(tabId: number): Promise<boolean> {
+  return debuggerSessionManager.attachDebugger(tabId, LEGACY_CONVERSATION_ID);
+}
+
+// Legacy detach wrapper (no-op in long connection mode)
+async function legacyDetach(_tabId: number): Promise<void> {
+  // No-op: long connection mode means we don't detach after each operation
+}
 
 // Cache for screenshot metadata per tab
 const screenshotCache = new Map<number, ScreenshotMetadata>();
@@ -207,7 +220,7 @@ async function performClick(
     `🖱️ [Computer] ${button}_click at preset (${targetX},${targetY}) -> actual (${xCss},${yCss}) viewport(${viewport.width}x${viewport.height})`,
   );
 
-  const attached = await debuggerManager.safeAttachDebugger(tabId);
+  const attached = await legacyAttach(tabId);
   if (!attached) {
     throw new Error('Failed to attach debugger');
   }
@@ -277,7 +290,7 @@ async function performClick(
       coordinates: { preset: { x: targetX, y: targetY }, actual: { x: xCss, y: yCss } },
     };
   } finally {
-    await debuggerManager.safeDetachDebugger(tabId);
+    await legacyDetach(tabId);
   }
 }
 
@@ -306,7 +319,7 @@ async function performMouseMove(
   console.log(`Mouse move: preset(${newPresetX.toFixed(1)}, ${newPresetY.toFixed(1)}) -> actual(${actualX.toFixed(0)}, ${actualY.toFixed(0)}) viewport(${viewport.width}x${viewport.height})`);
   
   // Now move the actual mouse via CDP using actual screen coordinates
-  const attached = await debuggerManager.safeAttachDebugger(tabId);
+  const attached = await legacyAttach(tabId);
   if (!attached) {
     // Even if debugger fails, we still updated our tracked position
     // for visual mouse purposes
@@ -379,7 +392,7 @@ async function performMouseMove(
       },
     };
   } finally {
-    await debuggerManager.safeDetachDebugger(tabId);
+    await legacyDetach(tabId);
   }
 }
 
@@ -408,7 +421,7 @@ async function resetMousePosition(
   
   console.log(`Mouse reset: preset(${PRESET_CENTER_X}, ${PRESET_CENTER_Y}) -> actual(${actualX.toFixed(0)}, ${actualY.toFixed(0)}) rounded(${roundedX}, ${roundedY}) viewport(${viewport.width}x${viewport.height})`);
   
-  const attached = await debuggerManager.safeAttachDebugger(tabId);
+  const attached = await legacyAttach(tabId);
   if (!attached) {
     console.warn('Debugger attachment failed, but mouse position reset tracked');
     
@@ -474,7 +487,7 @@ async function resetMousePosition(
       },
     };
   } finally {
-    await debuggerManager.safeDetachDebugger(tabId);
+    await legacyDetach(tabId);
   }
 }
 
@@ -485,7 +498,7 @@ async function performType(
   tabId: number,
   text: string,
 ): Promise<any> {
-  const attached = await debuggerManager.safeAttachDebugger(tabId);
+  const attached = await legacyAttach(tabId);
   if (!attached) {
     throw new Error('Failed to attach debugger');
   }
@@ -588,7 +601,7 @@ async function performType(
       message: `Successfully typed: "${text}" (using fallback key events)`,
     };
   } finally {
-    await debuggerManager.safeDetachDebugger(tabId);
+    await legacyDetach(tabId);
   }
 }
 
@@ -600,7 +613,7 @@ async function performKeyPress(
   key: string,
   modifiers: string[] = [],
 ): Promise<any> {
-  const attached = await debuggerManager.safeAttachDebugger(tabId);
+  const attached = await legacyAttach(tabId);
   if (!attached) {
     throw new Error('Failed to attach debugger');
   }
@@ -644,7 +657,7 @@ async function performKeyPress(
       message: `Successfully pressed key: ${key}`,
     };
   } finally {
-    await debuggerManager.safeDetachDebugger(tabId);
+    await legacyDetach(tabId);
   }
 }
 
@@ -685,7 +698,7 @@ async function performScroll(
   
   console.log(`🖱️ [Computer] Scroll at preset(${targetX}, ${targetY}) -> actual(${roundedX}, ${roundedY}) viewport(${viewport.width}x${viewport.height}) direction:${direction} amount:${amount}`);
 
-  const attached = await debuggerManager.safeAttachDebugger(tabId);
+  const attached = await legacyAttach(tabId);
   if (!attached) {
     throw new Error('Failed to attach debugger');
   }
@@ -756,7 +769,7 @@ async function performScroll(
       },
     };
   } finally {
-    await debuggerManager.safeDetachDebugger(tabId);
+    await legacyDetach(tabId);
   }
 }
 

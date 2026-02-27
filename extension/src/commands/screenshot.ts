@@ -1,13 +1,12 @@
 /**
  * Screenshot Capture Tool
- * Based on AIPex screenshot.ts
+ * Uses session-based long connection debugger management
  */
 
 import { cacheScreenshotMetadata } from './computer';
 import { CdpCommander } from './cdp-commander';
-import { debuggerManager } from './debugger-manager';
+import { debuggerSessionManager } from './debugger-manager';
 import { workerManager } from '../workers/worker-manager';
-
 /**
  * Resize image using OffscreenCanvas and createImageBitmap
  * 
@@ -152,15 +151,16 @@ export async function resizeImageWithWorker(
  */
 async function captureScreenshotWithCDP(
   tabId: number,
+  conversationId: string,
   _includeCursor: boolean = true,
   quality: number = 90,
   _resizeToPreset: boolean = true, // 已忽略，不再进行缩放
   waitForRender: number = 500,
 ): Promise<any> {
-  console.log(`📸 [Screenshot] Capturing screenshot via CDP for tab ${tabId} (所见即所得模式)`);
+  console.log(`📸 [Screenshot] Capturing screenshot via CDP for tab ${tabId} in session ${conversationId}`);
   
-  // Ensure debugger is attached
-  const attached = await debuggerManager.safeAttachDebugger(tabId);
+  // 使用会话级长连接 attach
+  const attached = await debuggerSessionManager.attachDebugger(tabId, conversationId);
   if (!attached) {
     throw new Error('[Screenshot] Failed to attach debugger for screenshot - cannot proceed');
   }
@@ -453,11 +453,11 @@ async function captureScreenshotWithCDP(
     const errorMsg = `[Screenshot] CDP screenshot failed: ${error instanceof Error ? error.message : error}`;
     console.error(`❌ ${errorMsg}`);
     throw new Error(errorMsg);
-  } finally {
-    // Don't detach debugger immediately, let it auto-detach after timeout
-    // This allows subsequent commands to reuse the debugger session
   }
-}
+  // 长连接模式：不再在 finally 中 detach，由会话管理器处理生命周期
+  }
+
+
 
 /**
  * DEPRECATED: Legacy screenshot method using captureVisibleTab
@@ -492,6 +492,7 @@ function _captureScreenshotLegacy(): never {
  * - All validation errors are reported clearly for debugging
  * 
  * @param tabId Target tab ID (optional, defaults to active tab)
+ * @param conversationId Session ID for debugger lifecycle management (REQUIRED)
  * @param includeCursor Whether to include cursor (not supported by CDP)
  * @param quality Image quality (1-100)
  * @param resizeToPreset Whether to resize to 1280x720
@@ -500,9 +501,10 @@ function _captureScreenshotLegacy(): never {
  */
 export async function captureScreenshot(
   tabId?: number,
+  conversationId?: string,
   includeCursor: boolean = true,
-  quality: number = 90, // 提高默认质量，PNG忽略此参数，JPEG使用
-  resizeToPreset: boolean = false, // 默认不缩放，使用"所见即所得"方案
+  quality: number = 90,
+  resizeToPreset: boolean = false,
   waitForRender: number = 500,
 ): Promise<any> {
   // Resolve tab ID if not provided
@@ -515,7 +517,12 @@ export async function captureScreenshot(
     targetTabId = tab.id;
   }
   
-  console.log(`📸 [Screenshot] Starting screenshot capture for tab ${targetTabId} (所见即所得模式)`);
+  // 会话 ID 是必需的
+  if (!conversationId) {
+    throw new Error('[Screenshot] conversationId is required for debugger lifecycle management');
+  }
+  
+  console.log(`📸 [Screenshot] Starting screenshot capture for tab ${targetTabId} in session ${conversationId}`);
   console.log(`📸 [Screenshot] Parameters: quality=${quality}, resizeToPreset=${resizeToPreset} (已忽略), waitForRender=${waitForRender}`);
   
   // Validate parameters
@@ -541,10 +548,10 @@ export async function captureScreenshot(
     throw new Error(`[Screenshot] Cannot capture screenshot of restricted URL: ${url}`);
   }
   
-  // Use CDP method - no fallback to legacy method
-  // If CDP fails, the error should be investigated and fixed
+  // Use CDP method with session-based debugger management
   const result = await captureScreenshotWithCDP(
     targetTabId,
+    conversationId,
     includeCursor,
     quality,
     resizeToPreset,

@@ -1,11 +1,11 @@
 /**
  * JavaScript Execution Tool Implementation
  * Enables execution of JavaScript code in browser tabs via Chrome DevTools Protocol
+ * Uses session-based long connection debugger management
  */
 
 import { CdpCommander } from './cdp-commander';
-import { debuggerManager } from './debugger-manager';
-
+import { debuggerSessionManager } from './debugger-manager';
 /**
  * CDP Runtime.evaluate response type
  */
@@ -47,6 +47,7 @@ interface ConsoleOutputEntry {
 /**
  * Execute JavaScript code in a tab using CDP Runtime.evaluate
  * @param tabId Target tab ID
+ * @param conversationId Session ID for debugger lifecycle management (REQUIRED)
  * @param script JavaScript code to execute
  * @param returnByValue If true, returns result as serializable JSON value (default: true)
  * @param awaitPromise If true, waits for Promise resolution (default: false)
@@ -55,21 +56,24 @@ interface ConsoleOutputEntry {
  */
 export async function executeJavaScript(
   tabId: number,
+  conversationId: string,
   script: string,
   returnByValue: boolean = true,
   awaitPromise: boolean = false,
-  timeout: number = 10000, // Reduced from 30000 to 10000ms (10 seconds) for better heartbeat responsiveness
+  timeout: number = 10000,
 ): Promise<any> {
-  console.log(`📜 [JavaScript] Executing JavaScript in tab ${tabId}:`, script.substring(0, 100) + (script.length > 100 ? '...' : ''));
+  console.log(`📜 [JavaScript] Executing JavaScript in tab ${tabId} session ${conversationId}:`, script.substring(0, 100) + (script.length > 100 ? '...' : ''));
 
-  // Attach debugger to tab (required for CDP commands)
-  const attached = await debuggerManager.safeAttachDebugger(tabId);
+  // 使用会话级长连接 attach
+  const attached = await debuggerSessionManager.attachDebugger(tabId, conversationId);
   if (!attached) {
     throw new Error('Failed to attach debugger to tab');
   }
 
   const cdpCommander = new CdpCommander(tabId);
   
+  // Collect console output during script execution
+
   // Collect console output during script execution
   const consoleOutput: ConsoleOutputEntry[] = [];
   let consoleListener: ((source: chrome.debugger.Debuggee, method: string, params?: object) => void) | null = null;
@@ -196,14 +200,12 @@ export async function executeJavaScript(
     console.error(`❌ [JavaScript] JavaScript execution failed:`, error);
     throw new Error(`JavaScript execution failed: ${error instanceof Error ? error.message : String(error)}`);
   } finally {
-    // Remove console listener before detaching debugger
+    // Remove console listener (but don't detach debugger - let session manager handle lifecycle)
     if (consoleListener) {
       chrome.debugger.onEvent.removeListener(consoleListener);
       console.log('🔌 [JavaScript] Console listener removed');
     }
-    
-    // Detach debugger to clean up resources
-    await debuggerManager.safeDetachDebugger(tabId);
+    // 长连接模式：不再显式 detach，由会话管理器处理生命周期
   }
 }
 
@@ -213,10 +215,11 @@ export async function executeJavaScript(
  */
 export async function evaluateJavaScript(
   tabId: number,
+  conversationId: string,
   script: string,
   timeout: number = 10000,
 ): Promise<any> {
-  const result = await executeJavaScript(tabId, script, true, false, timeout);
+  const result = await executeJavaScript(tabId, conversationId, script, true, false, timeout);
   
   if (!result.success) {
     throw new Error(result.error || 'JavaScript evaluation failed');
