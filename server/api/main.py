@@ -1,26 +1,29 @@
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+"""
+Local Chrome Server - FastAPI Application
+
+Main FastAPI application with modular routers for:
+- Health checks and API info
+- Browser command execution
+- Agent conversation management
+- Configuration management
+- Frontend serving
+"""
+
 import logging
-import json
-import asyncio
 from contextlib import asynccontextmanager
 
-from server.core.config import config
-from server.core.processor import command_processor
-from server.core.llm_config import llm_config_manager, LLMConfig
-from server.core.session_manager import session_manager
-from server.websocket.manager import ws_manager
-from server.models.commands import Command, parse_command, CommandResponse
-from server.agent.agent import (
-    agent_manager, 
-    process_agent_message, 
-    create_agent_conversation,
-    get_conversation_info, 
-    delete_conversation, 
-    list_conversations
-)
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 
+from server.core.config import config
+from server.websocket.manager import ws_manager
+from server.api.routes import (
+    health_router,
+    commands_router,
+    agent_router,
+    config_router,
+    frontend_router,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,17 +33,19 @@ async def lifespan(app: FastAPI):
     """Manage application lifecycle"""
     # Startup
     logger.info("Starting Local Chrome Server...")
-    
+
     # Start WebSocket server
     try:
         await ws_manager.start(host=config.host, port=config.websocket_port)
-        logger.info(f"WebSocket server started on ws://{config.host}:{config.websocket_port}")
+        logger.info(
+            f"WebSocket server started on ws://{config.host}:{config.websocket_port}"
+        )
     except Exception as e:
         logger.error(f"Failed to start WebSocket server: {e}")
         logger.error("Extension connectivity will be limited")
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down Local Chrome Server...")
     try:
@@ -54,7 +59,7 @@ app = FastAPI(
     title="Local Chrome Server API",
     description="API for controlling Chrome browser via Chrome extension",
     version="0.1.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # Add CORS middleware
@@ -67,546 +72,36 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
-
-@app.get("/api")
-async def api_info():
-    """API info endpoint"""
-    return {
-        "name": "Local Chrome Server",
-        "version": "0.1.0",
-        "status": "running",
-        "websocket_connected": ws_manager.is_connected(),
-        "websocket_connections": ws_manager.get_connection_count(),
-    }
+# Include routers
+app.include_router(health_router)
+app.include_router(commands_router)
+app.include_router(agent_router)
+app.include_router(config_router)
+app.include_router(frontend_router)
 
 
-@app.get("/health")
-async def health():
-    """Health check endpoint - checks server status, not Chrome extension connection"""
-    # Server is healthy if it's running - WebSocket connection status is informational
-    return {
-        "status": "healthy", 
-        "websocket_connected": ws_manager.is_connected(),
-        "websocket_connections": ws_manager.get_connection_count()
-    }
-
-
-@app.post("/command", response_model=CommandResponse)
-async def execute_command(command_data: dict):
-    """
-    Execute a browser command
-    
-    Supported command types:
-    - mouse_move: Move mouse relative to current position
-    - mouse_click: Click at current mouse position
-    - mouse_scroll: Scroll at current mouse position
-    - keyboard_type: Type text at current focus
-    - keyboard_press: Press special key
-    - screenshot: Capture screenshot
-    - tab: Tab management (open, close, switch)
-    - get_tabs: Get list of all tabs
-    """
-    try:
-        # Parse and validate command
-        command = parse_command(command_data)
-        
-        # Execute command
-        response = await command_processor.execute(command)
-        
-        return response
-        
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except ConnectionError as e:
-        raise HTTPException(status_code=503, detail=f"No Chrome extension connection: {e}")
-    except Exception as e:
-        logger.error(f"Unexpected error executing command: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-@app.post("/mouse/move")
-async def mouse_move(x: int, y: int, duration: float = 0.1):
-    """Move mouse to absolute position in preset coordinate system (0-1280, 0-720)"""
-    command = {
-        "type": "mouse_move",
-        "x": x,
-        "y": y,
-        "duration": duration
-    }
-    return await execute_command(command)
-
-
-@app.post("/mouse/click")
-async def mouse_click(button: str = "left", double: bool = False, count: int = 1):
-    """Click at current mouse position"""
-    command = {
-        "type": "mouse_click",
-        "button": button,
-        "double": double,
-        "count": count
-    }
-    return await execute_command(command)
-
-
-@app.post("/mouse/scroll")
-async def mouse_scroll(direction: str = "down", amount: int = 100):
-    """Scroll at current mouse position"""
-    command = {
-        "type": "mouse_scroll",
-        "direction": direction,
-        "amount": amount
-    }
-    return await execute_command(command)
-
-
-@app.post("/keyboard/type")
-async def keyboard_type(text: str):
-    """Type text at current focus"""
-    command = {
-        "type": "keyboard_type",
-        "text": text
-    }
-    return await execute_command(command)
-
-
-@app.post("/keyboard/press")
-async def keyboard_press(key: str, modifiers: list = None):
-    """Press special key"""
-    command = {
-        "type": "keyboard_press",
-        "key": key,
-        "modifiers": modifiers or []
-    }
-    return await execute_command(command)
-
-
-@app.post("/screenshot")
-async def screenshot(tab_id: int = None, include_cursor: bool = True, include_visual_mouse: bool = True, quality: int = 90):
-    """Capture screenshot"""
-    command = {
-        "type": "screenshot",
-        "tab_id": tab_id,
-        "include_cursor": include_cursor,
-        "include_visual_mouse": include_visual_mouse,
-        "quality": quality
-    }
-    return await execute_command(command)
-
-
-@app.post("/tabs")
-async def tab_action(action: str, url: str = None, tab_id: int = None):
-    """Tab management"""
-    command = {
-        "type": "tab",
-        "action": action,
-        "url": url,
-        "tab_id": tab_id
-    }
-    return await execute_command(command)
-
-
-@app.get("/tabs")
-async def get_tabs(managed_only: bool = True):
-    """Get list of all tabs"""
-    command = {
-        "type": "get_tabs",
-        "managed_only": managed_only
-    }
-    return await execute_command(command)
-
-
-# --- Agent API Endpoints ---
-
-@app.post("/agent/conversations")
-async def create_conversation(request: Request):
-    """Create a new agent conversation"""
-    try:
-        # Parse request body for optional cwd parameter
-        body = await request.json() if request.body else {}
-        cwd = body.get("cwd", ".")
-        
-        conversation_id = await create_agent_conversation(cwd=cwd)
-        return {
-            "success": True,
-            "conversation_id": conversation_id,
-            "message": f"Conversation created: {conversation_id}",
-            "cwd": cwd
-        }
-    except Exception as e:
-        logger.error(f"Error creating conversation: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.api_route("/agent/conversations/{conversation_id}/messages", methods=["GET", "POST"])
-async def agent_messages_stream(conversation_id: str, request: Request):
-    """
-    Handle agent conversation messages with SSE streaming
-    - GET: Connect to SSE stream
-    - POST: Send a message and get SSE stream response
-    """
-    
-    async def event_generator(message_text: str = None, cwd: str = "."):
-        """Generate SSE events for the agent conversation"""
-        try:
-            # If no message text provided, this is a GET request - just open stream
-            if message_text is None:
-                # Send a connected event to establish SSE connection
-                yield "event: connected\ndata: {\"status\": \"connected\", \"conversation_id\": \"" + conversation_id + "\"}\n\n"
-                # Keep the connection alive with periodic heartbeats
-                # but don't block if client disconnects
-                heartbeat_count = 0
-                while True:
-                    try:
-                        await asyncio.sleep(5)
-                        heartbeat_count += 1
-                        # Send heartbeat comment (SSE comments start with :)
-                        yield f": heartbeat {heartbeat_count}\n\n"
-                    except asyncio.CancelledError:
-                        logger.debug(f"SSE heartbeat cancelled for conversation {conversation_id}")
-                        break
-            else:
-                # Process the actual message with cwd
-                logger.debug(f"API: Starting SSE event generation for conversation {conversation_id} with cwd={cwd}")
-                event_count = 0
-                async for sse_event in process_agent_message(conversation_id, message_text, cwd):
-                    event_count += 1
-                    logger.debug(f"API: Yielding SSE event #{event_count}: {sse_event[:200] if sse_event else 'None'}")
-                    yield sse_event
-                logger.debug(f"API: Finished SSE event generation, yielded {event_count} events")
-                    
-        except ValueError as e:
-            logger.error(f"Error processing agent message: {e}")
-            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
-        except asyncio.CancelledError:
-            logger.debug(f"SSE connection cancelled for conversation {conversation_id} - client disconnected")
-            # Client disconnected - pause the conversation
-            try:
-                conv_state = agent_manager.get_conversation(conversation_id)
-                if conv_state and conv_state.conversation:
-                    logger.info(f"Pausing conversation {conversation_id} due to client disconnect")
-                    conv_state.conversation.pause()
-                    logger.info(f"Conversation {conversation_id} paused successfully")
-            except Exception as e:
-                logger.warning(f"Failed to pause conversation {conversation_id}: {e}")
-            # Don't yield error on cancellation, just exit cleanly
-            raise
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
-            yield f"event: error\ndata: {json.dumps({'error': 'Internal server error'})}\n\n"
-    
-    # Handle GET request (SSE connection)
-    if request.method == "GET":
-        return StreamingResponse(
-            event_generator(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            }
-        )
-    
-    # Handle POST request (send message)
-    elif request.method == "POST":
-        try:
-            message_data = await request.json()
-            if "text" not in message_data:
-                raise HTTPException(status_code=400, detail="Message must contain 'text' field")
-            
-            # Extract cwd parameter with default value
-            cwd = message_data.get("cwd", ".")
-            
-            return StreamingResponse(
-                event_generator(message_data["text"], cwd),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no",
-                }
-            )
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Invalid JSON in request body")
-
-
-@app.get("/agent/conversations/{conversation_id}")
-async def get_conversation(conversation_id: str):
-    """Get conversation information"""
-    info = await get_conversation_info(conversation_id)
-    if info:
-        return {"success": True, "conversation": info}
-    else:
-        raise HTTPException(status_code=404, detail=f"Conversation {conversation_id} not found")
-
-
-@app.delete("/agent/conversations/{conversation_id}")
-async def remove_conversation(conversation_id: str):
-    """Delete a conversation"""
-    success = await delete_conversation(conversation_id)
-    if success:
-        return {"success": True, "message": f"Conversation {conversation_id} deleted"}
-    else:
-        raise HTTPException(status_code=404, detail=f"Conversation {conversation_id} not found")
-
-
-@app.get("/agent/conversations")
-async def get_all_conversations(status: str = None):
-    """List all conversations with optional status filter
-    
-    Query Parameters:
-        status: Optional status filter ('active', 'idle', 'error', 'completed')
-    """
-    conversations = await list_conversations(status=status)
-    return {
-        "success": True,
-        "conversations": conversations,
-        "count": len(conversations),
-        "filter": {"status": status} if status else None
-    }
-
-
-@app.get("/agent/conversations/{conversation_id}/events")
-async def get_conversation_events(conversation_id: str):
-    """Get event history for a conversation (without images)"""
-    try:
-        events = session_manager.get_session_events(conversation_id)
-        return {
-            "success": True,
-            "conversation_id": conversation_id,
-            "events": events,
-            "count": len(events)
-        }
-    except Exception as e:
-        logger.error(f"Error getting events for {conversation_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/agent/conversations/{conversation_id}/replay")
-async def replay_conversation(conversation_id: str):
-    """Replay conversation history as SSE stream (without images)"""
-    try:
-        events = session_manager.get_session_events(conversation_id)
-        
-        async def replay_generator():
-            for event in events:
-                # Format as SSE
-                event_data_json = json.dumps(event['event_data'])
-                yield f"event: {event['event_type']}\ndata: {event_data_json}\n\n"
-                await asyncio.sleep(0.01)  # Small delay for streaming effect
-            
-            # Send completion event
-            yield f"event: complete\ndata: {json.dumps({'conversation_id': conversation_id})}\n\n"
-        
-        return StreamingResponse(
-            replay_generator(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            }
-        )
-    except Exception as e:
-        logger.error(f"Error replaying conversation {conversation_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/agent/conversations/{conversation_id}/messages")
-async def get_conversation_messages(conversation_id: str):
-    """Get user messages for a conversation"""
-    try:
-        messages = session_manager.get_user_messages(conversation_id)
-        return {
-            "success": True,
-            "conversation_id": conversation_id,
-            "messages": messages,
-            "count": len(messages)
-        }
-    except Exception as e:
-        logger.error(f"Error getting messages for {conversation_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# --- Configuration API Endpoints ---
-
-@app.get("/api/config/llm")
-async def get_llm_config():
-    """Get LLM configuration (API key will be masked)"""
-    try:
-        config = llm_config_manager.get_llm_config()
-        # Mask the API key for security
-        masked_config = {
-            "model": config.model,
-            "base_url": config.base_url,
-            "api_key": "********" if config.api_key else None,
-            "has_api_key": config.api_key is not None and len(config.api_key) > 0
-        }
-        return {"success": True, "config": masked_config}
-    except Exception as e:
-        logger.error(f"Error getting LLM config: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/config/llm")
-async def update_llm_config(request: Request):
-    """Update LLM configuration"""
-    try:
-        data = await request.json()
-        
-        # Build LLMConfig object
-        model = data.get("model", "dashscope/qwen3.5-plus")
-        base_url = data.get("base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-        api_key = data.get("api_key")
-        
-        # If api_key is the masked value, keep the existing one
-        if api_key == "********":
-            existing_config = llm_config_manager.get_llm_config()
-            api_key = existing_config.api_key
-        
-        llm_config = LLMConfig(
-            model=model,
-            base_url=base_url,
-            api_key=api_key
-        )
-        
-        updated_config = llm_config_manager.set_llm_config(llm_config)
-        
-        return {
-            "success": True,
-            "message": "LLM configuration updated successfully",
-            "config": {
-                "model": updated_config.model,
-                "base_url": updated_config.base_url,
-                "api_key": "********" if updated_config.api_key else None,
-                "has_api_key": updated_config.api_key is not None and len(updated_config.api_key) > 0
-            }
-        }
-    except Exception as e:
-        logger.error(f"Error updating LLM config: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/config/cwd")
-async def get_default_cwd():
-    """Get default working directory"""
-    try:
-        cwd = llm_config_manager.get_default_cwd()
-        return {"success": True, "default_cwd": cwd}
-    except Exception as e:
-        logger.error(f"Error getting default CWD: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/config/cwd")
-async def set_default_cwd(request: Request):
-    """Set default working directory"""
-    try:
-        data = await request.json()
-        cwd = data.get("cwd")
-        
-        if not cwd:
-            raise HTTPException(status_code=400, detail="cwd field is required")
-        
-        # Validate that the directory exists
-        import os
-        if not os.path.isdir(cwd):
-            raise HTTPException(status_code=400, detail=f"Directory does not exist: {cwd}")
-        
-        updated_cwd = llm_config_manager.set_default_cwd(cwd)
-        
-        return {
-            "success": True,
-            "message": "Default working directory updated successfully",
-            "default_cwd": updated_cwd
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error setting default CWD: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/config")
-async def get_full_config():
-    """Get full application configuration (API key will be masked)"""
-    try:
-        config = llm_config_manager.get_full_config()
-        return {
-            "success": True,
-            "config": {
-                "llm": {
-                    "model": config.llm.model,
-                    "base_url": config.llm.base_url,
-                    "api_key": "********" if config.llm.api_key else None,
-                    "has_api_key": config.llm.api_key is not None and len(config.llm.api_key) > 0
-                },
-                "default_cwd": config.default_cwd,
-                "is_configured": llm_config_manager.is_configured()
-            }
-        }
-    except Exception as e:
-        logger.error(f"Error getting full config: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# --- Frontend Routes ---
-
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
-import os
-
-# Get frontend directory path
-FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "frontend")
-STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "static")
-
-# Create directories if they don't exist
-os.makedirs(FRONTEND_DIR, exist_ok=True)
-os.makedirs(STATIC_DIR, exist_ok=True)
-
-@app.get("/", response_class=HTMLResponse)
-async def get_frontend():
-    """Serve the frontend interface"""
-    index_path = os.path.join(FRONTEND_DIR, "index.html")
-    if os.path.exists(index_path):
-        with open(index_path, "r") as f:
-            return HTMLResponse(content=f.read())
-    else:
-        return HTMLResponse(content="<h1>OpenBrowserAgent</h1><p>Frontend template not found.</p>")
-
-
-@app.get("/agent-ui", response_class=HTMLResponse)
-async def get_agent_ui():
-    """Alternative route for agent UI"""
-    return await get_frontend()
-
-
-@app.get("/sessions.html", response_class=HTMLResponse)
-async def get_sessions_page():
-    """Serve the sessions management page"""
-    sessions_path = os.path.join(FRONTEND_DIR, "sessions.html")
-    if os.path.exists(sessions_path):
-        with open(sessions_path, "r") as f:
-            return HTMLResponse(content=f.read())
-    else:
-        return HTMLResponse(content="<h1>Sessions</h1><p>Sessions page not found.</p>", status_code=404)
-
-
+# WebSocket endpoint for real-time command execution
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time command execution"""
+    from server.models.commands import parse_command, CommandResponse
+
     await websocket.accept()
-    
+
     try:
         while True:
             # Receive command from WebSocket client
             data = await websocket.receive_json()
-            
-            # Execute command
-            response = await execute_command(data)
-            
+
+            # Execute command via command processor
+            from server.core.processor import command_processor
+
+            command = parse_command(data)
+            response = await command_processor.execute(command)
+
             # Send response back
             await websocket.send_json(response.dict())
-            
+
     except WebSocketDisconnect:
         logger.info("WebSocket client disconnected")
     except Exception as e:
@@ -616,9 +111,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
-        app,
-        host=config.host,
-        port=config.port,
-        log_level=config.log_level.lower()
+        app, host=config.host, port=config.port, log_level=config.log_level.lower()
     )
