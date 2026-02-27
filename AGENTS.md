@@ -1,309 +1,133 @@
-# OpenBrowser - Development Guide
+# OpenBrowser Project Knowledge Base
 
-## Project Overview
+**Generated:** 2026-02-27
+**Commit:** 8836b0b (main)
+**Stack:** Python 3.12+ (FastAPI) + TypeScript (Chrome Extension MV3)
 
-OpenBrowser (Local Chrome Server) is a system for programmatically controlling Chrome browser via a Chrome extension using JavaScript-based automation.
+## OVERVIEW
 
-### 🎉 Key Feature: Zero-Disruption Background Automation
+Visual AI assistant powered by Qwen3.5-Plus for browser automation with visual feedback. Single-model closed loop: code generation → visual verification → browser control → terminal execution.
 
-**Users can continue browsing while automation runs without any visual interruption.** All major operations (screenshot, JavaScript execution, tab management) run in background tabs without switching the user's view.
-
-## Architecture
-
-### System Components
+## STRUCTURE
 
 ```
-┌─────────────────┐    HTTP/WebSocket    ┌─────────────────────┐
-│   Python Server │◄────────────────────►│  Chrome Extension   │
-│   (FastAPI)     │                      │  (TypeScript)       │
-└─────────────────┘                      └─────────────────────┘
-         │                                          │
-         ▼                                          ▼
-┌─────────────────┐                      ┌─────────────────────┐
-│  CLI Tools      │                      │  Chrome DevTools    │
-│  (click)        │                      │  Protocol (CDP)     │
-└─────────────────┘                      └─────────────────────┘
+OpenBrowser/
+├── server/           # FastAPI backend + agent logic + WebSocket
+├── extension/        # Chrome extension (MV3) for browser control
+├── cli/              # Command-line tool (chrome-cli)
+├── frontend/         # Static web UI (HTML)
+└── reference/        # External SDK references (read-only)
 ```
 
-### Communication Flow
+## WHERE TO LOOK
 
-1. **Command Initiation**: CLI or REST API sends command to Python server
-2. **WebSocket Forwarding**: Python server forwards command to Chrome extension via WebSocket
-3. **Browser Execution**: Extension executes command using Chrome DevTools Protocol (CDP)
-4. **Response Return**: Extension sends response back through WebSocket to Python server
-5. **Result Delivery**: Python server returns result to CLI/REST API client
+| Task | Location | Notes |
+|------|----------|-------|
+| Agent orchestration | `server/agent/manager.py` | Conversation lifecycle, LLM config |
+| Browser commands | `server/core/processor.py` | Command routing, multi-session |
+| REST API routes | `server/api/routes/` | FastAPI endpoints |
+| WebSocket handling | `server/websocket/manager.py` | Extension communication |
+| Command models | `server/models/commands.py` | Pydantic command/response types |
+| Extension entry | `extension/src/background/index.ts` | Command handler, queue manager |
+| JavaScript execution | `extension/src/commands/javascript.ts` | CDP Runtime.evaluate |
+| Screenshot capture | `extension/src/commands/screenshot.ts` | CDP Page.captureScreenshot |
+| Tab management | `extension/src/commands/tab-manager.ts` | Session isolation, tab groups |
+| CLI implementation | `cli/main.py` | Interactive mode, shortcuts |
 
-### Background Automation Design
+## ARCHITECTURE
 
-**Problem**: Traditional browser automation switches user's active tab, causing disruption.
-
-**Solution**: Use CDP to execute operations in background tabs:
-
-```typescript
-// ❌ Traditional approach (disruptive)
-1. User viewing Tab A
-2. Automation needs Tab B
-3. Switch to Tab B (flash!)
-4. Execute operation
-5. Switch back to Tab A (flash!)
-
-// ✅ OpenBrowser approach (non-disruptive)
-1. User viewing Tab A
-2. Automation needs Tab B
-3. Execute CDP operation on Tab B (no switch)
-4. User continues browsing Tab A
+```
+┌─────────────────────────────────────────┐
+│     Qwen3.5-Plus (Multimodal LLM)       │
+└────────────────────┬────────────────────┘
+                     │
+┌────────────────────▼────────────────────┐
+│   OpenBrowser Agent Server (FastAPI)    │
+│   - REST API (port 8765)                │
+│   - WebSocket (port 8766)               │
+│   - OpenHands SDK integration           │
+└────────────────────┬────────────────────┘
+                     │
+┌────────────────────▼────────────────────┐
+│   Chrome Extension (CDP)                │
+│   - JavaScript execution                │
+│   - Screenshots (1280x720)              │
+│   - Tab management with groups          │
+└─────────────────────────────────────────┘
 ```
 
-## Development Setup
+## CONVENTIONS
 
-### Prerequisites
+### Python (server/)
+- **Line length:** 88 (black/ruff)
+- **Target:** Python 3.12
+- **Strict typing:** `disallow_untyped_defs = true` in mypy
+- **Imports:** isort via ruff
 
-- Python 3.12+ with `uv` package manager
-- Node.js 16+ with `npm`
-- Chrome browser for extension testing
+### TypeScript (extension/)
+- **Target:** ES2022
+- **Module:** ESNext with bundler resolution
+- **Strict mode:** enabled
+- **Path alias:** `@/*` → `src/*`
+- **Build:** Vite with multi-entry (background, content, workers)
 
-### Initial Setup
+## ANTI-PATTERNS (THIS PROJECT)
+
+- **NEVER use pixel-based mouse/keyboard simulation** - All operations via JavaScript execution
+- **NEVER skip conversation_id** - Required for multi-session isolation
+- **NEVER return DOM nodes from JavaScript** - Must be JSON-serializable
+- **NEVER use `.click()` for React/Vue** - Dispatch full event sequence instead
+- **NEVER suppress type errors** - `as any`, `@ts-ignore` forbidden
+
+## UNIQUE PATTERNS
+
+### JavaScript-First Automation
+All page interactions via `javascript_execute`:
+```javascript
+// Click by visible text (universal pattern)
+(() => {
+    const text = 'YOUR_TEXT';
+    const leaf = Array.from(document.querySelectorAll('*'))
+        .find(el => el.children.length === 0 && el.textContent.includes(text));
+    if (!leaf) return 'not found';
+    const target = leaf.closest('a, button, [role="button"]') || leaf;
+    target.click();
+    return 'clicked: ' + target.tagName;
+})()
+```
+
+### Multi-Session Tab Isolation
+- `tab init <url>` creates managed session with tab group
+- `conversation_id` ties all commands to session
+- Tab groups provide visual isolation ("OpenBrowser" group)
+
+### 2-Strike Rule
+If operation fails twice:
+1. Try full event sequence (pointerdown → mousedown → click)
+2. Inspect DOM structure
+3. Consider direct URL navigation
+
+## COMMANDS
 
 ```bash
-# 1. Install Python dependencies
-uv sync
+# Start server
+uv run local-chrome-server serve
 
-# 2. Build Chrome extension
-cd extension
-npm install
-npm run build
+# Build extension
+cd extension && npm run build
 
-# 3. Load extension in Chrome
-#    - Open chrome://extensions/
-#    - Enable Developer mode
-#    - Click "Load unpacked"
-#    - Select `extension/dist/`
+# CLI interactive mode
+uv run chrome-cli interactive
 
-# 4. Start development server
-uv run local-chrome-server serve --log-level DEBUG
+# CLI tab management
+uv run chrome-cli tabs init https://example.com
+uv run chrome-cli tabs list
+uv run chrome-cli javascript execute "document.title"
 ```
 
-### Development Commands
+## NOTES
 
-```bash
-# Python development
-uv sync --group dev          # Install dev dependencies
-uv run black .               # Format code
-uv run ruff check .          # Lint code
-
-# Extension development
-cd extension
-npm run dev                  # Watch mode for extension
-npm run build                # Production build
-npm run typecheck            # TypeScript type checking
-```
-
-## Module Documentation
-
-## Supported Operations
-
-### Background Operations (Zero-Disruption) ✅
-
-All operations run completely in background tabs without switching user's view:
-
-| Operation | Implementation | Flash-Free | Notes |
-|-----------|---------------|------------|-------|
-| **Screenshot** | CDP `Page.captureScreenshot` | ✅ | WYSIWYG mode - captures actual viewport dimensions |
-| **JavaScript Execute** | CDP `Runtime.evaluate` | ✅ | Runs in background context |
-| **Tab Init** | CDP + Tab Management | ✅ | Initializes managed session |
-| **Tab Switch** | Internal state only | ✅ | No visible tab change |
-| **Tab Refresh** | `chrome.tabs.reload` | ✅ | Reloads in background |
-| **Tab List** | `chrome.tabs.query` | ✅ | Metadata only, no activation |
-
-**User Experience**:
-```
-User browsing: Tab A
-→ Execute JavaScript/screenshot on Tab B
-→ Zero visual disruption
-→ User continues on Tab A
-```
-
-### Python Server Modules
-
-Key modules in `server/`:
-
-- **`models/commands.py`**: Command schema definitions and validation using Pydantic
-- **`core/config.py`**: Configuration management with environment variable support
-- **`core/processor.py`**: Command execution and routing with tab tracking
-- **`core/llm_config.py`**: LLM configuration management (model, API key, base URL)
-- **`core/session_manager.py`**: Session state management and persistence
-- **`websocket/manager.py`**: WebSocket server for extension communication
-- **`api/main.py`**: FastAPI application with REST and WebSocket endpoints
-- **`main.py`**: CLI entry point for server management
-
-📖 **Detailed documentation**: [Python Server Modules](docs/architecture/python-modules.md)
-
-### Chrome Extension Modules
-
-Key modules in `extension/src/`:
-
-- **`types.ts`**: TypeScript type definitions for commands and responses
-- **`websocket/client.ts`**: WebSocket client with automatic reconnection
-- **`commands/`**: CDP command implementations
-  - `cdp-commander.ts`: Chrome DevTools Protocol wrapper
-  - `debugger-manager.ts`: Debugger attachment management with auto-detach
-  - `screenshot.ts`: Background screenshot capture with CDP
-  - `tabs.ts`: Tab management operations
-  - `tab-manager.ts`: Advanced tab group management for sessions
-  - `javascript.ts`: JavaScript execution in browser tabs (core functionality)
-- **`background/index.ts`**: Background script - main extension logic
-  - Command routing and execution
-  - Tab group management
-  - Global state tracking
-  - Debug logging for troubleshooting
-- **`content/index.ts`**: Content script for web page interaction
-  - Provides viewport information
-  - Image resizing utilities
-  - No visual mouse pointer - all automation via JavaScript execution
-
-📖 **Detailed documentation**: [Chrome Extension Modules](docs/extension/modules.md)
-
-### CLI Module
-
-**`cli/main.py`**: Command-line interface for interacting with server
-
-Commands:
-- `status`: Check server health
-- `screenshot capture`: Screenshot capture (WYSIWYG mode - actual viewport dimensions)
-- `tabs list/open/close/switch/refresh/init`: Tab management
-- `interactive`: Interactive REPL mode
-- `script`: Execute commands from JSON file
-
-📖 **Detailed documentation**: [CLI Usage Guide](docs/cli/usage.md)
-
-## Testing
-
-### Test Structure
-
-The project has test infrastructure planned for validating browser automation functionality, but tests are not yet implemented. When implemented, tests will be organized as follows:
-
-```
-tests/
-├── unit/              # Unit tests (planned)
-├── integration/       # Integration tests (planned)
-├── e2e/              # End-to-end tests (planned)
-└── fixtures/         # Test fixtures (planned)
-```
-
-### Running Tests
-
-When tests are implemented, they can be run with:
-
-```bash
-# Run tests (when implemented)
-uv run pytest tests/ -v
-
-# Run with coverage
-uv run pytest tests/ --cov=server --cov-report=html
-```
-
-### Test HTML Pages
-
-`html_test_pages/` is planned to contain HTML pages for regression testing browser automation:
-
-- `basic_test.html`: Basic interactions (buttons, inputs, scroll, links, checkboxes)
-
-📖 **Detailed documentation**: [Testing and Regression](docs/testing/regression.md)
-
-## Troubleshooting
-
-### Common Issues
-
-#### 1. Extension Shows "Disconnected"
-- **Cause**: WebSocket connection failure
-- **Check**: Server is running, WebSocket server started
-
-#### 2. WebSocket 403 Errors
-- **Cause**: WebSocket handshake failure
-- **Solution**: Ensure WebSocket server accepts all origins
-
-#### 3. Commands Not Executing
-- **Cause**: Extension not connected or CDP attachment failed
-- **Debug**: Check extension background page console
-
-#### 4. ObservationEvent missing in SSE stream
-- **Cause**: Tool execution blocking due to event loop competition
-- **Workaround**: Use synchronous HTTP API calls instead of WebSocket
-
-📖 **Detailed documentation**: [Troubleshooting Guide](docs/troubleshooting/common-issues.md)
-
-## Key Design Decisions
-
-### 1. JavaScript-First Automation
-- **Primary Method**: JavaScript execution for all page interactions
-- **No Visual Operations**: All browser interactions via JavaScript execution (no mouse/keyboard simulation)
-- **Reliable & Fast**: Direct DOM access is more reliable and faster than visual-based methods
-- **Core Principle**: Click buttons, fill forms, scroll pages, extract data - all through JavaScript execution
-
-### 2. Dual Communication Channels
-- **REST API**: For simple, synchronous command execution
-- **WebSocket**: For real-time, bidirectional communication
-- **Independent WebSocket Server**: Dedicated server for extension communication
-
-### 3. Tab Group Isolation
-- **Visual Separation**: Controlled tabs grouped separately from user's regular tabs
-- **Explicit Control**: User decides when to start a managed session with `tabs init`
-- **Background Automation**: AI operations run without disrupting user browsing
-
-## Implementation Notes
-
-Key implementation details and historical notes:
-
-- **Isolation Improvements (February 2026)**: Background automation mode to prevent focus stealing
-- **Tab Management Fixes (February 2026)**: Unified tab tracking system
-- **Screenshot WYSIWYG Mode (March 2025)**: CDP-based screenshot capture without resizing, preserving actual viewport dimensions
-- **Refresh Functionality (February 2026)**: Added tab refresh action
-- **Heartbeat Frequency Increase (February 2026)**: Increased ping-pong signal frequency from 20s to 5s for faster connection health detection
-- **Heartbeat Reliability Improvements (February 2026)**: 
-  - Changed from setInterval to recursive setTimeout to prevent callback stacking
-  - Added active command tracking and heartbeat priority management
-  - Reduced timeouts (JavaScript: 30s→10s, CDP: 15s→8s, WebSocket: 30s→15s, Server: 30s→15s)
-  - Added long-running command warnings and heartbeat emergency checks
-
-📖 **Detailed documentation**: [Implementation Notes](docs/development/implementation-notes.md)
-
-## Future Enhancements
-
-### Planned Features
-
-1. **Enhanced Visual Recognition**:
-   - Template matching for element detection
-   - OCR for text recognition in screenshots
-   - Visual verification of actions
-
-2. **Advanced Automation**:
-   - Drag-and-drop operations
-   - File upload/download handling
-   - Multi-monitor support
-
-3. **Improved Testing**:
-   - Visual regression testing
-   - Performance benchmarking
-   - Load testing scenarios
-
-4. **Developer Tools**:
-   - Visual command recorder
-   - Script generator from user actions
-   - Debug visualization tools
-
-## Documentation Structure
-
-- **[Architecture Overview](docs/architecture/overview.md)**: System design and component architecture
-- **[Python Server Modules](docs/architecture/python-modules.md)**: Detailed server module documentation
-- **[Chrome Extension Modules](docs/extension/modules.md)**: Detailed extension module documentation
-- **[REST API Reference](docs/api/rest.md)**: HTTP endpoints and command reference
-- **[WebSocket API](docs/api/websocket.md)**: Real-time communication protocol
-- **[CLI Usage Guide](docs/cli/usage.md)**: Command-line interface reference
-- **[Extension Setup](docs/extension/setup.md)**: Building and loading the extension
-- **[Testing and Regression](docs/testing/regression.md)**: Testing strategies and automation
-- **[Troubleshooting Guide](docs/troubleshooting/common-issues.md)**: Common issues and solutions
-- **[Implementation Notes](docs/development/implementation-notes.md)**: Technical details and design decisions
-
----
-
-*Last updated: February 2026*
+- **Git dependencies:** `openhands-sdk` and `openhands-tools` from git subdirectories
+- **CDP required:** Extension uses Chrome DevTools Protocol for screenshots/JS execution
+- **Preset coordinates:** Screenshots at 1280x720, mouse in 0-1280/0-720 coordinate system
+- **Config storage:** LLM config in `~/.openbrowser/llm_config.json`
