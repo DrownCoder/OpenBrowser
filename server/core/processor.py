@@ -9,7 +9,8 @@ from server.models.commands import (
     MouseMoveCommand, MouseClickCommand, MouseScrollCommand,
     ResetMouseCommand,
     KeyboardTypeCommand, KeyboardPressCommand, ScreenshotCommand,
-    TabCommand, GetTabsCommand, JavascriptExecuteCommand
+    TabCommand, GetTabsCommand, JavascriptExecuteCommand,
+    HandleDialogCommand
 )
 from server.websocket.manager import ws_manager
 from server.core.config import config
@@ -44,12 +45,12 @@ class CommandProcessor:
         """
         command_dict = command.dict()
         
-        # Import command types for type checking
+# Import command types for type checking
         from server.models.commands import (
             TabCommand, GetTabsCommand, ScreenshotCommand,
             MouseMoveCommand, MouseClickCommand, MouseScrollCommand,
             ResetMouseCommand, KeyboardTypeCommand, KeyboardPressCommand,
-            JavascriptExecuteCommand
+            JavascriptExecuteCommand, HandleDialogCommand
         )
         
         # Get conversation_id for multi-session support
@@ -57,15 +58,14 @@ class CommandProcessor:
         
         current_tab_id = self._get_current_tab_id(conversation_id)
         
-        # Special handling for screenshot and javascript_execute commands
+        # Special handling for screenshot, javascript_execute, and handle_dialog commands
         # These commands ALWAYS use current active tab, ignoring any provided tab_id
-        if isinstance(command, (ScreenshotCommand, JavascriptExecuteCommand)):
+        if isinstance(command, (ScreenshotCommand, JavascriptExecuteCommand, HandleDialogCommand)):
             if current_tab_id is not None:
                 command_dict['tab_id'] = current_tab_id
                 logger.debug(f"Forced use of current tab {current_tab_id} for {command.type} command in conversation {conversation_id} (ignoring provided tab_id)")
             else:
                 logger.warning(f"No current tab set for {command.type} command in conversation {conversation_id}")
-        # For other command types, auto-fill tab_id only if not specified
         elif hasattr(command, 'tab_id') and command.tab_id is None and current_tab_id is not None:
             # Check command type to decide if we should fill tab_id
             if isinstance(command, TabCommand):
@@ -130,6 +130,8 @@ class CommandProcessor:
                 return await self._execute_reset_mouse(command)
             elif isinstance(command, JavascriptExecuteCommand):
                 return await self._execute_javascript_execute(command)
+            elif isinstance(command, HandleDialogCommand):
+                return await self._execute_handle_dialog(command)
             else:
                 raise ValueError(f"Unknown command type: {command.type}")
                 
@@ -208,6 +210,11 @@ class CommandProcessor:
         
     async def _execute_javascript_execute(self, command: JavascriptExecuteCommand) -> CommandResponse:
         """Execute JavaScript code in browser tab"""
+        response = await self._send_prepared_command(command)
+        return response
+        
+    async def _execute_handle_dialog(self, command: HandleDialogCommand) -> CommandResponse:
+        """Handle open dialog (accept or dismiss)"""
         response = await self._send_prepared_command(command)
         return response
         

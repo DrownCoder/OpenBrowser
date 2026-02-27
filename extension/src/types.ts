@@ -1,6 +1,8 @@
 export type MouseButton = 'left' | 'right' | 'middle';
 export type ScrollDirection = 'up' | 'down' | 'left' | 'right';
 export type TabAction = 'open' | 'close' | 'switch' | 'list' | 'init' | 'refresh';
+export type DialogType = 'alert' | 'confirm' | 'prompt' | 'beforeunload';
+export type DialogAction = 'accept' | 'dismiss';
 
 export interface BaseCommand {
   type: string;
@@ -79,6 +81,13 @@ export interface CleanupSessionCommand extends BaseCommand {
   conversation_id: string;
 }
 
+// Handle dialog command - respond to open dialog (confirm/prompt)
+export interface HandleDialogCommand extends BaseCommand {
+  type: 'handle_dialog';
+  action: DialogAction;  // 'accept' or 'dismiss'
+  prompt_text?: string;  // Required for prompt dialogs
+}
+
 export type Command = 
   | MouseMoveCommand
   | MouseClickCommand
@@ -90,7 +99,8 @@ export type Command =
   | TabCommand
   | GetTabsCommand
   | JavascriptExecuteCommand
-  | CleanupSessionCommand;
+  | CleanupSessionCommand
+  | HandleDialogCommand;
 
 export interface CommandResponse {
   success: boolean;
@@ -100,6 +110,14 @@ export interface CommandResponse {
   data?: any;
   timestamp: number;
   duration?: number;
+  // Dialog-related fields
+  dialog_opened?: boolean;
+  dialog?: {
+    type: DialogType;
+    message: string;
+    url?: string;
+    needsDecision: boolean;
+  };
 }
 
 export interface ScreenshotMetadata {

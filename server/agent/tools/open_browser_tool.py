@@ -25,13 +25,12 @@ from server.core.processor import command_processor
 from server.models.commands import (
     ScreenshotCommand,
     TabCommand, GetTabsCommand, JavascriptExecuteCommand,
+    HandleDialogCommand, DialogAction,
     TabAction
 )
 
 logger = logging.getLogger(__name__)
 
-
-# --- Single Action Type ---
 
 class OpenBrowserAction(Action):
     """Browser automation action with unified parameter system"""
@@ -42,7 +41,15 @@ class OpenBrowserAction(Action):
     action: Optional[str] = Field(default=None, description="Action for tab operations: 'init', 'open', 'close', 'switch', 'list', 'refresh'")
     url: Optional[str] = Field(default=None, description="URL for tab operations (required for init and open)")
     tab_id: Optional[int] = Field(default=None, description="Tab ID for tab operations (required for close, switch, refresh)")
-
+    # Dialog handling parameters
+    dialog_action: Optional[str] = Field(
+        default=None, 
+        description="Action for dialog handling: 'accept' or 'dismiss'"
+    )
+    prompt_text: Optional[str] = Field(
+        default=None,
+        description="Text to enter for prompt dialogs (only for handle_dialog with prompt)"
+    )
 
 # --- Supported Action Types and Their Parameters ---
 """
@@ -78,7 +85,7 @@ class OpenBrowserObservation(Observation):
     screenshot_data_url: Optional[str] = Field(
         default=None,
         description="Screenshot as data URL (base64 encoded PNG, 1280x720 pixels)"
-    )
+)
     javascript_result: Optional[Any] = Field(
         default=None,
         description="Result of JavaScript execution (if action was javascript_execute)"
@@ -87,7 +94,15 @@ class OpenBrowserObservation(Observation):
         default=None,
         description="Console output captured during JavaScript execution (list of {type, args, timestamp})"
     )
-    
+    # Dialog-related fields
+    dialog_opened: Optional[bool] = Field(
+        default=None,
+        description="Whether a dialog is currently open"
+    )
+    dialog: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Dialog information if a dialog is open (type, message, needsDecision)"
+    )
     @property
     def to_llm_content(self) -> Sequence[TextContent | ImageContent]:
         """Convert observation to LLM content format"""
@@ -191,11 +206,33 @@ class OpenBrowserObservation(Observation):
                 if len(args_str) > 1000:
                     args_str = args_str[:1000] + "... (truncated)"
                 
-                # Add console line with type
+# Add console line with type
                 text_parts.append(f"{type_emoji} **[{console_type}]** {args_str}")
             
             text_parts.append("")
+        
+        # Dialog Section (if applicable)
+        if self.dialog_opened and self.dialog:
+            text_parts.append("## ⚠️ Dialog Opened")
+            text_parts.append("")
+            dialog_type = self.dialog.get('type', 'unknown')
+            dialog_message = self.dialog.get('message', '')
+            needs_decision = self.dialog.get('needsDecision', False)
             
+            text_parts.append(f"**Type**: {dialog_type}")
+            text_parts.append(f"**Message**: \"{dialog_message}\"")
+            text_parts.append(f"**Needs Decision**: {'Yes' if needs_decision else 'No'}")
+            text_parts.append("")
+            
+            if needs_decision:
+                text_parts.append("**Action Required**: Use `handle_dialog` to respond.")
+                text_parts.append("- To accept: `{\"type\": \"handle_dialog\", \"dialog_action\": \"accept\"}`")
+                text_parts.append("- To dismiss: `{\"type\": \"handle_dialog\", \"dialog_action\": \"dismiss\"}`")
+                text_parts.append("- For prompts: `{\"type\": \"handle_dialog\", \"dialog_action\": \"accept\", \"prompt_text\": \"your text\"}`")
+            else:
+                text_parts.append("**Note**: This dialog was auto-accepted (no decision needed).")
+            text_parts.append("")
+        
         # Browser State Section
         if self.tabs:
             text_parts.append("## Browser State")
@@ -386,7 +423,7 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                         # If data is not a dict (e.g., string error), use it as result
                         javascript_result = js_data
                     
-                    # If we have a result, update message to include it (only for successful executions)
+# If we have a result, update message to include it (only for successful executions)
                     if javascript_result is not None and result_dict.get('success'):
                         result_str = str(javascript_result)
                         if len(result_str) > 100:
@@ -395,7 +432,26 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 elif result_dict and result_dict.get('error'):
                     # If there's an error but no data, use error as javascript_result
                     javascript_result = result_dict['error']
-                    
+            elif action_type == "handle_dialog":
+                # Handle dialog action (accept or dismiss)
+                if action.dialog_action is None:
+                    raise ValueError("handle_dialog requires dialog_action parameter")
+                
+                dialog_action_str = action.dialog_action
+                try:
+                    dialog_action = DialogAction(dialog_action_str.lower())
+                except ValueError:
+                    raise ValueError(f"Invalid dialog action: {dialog_action_str}. Must be 'accept' or 'dismiss'")
+                
+                command = HandleDialogCommand(
+                    action=dialog_action,
+                    prompt_text=action.prompt_text,
+                    conversation_id=self.conversation_id
+                )
+                result_dict = self._execute_command_sync(command)
+                
+                message = f"Dialog handled: {dialog_action_str}"
+                
             else:
                 raise ValueError(f"Unknown action type: {action_type}")
             
@@ -441,17 +497,32 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
             elif action_type == "javascript_execute":
                 pass
             
-            # 3. javascript_result is already set in javascript_execute branch
+# 3. javascript_result is already set in javascript_execute branch
             
-            # Extract success from result_dict
+            # Extract success and dialog info from result_dict
             success = False
             error = None
+            dialog_opened = None
+            dialog = None
+            
             if result_dict:
                 success = result_dict.get('success', False)
                 if 'error' in result_dict:
                     error = result_dict['error']
                 elif 'message' in result_dict and 'error' in result_dict.get('data', {}):
                     error = result_dict['data']['error']
+                
+                # Extract dialog info if present
+                if 'dialog_opened' in result_dict:
+                    dialog_opened = result_dict['dialog_opened']
+                if 'dialog' in result_dict:
+                    dialog = result_dict['dialog']
+                    # Update message for dialog scenarios
+                    if dialog and success:
+                        if dialog.get('needsDecision'):
+                            message = f"Dialog opened: {dialog.get('type')} (\"{dialog.get('message')}\"). Use handle_dialog to respond."
+                        else:
+                            message = f"Dialog auto-accepted: {dialog.get('type')} (\"{dialog.get('message')}\")"
             
             return OpenBrowserObservation(
                 success=success,
@@ -461,7 +532,9 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 mouse_position=mouse_position,
                 screenshot_data_url=screenshot_data_url,
                 javascript_result=javascript_result,
-                console_output=console_output
+                console_output=console_output,
+dialog_opened=dialog_opened,
+                dialog=dialog
             )
             
         except ValueError as e:
@@ -475,7 +548,9 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 mouse_position=None,
                 screenshot_data_url=None,
                 javascript_result=None,
-                console_output=None
+                console_output=None,
+                dialog_opened=None,
+                dialog=None
             )
         except Exception as e:
             logger.debug(f"DEBUG: _execute_action_sync caught exception: {e}")
@@ -489,7 +564,9 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 mouse_position=None,
                 screenshot_data_url=None,
                 javascript_result=None,
-                console_output=None
+                console_output=None,
+                dialog_opened=None,
+                dialog=None
             )
     
     def __call__(self, action: OpenBrowserAction, conversation) -> OpenBrowserObservation:
@@ -785,6 +862,40 @@ new Promise(resolve => {
 **Actions:** `init` | `open` | `close` | `switch` | `list` | `refresh`
 - `init` / `open` require `url`
 - `close` / `switch` / `refresh` require `tab_id`
+
+---
+
+## 3. handle_dialog
+
+When JavaScript triggers a dialog (alert, confirm, prompt), the browser pauses execution. OpenBrowser detects dialogs automatically:
+
+- **alert**: Auto-accepted (notification only)
+- **confirm**: Requires decision - use `handle_dialog`
+- **prompt**: Requires decision and text input - use `handle_dialog`
+
+```json
+{
+  "type": "handle_dialog",
+  "dialog_action": "accept",
+  "prompt_text": "optional text for prompt dialogs"
+}
+```
+
+**Parameters:**
+- `dialog_action`: Required - either `"accept"` or `"dismiss"`
+- `prompt_text`: Optional - text to enter for prompt dialogs
+
+**Cascading Dialogs:**
+After handling one dialog, another may appear (e.g., confirm → alert). OpenBrowser:
+1. Returns info about the new dialog
+2. Auto-accepts alerts
+3. Requires another `handle_dialog` for confirm/prompt
+
+**Example Flow:**
+1. Click triggers `confirm('Delete?')`
+2. OpenBrowser returns: `dialog_opened: true, dialog: {type: "confirm", message: "Delete?", needsDecision: true}`
+3. You respond: `{"type": "handle_dialog", "dialog_action": "accept"}`
+4. If alert follows, OpenBrowser auto-accepts and shows result
 
 ---
 

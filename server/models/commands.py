@@ -183,6 +183,23 @@ class JavascriptExecuteCommand(BaseCommand):
     )
 
 
+class DialogAction(str, Enum):
+    """Dialog handling action"""
+    ACCEPT = "accept"
+    DISMISS = "dismiss"
+
+
+class HandleDialogCommand(BaseCommand):
+    """Handle an open JavaScript dialog (confirm/prompt)"""
+    type: Literal["handle_dialog"] = "handle_dialog"
+    action: DialogAction = Field(
+        description="Action to take: 'accept' or 'dismiss'"
+    )
+    prompt_text: Optional[str] = Field(
+        default=None,
+        description="Text to enter for prompt dialogs"
+    )
+
 class CommandResponse(BaseModel):
     """Response from command execution"""
     success: bool
@@ -221,6 +238,7 @@ Command = Union[
     TabCommand,
     GetTabsCommand,
     JavascriptExecuteCommand,
+    HandleDialogCommand,
 ]
 
 
@@ -242,6 +260,7 @@ def parse_command(data: dict) -> Command:
         "tab": TabCommand,
         "get_tabs": GetTabsCommand,
         "javascript_execute": JavascriptExecuteCommand,
+        "handle_dialog": HandleDialogCommand,
     }
     
     if cmd_type not in command_map:

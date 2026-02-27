@@ -1,97 +1,166 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /**
  * Dialog Handling - JavaScript Dialog Manager
  * 
  * Handles browser native dialogs (alert, confirm, prompt, beforeunload)
  * using Chrome DevTools Protocol (CDP).
  * 
- * Flow:
- * 1. Page executes confirm/alert/prompt
- * 2. CDP triggers Page.javascriptDialogOpening event
- * 3. DialogManager notifies server via WebSocket
- * 4. AI assistant decides how to respond
- * 5. Server sends handle_dialog command
- * 6. DialogManager executes Page.handleJavaScriptDialog
+ * DESIGN PRINCIPLES:
+ * 1. Dialog state is per-tab, not per-conversation (dialog is a browser-level concept)
+ * 2. Only one dialog can be open at a time per tab (browser behavior)
+ * 3. Cascading dialogs: handling one dialog may trigger another
+ * 4. During dialog state: JS execution and screenshot are BLOCKED
+ * 
+ * STATE MACHINE:
+ * - IDLE: No dialog, normal operations allowed
+ * - DIALOG_OPEN: Dialog blocking, only handle_dialog allowed
+ * 
+ * FLOW:
+ * 1. javascript_execute triggers dialog
+ * 2. DialogManager stores dialog info, returns dialog_opened result
+ * 3. Server/AI decides: handle_dialog or error
+ * 4. handle_dialog executes, may trigger cascading dialog
+ * 5. If cascading: repeat from step 2
+ * 6. If no cascade: return to IDLE, normal operations resume
  */
 
 import { CdpCommander } from './cdp-commander';
-import { debuggerSessionManager } from './debugger-manager';
-import { wsClient } from '../websocket/client';
-// Note: DialogType and DialogAction types need to be added to types.ts if dialog handling is needed
-type DialogType = 'alert' | 'confirm' | 'prompt' | 'beforeunload';
-type DialogAction = 'accept' | 'dismiss';
-interface DialogOpenedEvent {
-  tabId: number;
-  dialogType: DialogType;
-  message: string;
-  url?: string;
-  timestamp: number;
-}
 
-// Default conversation ID for legacy operations
-const LEGACY_CONVERSATION_ID = '__legacy_dialog__';
+// ============================================================================
+// Types
+// ============================================================================
+
+export type DialogType = 'alert' | 'confirm' | 'prompt' | 'beforeunload';
+export type DialogAction = 'accept' | 'dismiss';
 
 /**
- * Dialog information stored when a dialog opens
+ * Dialog types that require AI decision
  */
-interface DialogResult {
+export const DECISION_REQUIRED_TYPES: Set<DialogType> = new Set([
+  'confirm',
+  'prompt', 
+  'beforeunload'
+]);
+
+/**
+ * Information about an open dialog
+ */
+export interface DialogInfo {
   tabId: number;
+  conversationId: string;
   dialogType: DialogType;
   message: string;
   url: string;
   timestamp: number;
   hasBrowserHandler: boolean;
+  needsDecision: boolean;  // true for confirm/prompt/beforeunload
 }
 
 /**
- * DialogManager - Manages JavaScript dialog handling
+ * Result returned when a dialog opens during JS execution
+ */
+export interface DialogOpenedResult {
+  status: 'dialog_opened';
+  dialog: {
+    type: DialogType;
+    message: string;
+    url?: string;
+    needsDecision: boolean;
+  };
+}
+
+/**
+ * Result returned when a dialog is auto-accepted (alert)
+ */
+export interface DialogAutoAcceptedResult {
+  status: 'dialog_auto_accepted';
+  dialog: {
+    type: 'alert';
+    message: string;
+  url?: string;
+  };
+}
+
+/**
+ * Result returned after handling a dialog
+ */
+export interface DialogHandledResult {
+  status: 'dialog_handled' | 'dialog_cascaded';
+  previousDialog: {
+    type: DialogType;
+    action: DialogAction;
+  };
+  newDialog?: {
+    type: DialogType;
+    message: string;
+    url?: string;
+    needsDecision: boolean;
+  };
+}
+
+// ============================================================================
+// DialogManager Class
+// ============================================================================
+
+/**
+ * DialogManager - Singleton that manages JavaScript dialog handling
+ * 
+ * CRITICAL: This class manages GLOBAL dialog state. Only one dialog
+ * can be open per tab at any time (browser limitation).
  */
 export class DialogManager {
+  // Global dialog event listener
   private dialogListener: ((source: chrome.debugger.Debuggee, method: string, params?: object) => void) | null = null;
-  private activeDialogs = new Map<number, DialogResult>();  // tabId -> dialog info
-  private enabledTabs = new Set<number>();  // Tabs with dialog handling enabled
+  
+  // Active dialogs: tabId -> DialogInfo
+  private activeDialogs = new Map<number, DialogInfo>();
+  
+  // Tabs with dialog handling enabled
+  private enabledTabs = new Set<number>();
+  
+  // Dialog event resolvers: tabId -> resolve function
+  // Used to signal when a dialog opens during JS execution
+  private dialogResolvers = new Map<number, (dialogInfo: DialogInfo) => void>();
+  
+  // Cascade detection window (ms)
+  private readonly CASCADE_WINDOW = 150;
 
   /**
    * Enable dialog handling for a tab
-   * This attaches debugger and sets up event listener
+   * Must be called before executing JavaScript that might trigger dialogs
    */
-  async enableDialogHandling(tabId: number): Promise<void> {
+  async enableForTab(tabId: number): Promise<void> {
     console.log(`💬 [Dialog] Enabling dialog handling for tab ${tabId}`);
 
-    // Skip if already enabled
     if (this.enabledTabs.has(tabId)) {
-      console.log(`💬 [Dialog] Dialog handling already enabled for tab ${tabId}`);
+      console.log(`💬 [Dialog] Already enabled for tab ${tabId}`);
       return;
     }
 
-    // Attach debugger using session manager
-    const attached = await debuggerSessionManager.attachDebugger(tabId, LEGACY_CONVERSATION_ID);
-    if (!attached) {
-      throw new Error(`Failed to attach debugger for dialog handling on tab ${tabId}`);
-    }
-
-    const cdpCommander = new CdpCommander(tabId);
-
-    // Enable Page domain
-    try {
-      await cdpCommander.sendCommand('Page.enable', {}, 5000);
-      console.log(`✅ [Dialog] Page domain enabled for tab ${tabId}`);
-    } catch (error) {
-      console.warn(`⚠️ [Dialog] Page.enable failed (may already be enabled):`, error);
-    }
-
-    // Register dialog event listener if not already registered
+    // Ensure debugger is attached (DialogManager doesn't manage debugger lifecycle)
+    // The caller (executeJavaScript) should have already attached debugger
+    
+    // Register global listener if not already registered
     if (!this.dialogListener) {
       this.dialogListener = (source: chrome.debugger.Debuggee, method: string, params?: object) => {
         if (method === 'Page.javascriptDialogOpening' && source.tabId !== undefined) {
           this.handleDialogOpening(source.tabId, params);
         }
       };
-
       chrome.debugger.onEvent.addListener(this.dialogListener);
       console.log('✅ [Dialog] Global dialog event listener registered');
     }
 
-    // Mark this tab as enabled
+    // Enable Page domain to receive dialog events
+    const cdpCommander = new CdpCommander(tabId);
+    try {
+      await cdpCommander.sendCommand('Page.enable', {}, 5000);
+      console.log(`✅ [Dialog] Page domain enabled for tab ${tabId}`);
+    } catch (error) {
+      // Page.enable may fail if already enabled, which is fine
+      console.warn(`⚠️ [Dialog] Page.enable failed (may already be enabled):`, error);
+    }
+
     this.enabledTabs.add(tabId);
     console.log(`✅ [Dialog] Dialog handling enabled for tab ${tabId}`);
   }
@@ -99,22 +168,49 @@ export class DialogManager {
   /**
    * Disable dialog handling for a tab
    */
-  async disableDialogHandling(tabId: number): Promise<void> {
+  disableForTab(tabId: number): void {
     console.log(`💬 [Dialog] Disabling dialog handling for tab ${tabId}`);
-
     this.enabledTabs.delete(tabId);
     this.activeDialogs.delete(tabId);
+    this.dialogResolvers.delete(tabId);
+  }
 
-    // Note: We don't remove the global listener as other tabs may still need it
-    // The listener will check if the tab is in enabledTabs
-    console.log(`✅ [Dialog] Dialog handling disabled for tab ${tabId}`);
+  /**
+   * Register a resolver to be called when a dialog opens for this tab
+   * This is used by executeJavaScript to wait for dialog events
+   */
+  setDialogResolver(tabId: number, resolver: (dialogInfo: DialogInfo) => void): void {
+    this.dialogResolvers.set(tabId, resolver);
+    console.log(`💬 [Dialog] Resolver registered for tab ${tabId}`);
+  }
+
+  /**
+   * Clear the dialog resolver for a tab
+   */
+  clearDialogResolver(tabId: number): void {
+    this.dialogResolvers.delete(tabId);
+    console.log(`💬 [Dialog] Resolver cleared for tab ${tabId}`);
+  }
+
+  /**
+   * Check if there's an active dialog for a tab
+   */
+  hasActiveDialog(tabId: number): boolean {
+    return this.activeDialogs.has(tabId);
+  }
+
+  /**
+   * Get active dialog info for a tab
+   */
+  getActiveDialog(tabId: number): DialogInfo | undefined {
+    return this.activeDialogs.get(tabId);
   }
 
   /**
    * Handle Page.javascriptDialogOpening event
-   * This is called when a dialog opens
+   * Called by the global listener when any dialog opens
    */
-  private async handleDialogOpening(tabId: number, params: any): Promise<void> {
+  private handleDialogOpening(tabId: number, params: any): void {
     console.log(`💬 [Dialog] Dialog opening on tab ${tabId}:`, params);
 
     // Only process if dialog handling is enabled for this tab
@@ -123,57 +219,55 @@ export class DialogManager {
       return;
     }
 
-    const dialogInfo: DialogResult = {
-      tabId: tabId,
-      dialogType: params.type as DialogType,
+    const dialogType = params.type as DialogType;
+    const dialogInfo: DialogInfo = {
+      tabId,
+      conversationId: '', // Will be set by caller
+      dialogType,
       message: params.message || '',
       url: params.url || '',
       timestamp: Date.now(),
       hasBrowserHandler: params.hasBrowserHandler || false,
+      needsDecision: DECISION_REQUIRED_TYPES.has(dialogType),
     };
 
     // Store dialog info
     this.activeDialogs.set(tabId, dialogInfo);
+    console.log(`💬 [Dialog] Dialog stored: type=${dialogType}, needsDecision=${dialogInfo.needsDecision}`);
 
-    // Notify server via WebSocket
-    const event: DialogOpenedEvent = {
-      type: 'dialog_opened',
-      tab_id: tabId,
-      conversation_id: undefined,  // Will be set by background script
-      dialog_type: dialogInfo.dialogType,
-      message: dialogInfo.message,
-      url: dialogInfo.url,
-      timestamp: dialogInfo.timestamp,
-    };
-
-    console.log(`💬 [Dialog] Sending dialog_opened event to server:`, event);
-
-    if (wsClient.isConnected()) {
-      try {
-        wsClient.sendCommand(event as any);
-        console.log(`✅ [Dialog] Dialog event sent to server`);
-      } catch (error) {
-        console.error(`❌ [Dialog] Failed to send dialog event:`, error);
-      }
-    } else {
-      console.warn(`⚠️ [Dialog] WebSocket not connected, cannot send dialog event`);
+    // Notify resolver if registered (executeJavaScript is waiting)
+    const resolver = this.dialogResolvers.get(tabId);
+    if (resolver) {
+      console.log(`💬 [Dialog] Notifying resolver for tab ${tabId}`);
+      resolver(dialogInfo);
     }
   }
 
   /**
    * Handle a dialog (accept or dismiss)
-   * This is called when AI decides how to respond
+   * Returns information about any cascading dialog
    */
-  async handleDialog(tabId: number, action: DialogAction, promptText?: string): Promise<void> {
+  async handleDialog(
+    tabId: number,
+    action: DialogAction,
+    promptText?: string
+  ): Promise<DialogHandledResult> {
     console.log(`💬 [Dialog] Handling dialog on tab ${tabId}: action=${action}, promptText=${promptText}`);
 
-    // Check if there's an active dialog for this tab
-    const dialogInfo = this.activeDialogs.get(tabId);
-    if (!dialogInfo) {
+    const existingDialog = this.activeDialogs.get(tabId);
+    if (!existingDialog) {
       throw new Error(`No active dialog found for tab ${tabId}`);
     }
 
     const cdpCommander = new CdpCommander(tabId);
+    const previousType = existingDialog.dialogType;
+
+    // Set up resolver to detect cascading dialog
+    let cascadeDialog: DialogInfo | null = null;
+    const cascadeResolver = (info: DialogInfo) => {
+      cascadeDialog = info;
+    };
+    this.setDialogResolver(tabId, cascadeResolver);
 
     try {
       // Execute Page.handleJavaScriptDialog
@@ -182,28 +276,86 @@ export class DialogManager {
         promptText: promptText || '',
       }, 5000);
 
-      console.log(`✅ [Dialog] Dialog handled: ${action}${promptText ? `, text="${promptText}"` : ''}`);
+      console.log(`✅ [Dialog] Dialog handled: ${action}`);
 
-      // Remove active dialog
+      // Clear the handled dialog
       this.activeDialogs.delete(tabId);
+
+      // Wait for cascade window to detect if a new dialog opens
+      await this.waitForCascade();
+
+      // Check if a cascading dialog opened
+      if (cascadeDialog) {
+        const cd: DialogInfo = cascadeDialog; // Type guard for TypeScript
+        console.log(`💬 [Dialog] Cascading dialog detected: type=${cd.dialogType}`);
+        
+        return {
+          status: 'dialog_cascaded',
+          previousDialog: {
+            type: previousType,
+            action,
+          },
+          newDialog: {
+            type: cd.dialogType,
+            message: cd.message,
+            url: cd.url,
+            needsDecision: cd.needsDecision,
+          },
+        };
+      }
+
+      console.log(`✅ [Dialog] No cascade, dialog handling complete`);
+      
+      return {
+        status: 'dialog_handled',
+        previousDialog: {
+          type: previousType,
+          action,
+        },
+      };
     } catch (error) {
       console.error(`❌ [Dialog] Failed to handle dialog:`, error);
+      // Don't clear dialog info on error - it might still be open
       throw new Error(`Failed to handle dialog: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      this.clearDialogResolver(tabId);
     }
   }
 
   /**
-   * Get active dialog info for a tab
+   * Auto-accept a dialog (used for alerts that don't need decision)
    */
-  getActiveDialog(tabId: number): DialogResult | undefined {
-    return this.activeDialogs.get(tabId);
+  async autoAcceptDialog(tabId: number): Promise<void> {
+    console.log(`💬 [Dialog] Auto-accepting dialog on tab ${tabId}`);
+    
+    const dialogInfo = this.activeDialogs.get(tabId);
+    if (!dialogInfo) {
+      throw new Error(`No active dialog found for tab ${tabId}`);
+    }
+
+    const cdpCommander = new CdpCommander(tabId);
+    
+    try {
+      await cdpCommander.sendCommand('Page.handleJavaScriptDialog', {
+        accept: true,
+        promptText: '',
+      }, 5000);
+
+      this.activeDialogs.delete(tabId);
+      console.log(`✅ [Dialog] Dialog auto-accepted`);
+    } catch (error) {
+      console.error(`❌ [Dialog] Failed to auto-accept dialog:`, error);
+      throw error;
+    }
   }
 
   /**
-   * Check if there's an active dialog for a tab
+   * Wait for cascade window to detect cascading dialogs
    */
-  hasActiveDialog(tabId: number): boolean {
-    return this.activeDialogs.has(tabId);
+  private waitForCascade(): Promise<void> {
+    return new Promise(resolve => {
+      setTimeout(resolve, this.CASCADE_WINDOW);
+    });
   }
 
   /**
@@ -217,6 +369,7 @@ export class DialogManager {
 
     this.enabledTabs.clear();
     this.activeDialogs.clear();
+    this.dialogResolvers.clear();
     console.log('✅ [Dialog] Dialog manager cleaned up');
   }
 }

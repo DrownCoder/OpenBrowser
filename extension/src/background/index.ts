@@ -11,6 +11,7 @@ import { tabs } from '../commands/tabs';
 import { tabManager } from '../commands/tab-manager';
 import { javascript } from '../commands/javascript';
 import { debuggerSessionManager } from '../commands/debugger-manager';
+import { dialogManager } from '../commands/dialog';
 import type { Command, CommandResponse } from '../types';
 console.log('🚀 OpenBrowser extension starting (Strict Mode)...');
 
@@ -401,7 +402,7 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
 
   try {
     switch (command.type) {
-      case 'screenshot': {
+case 'screenshot': {
         // ✅ STRICT MODE: conversation_id is REQUIRED
         if (!command.conversation_id) {
           throw new Error('conversation_id is required for screenshot command (strict mode)');
@@ -413,6 +414,23 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
         const activeTabId = tabManager.getCurrentActiveTabId(conversationId);
         if (!activeTabId) {
           throw new Error(`No active tab found for conversation ${conversationId}. Use tab init or specify tab_id.`);
+        }
+        
+        // ⚠️ DIALOG BLOCKING CHECK: Cannot take screenshot while dialog is open
+        if (dialogManager.hasActiveDialog(activeTabId)) {
+          const dialog = dialogManager.getActiveDialog(activeTabId)!;
+          console.log(`💬 [Screenshot] Blocked: dialog open on tab ${activeTabId}`);
+          return {
+            success: false,
+            error: `Cannot capture screenshot: A ${dialog.dialogType} dialog is open ("${dialog.message}"). Use handle_dialog to respond first.`,
+            dialog_opened: true,
+            dialog: {
+              type: dialog.dialogType,
+              message: dialog.message,
+              needsDecision: dialog.needsDecision,
+            },
+            timestamp: Date.now(),
+          };
         }
         
         console.log(`📸 [Screenshot] Using active tab ${activeTabId} for conversation ${conversationId} (ignoring provided tab_id: ${command.tab_id || 'none'})`);
@@ -565,8 +583,8 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
               timestamp: Date.now(),
             };
 
-          default:
-            throw new Error(`Unknown tab action: ${command.action}`);
+default:
+            throw new Error(`Unknown tab action: ${(command as any).action}`);
         }
       }
 
@@ -687,7 +705,7 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
         const jsDuration = Date.now() - jsStartTime;
         console.log(`✅ [JavaScript] Execution completed in ${jsDuration}ms`);
         
-        return {
+return {
           success: true,
           message: 'JavaScript executed successfully',
           data: jsResult,
@@ -696,7 +714,133 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
         };
       }
 
-      default:
+      case 'handle_dialog': {
+        // ✅ STRICT MODE: conversation_id is REQUIRED
+        if (!command.conversation_id) {
+          throw new Error('conversation_id is required for handle_dialog command (strict mode)');
+        }
+        
+        const conversationId = command.conversation_id;
+        const action = command.action;  // 'accept' or 'dismiss'
+        
+        console.log(`💬 [HandleDialog] Handling dialog for conversation ${conversationId}: action=${action}`);
+        
+        // Get the active tab for this conversation
+        const activeTabId = tabManager.getCurrentActiveTabId(conversationId);
+        if (!activeTabId) {
+          throw new Error(`No active tab found for conversation ${conversationId}. Use tab init first.`);
+        }
+        
+        // Check if there's an active dialog
+        if (!dialogManager.hasActiveDialog(activeTabId)) {
+          return {
+            success: false,
+            error: 'No dialog is currently open. There is nothing to handle.',
+            timestamp: Date.now(),
+          };
+        }
+        
+        const existingDialog = dialogManager.getActiveDialog(activeTabId)!;
+        console.log(`💬 [HandleDialog] Found dialog: type=${existingDialog.dialogType}, message="${existingDialog.message}"`);
+        
+        try {
+          // Handle the dialog (may cascade to another dialog)
+          const handleResult = await dialogManager.handleDialog(
+            activeTabId,
+            action,
+            command.prompt_text
+          );
+          
+          console.log(`✅ [HandleDialog] Dialog handled: status=${handleResult.status}`);
+          
+          // If a new dialog cascaded, return info about it
+          if (handleResult.status === 'dialog_cascaded' && handleResult.newDialog) {
+            console.log(`💬 [HandleDialog] Cascading dialog detected: type=${handleResult.newDialog.type}`);
+            
+            // Auto-accept if it's an alert (no decision needed)
+            if (!handleResult.newDialog.needsDecision) {
+              console.log(`💬 [HandleDialog] Auto-accepting cascading alert`);
+              await dialogManager.autoAcceptDialog(activeTabId);
+              
+              // Take screenshot after auto-accept
+              const screenshotResult = await captureScreenshot(
+                activeTabId,
+                conversationId,
+                true, // include_cursor
+                90,   // quality
+                false, // resizeToPreset
+                0     // waitForRender
+              );
+              
+              return {
+                success: true,
+                message: `Dialog handled (${action}), cascading alert auto-accepted: "${handleResult.newDialog.message}"`,
+                data: {
+                  previousDialog: handleResult.previousDialog,
+                  cascadingDialog: {
+                    type: handleResult.newDialog.type,
+                    message: handleResult.newDialog.message,
+                    autoAccepted: true,
+                  },
+                  screenshot: screenshotResult,
+                },
+                timestamp: Date.now(),
+              };
+            }
+            
+            // Return info about the cascading dialog (needs decision)
+            return {
+              success: true,
+              message: `Dialog handled (${action}), but a new ${handleResult.newDialog.type} dialog opened: "${handleResult.newDialog.message}". Use handle_dialog again to respond.`,
+              dialog_opened: true,
+              dialog: {
+                type: handleResult.newDialog.type,
+                message: handleResult.newDialog.message,
+                url: handleResult.newDialog.url,
+                needsDecision: handleResult.newDialog.needsDecision,
+              },
+              data: {
+                previousDialog: handleResult.previousDialog,
+                cascadingDialog: handleResult.newDialog,
+              },
+              timestamp: Date.now(),
+            };
+          }
+          
+          // No cascade - dialog handling complete
+          // Take screenshot to show the result
+          const screenshotResult = await captureScreenshot(
+            activeTabId,
+            conversationId,
+            true, // include_cursor
+            90,   // quality
+            false, // resizeToPreset
+            0     // waitForRender
+          );
+          
+          console.log(`✅ [HandleDialog] Dialog handling complete, screenshot captured`);
+          
+          return {
+            success: true,
+            message: `Dialog handled successfully: ${handleResult.previousDialog.type} ${action}ed`,
+            data: {
+              handledDialog: handleResult.previousDialog,
+              screenshot: screenshotResult,
+            },
+            timestamp: Date.now(),
+          };
+          
+        } catch (error) {
+          console.error(`❌ [HandleDialog] Failed to handle dialog:`, error);
+          return {
+            success: false,
+            error: `Failed to handle dialog: ${error instanceof Error ? error.message : String(error)}`,
+            timestamp: Date.now(),
+          };
+        }
+      }
+
+default:
         throw new Error(`Unknown command type: ${(command as any).type}`);
     }
   } catch (error) {
