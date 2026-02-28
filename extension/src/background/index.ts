@@ -14,6 +14,10 @@ import { debuggerSessionManager } from '../commands/debugger-manager';
 import { dialogManager } from '../commands/dialog';
 import { extractGroundedElements } from '../commands/grounded-elements';
 import { handleGetAccessibilityTree } from '../commands/accessibility';
+import { detectInteractiveElements, sortInteractiveElements } from '../commands/interactive-elements';
+import { drawHighlights } from '../commands/visual-highlight';
+import { elementCache } from '../commands/element-cache';
+import { performElementClick, performElementHover, performElementScroll, performKeyboardInput } from '../commands/element-actions';
 import type { Command, CommandResponse } from '../types';
 console.log('🚀 OpenBrowser extension starting (Strict Mode)...');
 
@@ -885,6 +889,95 @@ return {
             timestamp: Date.now(),
           };
         }
+      }
+
+      case 'highlight_elements': {
+        if (!command.conversation_id) {
+          throw new Error('conversation_id is required for highlight_elements command');
+        }
+        const conversationId = command.conversation_id;
+        const activeTabId = tabManager.getCurrentActiveTabId(conversationId);
+        if (!activeTabId) {
+          throw new Error(`No active tab for conversation ${conversationId}`);
+        }
+        
+        const elementTypes = command.element_types || ['clickable', 'scrollable', 'inputable', 'hoverable'];
+        const limit = command.limit || 10;
+        const offset = command.offset || 0;
+        
+        // Detect and sort elements
+        const allElements = detectInteractiveElements({ elementTypes });
+        const sortedElements = sortInteractiveElements(allElements);
+        
+        // Paginate
+        const paginatedElements = sortedElements.slice(offset, offset + limit);
+        
+        // Cache elements for later operations
+        elementCache.storeElements(conversationId, sortedElements);
+        
+        // Capture screenshot with highlights
+        const screenshotResult = await captureScreenshot(activeTabId, conversationId, true, 90, false, 0);
+        
+        // Draw highlights on screenshot
+        const highlightedScreenshot = await drawHighlights(screenshotResult.dataUrl, paginatedElements, { limit, offset });
+        
+        return {
+          success: true,
+          data: {
+            elements: paginatedElements,
+            totalElements: sortedElements.length,
+            screenshot: highlightedScreenshot,
+          },
+          timestamp: Date.now(),
+        };
+      }
+
+      case 'click_element': {
+        if (!command.conversation_id) throw new Error('conversation_id required');
+        const activeTabId = tabManager.getCurrentActiveTabId(command.conversation_id);
+        if (!activeTabId) throw new Error('No active tab');
+        
+        const result = await performElementClick(command.conversation_id, command.element_id, activeTabId);
+        const screenshot = await captureScreenshot(activeTabId, command.conversation_id, true, 90, false, 0);
+        
+        return {
+          success: result.success,
+          data: { ...result, screenshot },
+          timestamp: Date.now(),
+        };
+      }
+
+      case 'hover_element': {
+        if (!command.conversation_id) throw new Error('conversation_id required');
+        const activeTabId = tabManager.getCurrentActiveTabId(command.conversation_id);
+        if (!activeTabId) throw new Error('No active tab');
+        
+        const result = await performElementHover(command.conversation_id, command.element_id, activeTabId);
+        const screenshot = await captureScreenshot(activeTabId, command.conversation_id, true, 90, false, 0);
+        
+        return { success: result.success, data: { ...result, screenshot }, timestamp: Date.now() };
+      }
+
+      case 'scroll_element': {
+        if (!command.conversation_id) throw new Error('conversation_id required');
+        const activeTabId = tabManager.getCurrentActiveTabId(command.conversation_id);
+        if (!activeTabId) throw new Error('No active tab');
+        
+        const result = await performElementScroll(command.conversation_id, command.element_id, command.direction || 'down', activeTabId);
+        const screenshot = await captureScreenshot(activeTabId, command.conversation_id, true, 90, false, 0);
+        
+        return { success: result.success, data: { ...result, screenshot }, timestamp: Date.now() };
+      }
+
+      case 'keyboard_input': {
+        if (!command.conversation_id) throw new Error('conversation_id required');
+        const activeTabId = tabManager.getCurrentActiveTabId(command.conversation_id);
+        if (!activeTabId) throw new Error('No active tab');
+        
+        const result = await performKeyboardInput(command.conversation_id, command.element_id, command.text, activeTabId);
+        const screenshot = await captureScreenshot(activeTabId, command.conversation_id, true, 90, false, 0);
+        
+        return { success: result.success, data: { ...result, screenshot }, timestamp: Date.now() };
       }
 
 default:
