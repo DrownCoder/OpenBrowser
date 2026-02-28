@@ -350,3 +350,89 @@ function createElementInfo(el: Element, type: ElementType, index: number): Inter
     isInViewport: inViewport,
   };
 }
+
+/**
+ * Score breakdown for an interactive element
+ */
+export interface ElementScore {
+  element: InteractiveElement;
+  score: number;
+}
+
+/**
+ * Sort interactive elements by composite score
+ * Ranking: viewport visibility (40%) + size (30%) + z-index (20%) + position (10%)
+ * @param elements Array of interactive elements to sort
+ * @returns Sorted array with reassigned IDs
+ */
+export function sortInteractiveElements(elements: InteractiveElement[]): InteractiveElement[] {
+  // Calculate score for each element
+  const scored = elements.map((el, index) => ({
+    element: el,
+    score: calculateElementScore(el),
+    originalIndex: index, // For tie-breaking
+  }));
+
+  // Sort by score descending, then by original index for determinism
+  scored.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return a.originalIndex - b.originalIndex;
+  });
+
+  // Reassign IDs based on new order
+  const counts: Record<ElementType, number> = { clickable: 0, scrollable: 0, inputable: 0, hoverable: 0 };
+  return scored.map(({ element }) => {
+    const newIndex = counts[element.type] + 1;
+    counts[element.type]++;
+    return { ...element, id: `${element.type}-${newIndex}` };
+  });
+}
+
+/**
+ * Calculate composite score for an element
+ */
+function calculateElementScore(el: InteractiveElement): number {
+  // Viewport visibility (40% weight)
+  const viewportScore = el.isInViewport ? 40 : 0;
+
+  // Size score (30% weight) - normalize by viewport
+  const area = el.bbox.width * el.bbox.height;
+  const viewportArea = window.innerWidth * window.innerHeight;
+  const sizeScore = Math.min(30, (area / viewportArea) * 300); // Cap at 30
+
+  // Z-index score (20% weight)
+  const zScore = getZIndexScore(el) * 20; // 0-20
+
+  // Position score (10% weight) - top-left is better
+  const maxDist = Math.sqrt(window.innerWidth ** 2 + window.innerHeight ** 2);
+  const dist = Math.sqrt(el.bbox.x ** 2 + el.bbox.y ** 2);
+  const positionScore = (1 - dist / maxDist) * 10; // 0-10
+
+  return viewportScore + sizeScore + zScore + positionScore;
+}
+
+/**
+ * Get z-index score for an element (0-1 normalized)
+ */
+function getZIndexScore(el: InteractiveElement): number {
+  try {
+    const domEl = document.querySelector(el.selector);
+    if (!domEl) return 0;
+
+    const style = window.getComputedStyle(domEl);
+    const zIndex = style.zIndex;
+
+    // Parse z-index value
+    if (zIndex === 'auto' || zIndex === '') return 0.5; // Normal stacking
+
+    const zValue = parseInt(zIndex, 10);
+    if (isNaN(zValue)) return 0;
+
+    // Normalize: typical z-index range 0-9999, map to 0-1
+    // Negative z-index gets lower score
+    if (zValue < 0) return 0;
+    return Math.min(1, zValue / 100);
+  } catch {
+    return 0;
+  }
+}
