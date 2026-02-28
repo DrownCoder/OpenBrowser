@@ -200,6 +200,32 @@ class HandleDialogCommand(BaseCommand):
         description="Text to enter for prompt dialogs"
     )
 
+
+class GetGroundedElementsCommand(BaseCommand):
+    """Extract interactive elements with selectors and bounding boxes for visual grounding"""
+    type: Literal["get_grounded_elements"] = "get_grounded_elements"
+    max_elements: int = Field(
+        default=100,
+        ge=1,
+        le=500,
+        description="Maximum number of elements to return (1-500, default 100)"
+    )
+    include_hidden: bool = Field(
+        default=False,
+        description="If true, include hidden/disabled elements (default false)"
+    )
+
+
+class GetAccessibilityTreeCommand(BaseCommand):
+    """Get accessibility tree from the page for AI agent context"""
+    type: Literal["get_accessibility_tree"] = "get_accessibility_tree"
+    max_elements: Optional[int] = Field(
+        default=50,
+        ge=1,
+        le=500,
+        description="Maximum number of elements to return (1-500, default 50)"
+    )
+
 class CommandResponse(BaseModel):
     """Response from command execution"""
     success: bool
@@ -239,6 +265,8 @@ Command = Union[
     GetTabsCommand,
     JavascriptExecuteCommand,
     HandleDialogCommand,
+    GetGroundedElementsCommand,
+    GetAccessibilityTreeCommand,
 ]
 
 
@@ -261,6 +289,8 @@ def parse_command(data: dict) -> Command:
         "get_tabs": GetTabsCommand,
         "javascript_execute": JavascriptExecuteCommand,
         "handle_dialog": HandleDialogCommand,
+        "get_grounded_elements": GetGroundedElementsCommand,
+        "get_accessibility_tree": GetAccessibilityTreeCommand,
     }
     
     if cmd_type not in command_map:

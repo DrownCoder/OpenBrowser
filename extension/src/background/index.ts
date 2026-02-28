@@ -12,6 +12,8 @@ import { tabManager } from '../commands/tab-manager';
 import { javascript } from '../commands/javascript';
 import { debuggerSessionManager } from '../commands/debugger-manager';
 import { dialogManager } from '../commands/dialog';
+import { extractGroundedElements } from '../commands/grounded-elements';
+import { handleGetAccessibilityTree } from '../commands/accessibility';
 import type { Command, CommandResponse } from '../types';
 console.log('🚀 OpenBrowser extension starting (Strict Mode)...');
 
@@ -402,7 +404,7 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
 
   try {
     switch (command.type) {
-case 'screenshot': {
+      case 'screenshot': {
         // ✅ STRICT MODE: conversation_id is REQUIRED
         if (!command.conversation_id) {
           throw new Error('conversation_id is required for screenshot command (strict mode)');
@@ -457,6 +459,51 @@ case 'screenshot': {
           success: true,
           message: 'Screenshot captured',
           data: screenshotResult,
+          timestamp: Date.now(),
+        };
+      }
+
+      case 'get_grounded_elements': {
+        if (!command.conversation_id) {
+          throw new Error('conversation_id is required for get_grounded_elements command (strict mode)');
+        }
+        const conversationId = command.conversation_id;
+        const activeTabId = tabManager.getCurrentActiveTabId(conversationId);
+        if (!activeTabId) {
+          throw new Error(`No active tab found for conversation ${conversationId}. Use tab init first.`);
+        }
+        await tabManager.ensureTabManaged(activeTabId, conversationId);
+
+        const maxElements = command.max_elements || 100;
+        const includeHidden = command.include_hidden || false;
+        const result = await extractGroundedElements(activeTabId, maxElements, includeHidden);
+
+        return {
+          success: true,
+          message: `Found ${result.elements.length} interactive elements`,
+          data: result,
+          timestamp: Date.now(),
+        };
+      }
+
+      case 'get_accessibility_tree': {
+        if (!command.conversation_id) {
+          throw new Error('conversation_id is required for get_accessibility_tree command');
+        }
+        const conversationId = command.conversation_id;
+        const activeTabId = tabManager.getCurrentActiveTabId(conversationId);
+        if (!activeTabId) {
+          throw new Error(`No active tab found for conversation ${conversationId}. Use tab init first.`);
+        }
+        await tabManager.ensureTabManaged(activeTabId, conversationId);
+
+        const maxElements = command.max_elements || 50;
+        const result = await handleGetAccessibilityTree(activeTabId, conversationId, maxElements);
+
+        return {
+          success: true,
+          message: `Found ${result.elements.length} accessible elements`,
+          data: result,
           timestamp: Date.now(),
         };
       }

@@ -75,17 +75,49 @@ export interface JavascriptExecuteCommand extends BaseCommand {
   timeout?: number;
 }
 
-// Cleanup session command for multi-session support
 export interface CleanupSessionCommand extends BaseCommand {
   type: 'cleanup_session';
   conversation_id: string;
 }
 
-// Handle dialog command - respond to open dialog (confirm/prompt)
 export interface HandleDialogCommand extends BaseCommand {
   type: 'handle_dialog';
   action: DialogAction;  // 'accept' or 'dismiss'
   prompt_text?: string;  // Required for prompt dialogs
+}
+
+export interface GroundedElement {
+  id: number;
+  type: string;
+  text: string;
+  selector: string;
+  bbox: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  attributes?: Record<string, any>;
+}
+
+export interface GetGroundedElementsCommand extends BaseCommand {
+  type: 'get_grounded_elements';
+  max_elements?: number;
+  include_hidden?: boolean;
+}
+
+export interface GroundedElementsResponse {
+  success: boolean;
+  data?: {
+    elements: GroundedElement[];
+    pageInfo: {
+      url: string;
+      title: string;
+      totalInteractive: number;
+    };
+  };
+  error?: string;
+  timestamp: number;
 }
 
 export type Command = 
@@ -100,7 +132,8 @@ export type Command =
   | GetTabsCommand
   | JavascriptExecuteCommand
   | CleanupSessionCommand
-  | HandleDialogCommand;
+  | HandleDialogCommand
+  | GetGroundedElementsCommand;
 
 export interface CommandResponse {
   success: boolean;

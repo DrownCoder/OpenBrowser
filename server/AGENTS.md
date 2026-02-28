@@ -68,6 +68,7 @@ server/
 | `tab` | `TabCommand` | Extension tab API |
 | `get_tabs` | `GetTabsCommand` | Extension tab API |
 | `handle_dialog` | `HandleDialogCommand` | Extension CDP |
+| `get_accessibility_tree` | `GetAccessibilityTreeCommand` | Extension CDP |
 
 ## DIALOG HANDLING
 
@@ -102,6 +103,31 @@ After handling one dialog, another may open (e.g., confirm → alert).
 The extension:
 - Auto-accepts alerts
 - Returns info for new confirm/prompt
+
+## ACCESSIBILITY CONTEXT
+
+The system provides a list of accessible interactive elements to help the AI agent
+understand page structure and select elements.
+
+### How It Works
+1. After each `javascript_execute`, `tab init/open/switch`, the system fetches the accessibility tree
+2. Returns list of interactive elements with selectors in `a11y_elements` field
+
+### Key Components
+| Component | File | Role |
+|-----------|------|------|
+| `GetAccessibilityTreeCommand` | models/commands.py | `max_elements` parameter |
+| `a11y_elements` | tools/open_browser_tool.py | Observation field with elements list |
+| `_get_a11y_elements_for_conversation()` | core/processor.py | Fetch accessibility tree |
+
+### Elements Format
+```python
+[
+    {"role": "button", "name": "Submit", "selector": "#submit-btn", "index": 0},
+    {"role": "textbox", "name": "Email", "selector": "[name='email']", "index": 0},
+    ...
+]
+```
 
 ## NOTES
 

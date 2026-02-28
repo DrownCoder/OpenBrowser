@@ -10,7 +10,7 @@ from server.models.commands import (
     ResetMouseCommand,
     KeyboardTypeCommand, KeyboardPressCommand, ScreenshotCommand,
     TabCommand, GetTabsCommand, JavascriptExecuteCommand,
-    HandleDialogCommand
+    HandleDialogCommand, GetGroundedElementsCommand, GetAccessibilityTreeCommand
 )
 from server.websocket.manager import ws_manager
 from server.core.config import config
@@ -23,8 +23,8 @@ class CommandProcessor:
     """Processes and executes commands"""
     
     def __init__(self):
-        # ✅ Multi-session support: Map conversation_id -> current_tab_id
         self._current_tab_ids: Dict[str, Optional[int]] = {}
+        self._max_a11y_elements: Dict[str, int] = {}  # conversation_id -> max_elements
     
     def _get_current_tab_id(self, conversation_id: str = None) -> Optional[int]:
         """Get current tab ID for a specific conversation"""
@@ -36,6 +36,41 @@ class CommandProcessor:
         key = conversation_id or 'default'
         self._current_tab_ids[key] = tab_id
         logger.debug(f"Set current tab ID {tab_id} for conversation {key}")
+    
+    def set_max_a11y_elements(self, max_elements: int, conversation_id: str = None):
+        """Set max a11y elements for a specific conversation"""
+        key = conversation_id or 'default'
+        self._max_a11y_elements[key] = max_elements
+    
+    def _get_max_a11y_elements(self, conversation_id: str = None) -> int:
+        """Get max a11y elements for a specific conversation"""
+        key = conversation_id or 'default'
+        return self._max_a11y_elements.get(key, 100)
+    
+    async def _get_a11y_elements_for_conversation(
+        self,
+        conversation_id: str,
+        max_elements: int = 100
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Get accessibility tree elements for a conversation."""
+        command = GetAccessibilityTreeCommand(
+            conversation_id=conversation_id,
+            max_elements=max_elements
+        )
+        
+        try:
+            response = await self._send_prepared_command(command)
+            
+            if not response.success or not response.data:
+                logger.warning(f"Failed to get accessibility tree: {response.error}")
+                return None
+            elements = response.data.get('elements', [])
+            logger.info(f"_get_a11y_elements_for_conversation got {len(elements)} elements")
+            return response.data.get('elements', [])
+            
+        except Exception as e:
+            logger.error(f"Error getting accessibility tree: {e}")
+            return None
     
     def _prepare_command_dict(self, command: Command) -> dict:
         """
@@ -132,6 +167,10 @@ class CommandProcessor:
                 return await self._execute_javascript_execute(command)
             elif isinstance(command, HandleDialogCommand):
                 return await self._execute_handle_dialog(command)
+            elif isinstance(command, GetGroundedElementsCommand):
+                return await self._execute_get_grounded_elements(command)
+            elif isinstance(command, GetAccessibilityTreeCommand):
+                return await self._execute_get_accessibility_tree(command)
             else:
                 raise ValueError(f"Unknown command type: {command.type}")
                 
@@ -174,28 +213,38 @@ class CommandProcessor:
         return response
         
     async def _execute_tab_command(self, command: TabCommand) -> CommandResponse:
-        """Execute tab management command"""
+        """Execute tab management command and return a11y delta for page changes"""
         response = await self._send_prepared_command(command)
         
         # Update current tab based on action (conversation-aware)
         if response.success:
             conversation_id = command.conversation_id
+            needs_a11y_update = False
             
             if command.action == "switch" and command.tab_id:
                 self._set_current_tab_id(command.tab_id, conversation_id)
+                needs_a11y_update = True
             elif command.action == "init":
-                # For init action, update current tab to the newly created tab
                 if response.data and 'tabId' in response.data:
                     self._set_current_tab_id(response.data['tabId'], conversation_id)
                 elif response.data and 'tab_id' in response.data:
                     self._set_current_tab_id(response.data['tab_id'], conversation_id)
+                needs_a11y_update = True
             elif command.action == "open":
-                # For open action, update current tab to the newly opened tab
                 if response.data and 'tabId' in response.data:
                     self._set_current_tab_id(response.data['tabId'], conversation_id)
                 elif response.data and 'tab_id' in response.data:
                     self._set_current_tab_id(response.data['tab_id'], conversation_id)
+                needs_a11y_update = True
             
+            # Get accessibility elements for page navigation actions
+            if needs_a11y_update and conversation_id:
+                max_el = self._get_max_a11y_elements(conversation_id)
+                a11y_elements = await self._get_a11y_elements_for_conversation(conversation_id, max_el)
+                if a11y_elements:
+                    if response.data is None:
+                        response.data = {}
+                    response.data['a11y_elements'] = a11y_elements
         return response
         
     async def _execute_get_tabs(self, command: GetTabsCommand) -> CommandResponse:
@@ -209,12 +258,31 @@ class CommandProcessor:
         return response
         
     async def _execute_javascript_execute(self, command: JavascriptExecuteCommand) -> CommandResponse:
-        """Execute JavaScript code in browser tab"""
+        """Execute JavaScript code in browser tab and return accessibility elements"""
         response = await self._send_prepared_command(command)
+        
+        # Get accessibility elements after JavaScript execution
+        if command.conversation_id:
+            max_el = self._get_max_a11y_elements(command.conversation_id)
+            a11y_elements = await self._get_a11y_elements_for_conversation(command.conversation_id, max_el)
+            if a11y_elements:
+                if response.data is None:
+                    response.data = {}
+                response.data['a11y_elements'] = a11y_elements
         return response
         
     async def _execute_handle_dialog(self, command: HandleDialogCommand) -> CommandResponse:
         """Handle open dialog (accept or dismiss)"""
+        response = await self._send_prepared_command(command)
+        return response
+    
+    async def _execute_get_grounded_elements(self, command: GetGroundedElementsCommand) -> CommandResponse:
+        """Get grounded interactive elements"""
+        response = await self._send_prepared_command(command)
+        return response
+    
+    async def _execute_get_accessibility_tree(self, command: GetAccessibilityTreeCommand) -> CommandResponse:
+        """Get accessibility tree from the page"""
         response = await self._send_prepared_command(command)
         return response
         

@@ -50,7 +50,10 @@ class OpenBrowserAction(Action):
         default=None,
         description="Text to enter for prompt dialogs (only for handle_dialog with prompt)"
     )
-    # Note: 'view' action requires no additional parameters
+    max_a11y_elements: Optional[int] = Field(
+        default=100,
+        description="Maximum number of accessible elements to return (default: 100). Set higher if you need more elements."
+    )
 
 # --- Supported Action Types and Their Parameters ---
 """
@@ -111,6 +114,11 @@ class OpenBrowserObservation(Observation):
         default=None,
         description="Dialog information if a dialog is open (type, message, needsDecision)"
     )
+    a11y_elements: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="List of accessible interactive elements with selectors"
+    )
+
     @property
     def to_llm_content(self) -> Sequence[TextContent | ImageContent]:
         """Convert observation to LLM content format"""
@@ -241,6 +249,34 @@ class OpenBrowserObservation(Observation):
                 text_parts.append("**Note**: This dialog was auto-accepted (no decision needed).")
             text_parts.append("")
         
+        if getattr(self, "a11y_elements", None) is not None:
+            text_parts.append("## Accessible Elements")
+            text_parts.append("")
+            elements = self.a11y_elements
+            text_parts.append(f"**Found {len(elements)} interactive elements:**")
+            text_parts.append("")
+            for el in elements[:100]:
+                idx_info = f" (idx:{el.get('index')})" if el.get('index') is not None else ""
+                extra_info = []
+                if el.get('href'):
+                    extra_info.append(f"href={el.get('href')[:60]}")
+                if el.get('placeholder'):
+                    extra_info.append(f"placeholder=\"{el.get('placeholder')[:30]}\"")
+                if el.get('value') and el.get('role') in ('textbox', 'searchbox'):
+                    extra_info.append(f"value=\"{el.get('value')[:30]}\"")
+                if el.get('checked') is not None:
+                    extra_info.append(f"checked={el.get('checked')}")
+                if el.get('disabled'):
+                    extra_info.append("disabled")
+                extra_str = f" [{', '.join(extra_info)}]" if extra_info else ""
+                text_parts.append(f"  - [{el.get('role')}] \"{el.get('name')}\" → {el.get('selector')}{idx_info}{extra_str}")
+            if len(elements) > 100:
+                text_parts.append(f"  ... and {len(elements) - 100} more (set max_a11y_elements to see all)")
+            else:
+                text_parts.append(f" (if you find accessible elements unhelpful, set max_a11y_elements to 0 to ignore all)")
+            text_parts.append("")
+        
+        # Browser State Section
         # Browser State Section
         if self.tabs:
             text_parts.append("## Browser State")
@@ -515,6 +551,7 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
             error = None
             dialog_opened = None
             dialog = None
+            a11y_elements = None
             
             if result_dict:
                 success = result_dict.get('success', False)
@@ -534,6 +571,10 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                             message = f"Dialog opened: {dialog.get('type')} (\"{dialog.get('message')}\"). Use handle_dialog to respond."
                         else:
                             message = f"Dialog auto-accepted: {dialog.get('type')} (\"{dialog.get('message')}\")"
+                
+                # Extract a11y_elements if present
+                if 'data' in result_dict and isinstance(result_dict['data'], dict):
+                    a11y_elements = result_dict['data'].get('a11y_elements')
             
             return OpenBrowserObservation(
                 success=success,
@@ -545,7 +586,8 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 javascript_result=javascript_result,
                 console_output=console_output,
                 dialog_opened=dialog_opened,
-                dialog=dialog
+                dialog=dialog,
+                a11y_elements=a11y_elements
             )
             
         except ValueError as e:
@@ -561,7 +603,8 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 javascript_result=None,
                 console_output=None,
                 dialog_opened=None,
-                dialog=None
+                dialog=None,
+                a11y_elements=None
             )
         except Exception as e:
             logger.debug(f"DEBUG: _execute_action_sync caught exception: {e}")
@@ -577,19 +620,21 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 javascript_result=None,
                 console_output=None,
                 dialog_opened=None,
-                dialog=None
+                dialog=None,
+                a11y_elements=None
             )
     
     def __call__(self, action: OpenBrowserAction, conversation) -> OpenBrowserObservation:
         """Execute a browser action and return observation"""
         self.conversation_id = str(conversation._state.id)
 
-        # Use synchronous HTTP API to avoid event loop competition with WebSocket
+        if action.max_a11y_elements is not None:
+            command_processor.set_max_a11y_elements(action.max_a11y_elements, self.conversation_id)
+
         logger.debug(f"DEBUG: OpenBrowserTool.__call__ called with action: {action.type}, conversation_id: {self.conversation_id}")
         logger.debug(f"DEBUG: Current thread: {threading.current_thread().name}")
         
         try:
-            # Use synchronous execution (avoids event loop issues)
             logger.debug(f"DEBUG: Using synchronous HTTP API for tool execution")
             obs = self._execute_action_sync(action)
             logger.debug(f"DEBUG: OpenBrowserTool.__call__ returning observation: success={obs.success}, message={obs.message}, tabs_count={len(obs.tabs)}, has_screenshot={obs.screenshot_data_url is not None}")
@@ -658,306 +703,217 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
 # --- Tool Definition ---
 
 _OPEN_BROWSER_DESCRIPTION = """
-Browser automation tool for controlling Chrome via JavaScript execution.
+Browser automation tool with accessibility-first interaction.
 
-## Text-First, Visual-On-Demand Philosophy
+## Core Concept: Accessibility Elements
 
-Most browser operations can be done with text-only feedback:
-- **javascript_execute**: Returns execution result and console output (no screenshot)
-- **tab**: Returns current tab list (no screenshot)
-- **handle_dialog**: Returns dialog status (no screenshot)
+Every action returns a **list of accessible interactive elements** on the page. This is your PRIMARY way to find and interact with elements.
 
-Use **view** action when you need visual context:
-- After navigation to verify page loaded correctly
-- When UI structure is unknown and you need to "see" the page
-- After multiple operations to verify final state
-- When you encounter unexpected behavior
+### What You Get
 
-This approach is **more efficient**: text operations are faster and cheaper than visual analysis.
+After `javascript_execute`, `tab init/open/switch`, you receive:
 
+```
+## Accessible Elements
+
+**Found 5 interactive elements:**
+
+  - [button] "Submit" → #submit-btn (idx: 0)
+  - [button] "Cancel" → button, [role="button"] (idx: 2)
+  - [textbox] "Email" → [name="email"] (idx: 0) [placeholder="Enter email"]
+  - [link] "Learn More" → a, [role="link"] (idx: 3) [href=/learn]
+  - [checkbox] "Remember me" → #remember (idx: 0) [checked=false]
+```
+
+### Element Format
+
+Each element provides:
+- **role**: Semantic type (`button`, `link`, `textbox`, `checkbox`, etc.)
+- **name**: Visible text or aria-label
+- **selector**: CSS selector for `querySelectorAll()` - use with index
+- **idx**: Array index for `querySelectorAll(selector)[idx]`
+- **href**: URL for links
+- **placeholder/value**: For text inputs
+- **checked**: For checkboxes/radios
+
+### How to Use Selectors
+
+**With ID/name/data-testid** (unique selector):
+```javascript
+document.querySelector('#submit-btn')  // idx is 0, can use querySelector
+```
+
+**With compound selector** (multiple element types):
+```javascript
+// selector is "button, [role=\"button\"]" , idx is 2
+document.querySelectorAll('button, [role="button"]')[2]
+```
+
+IMPORTANT: Always use the **exact selector shown** with `querySelectorAll`, then access by **idx**.
+
+### Getting More Elements
+
+If you see "... and N more" at the end, set `max_a11y_elements` to see all:
+```json
+{ "type": "javascript_execute", "script": "...", "max_a11y_elements": 500 }
+```
 ---
 
-## ⚠️ Important Notes Before You Start
+## How to Interact
 
-- **React/Vue Applications**: Modern frameworks often ignore `.click()`. If a click doesn't work, immediately use [Full Event Sequence](#when-templates-dont-work).
-- **2-Strike Rule**: If the same operation fails twice, switch to diagnostic mode immediately.
-- **URL Navigation**: When UI interaction is complex (e.g., region switching), consider direct URL navigation as a faster alternative.
+### Step 1: Read the Accessible Elements
 
-## 1. javascript_execute
+The list tells you exactly what elements are available and how to select them.
+
+### Step 2: Use the Selector
 
 ```json
 {
   "type": "javascript_execute",
-  "script": "your JavaScript code here"
+  "script": "(() => { const el = document.querySelector('#submit-btn'); if (el) { el.click(); return 'clicked'; } return 'not found'; })()"
 }
 ```
 
-**Rules:**
-- 30-second timeout
-- Return values must be JSON-serializable (strings, numbers, plain objects, arrays). **Never return DOM nodes.**
-- Use IIFE `(() => { ... })()` when you need `return` statements
-- `console.log()` output is captured and visible
-- Results over 50KB will be truncated
+### Step 3: Check Result
+
+- Success: Element was found and action completed
+- "not found": Selector failed, element may have been removed
 
 ---
 
-## Universal Templates
+## Common Patterns
 
-### Click by visible text
-
-See something on screen? Click it. Replace `YOUR_TEXT` with any text you can see (partial match):
+### Click a Button
 
 ```javascript
+// Accessibility shows: [button] "Submit" → #submit-btn
 (() => {
-    const text = 'YOUR_TEXT';
-    const leaf = Array.from(document.querySelectorAll('*'))
-        .find(el => el.children.length === 0 && el.textContent.includes(text));
-    if (!leaf) return 'not found';
-    const target = leaf.closest('a, button, [role="button"], [onclick], [tabindex], tr, li') 
-        || leaf.parentElement || leaf;
-    target.click();
-    return 'clicked: ' + target.tagName + ' | ' + target.textContent.trim().substring(0, 50);
+    const el = document.querySelector('#submit-btn');
+    if (!el) return 'not found';
+    el.click();
+    return 'clicked';
 })()
 ```
 
-This single pattern handles ~90% of click tasks. It finds the innermost element containing your text, walks up to the nearest interactive ancestor, and clicks it.
-
-### Fill an input field
-
-Locate by nearby label or placeholder text, set value, and **trigger events for framework compatibility**:
+### Fill a Text Field
 
 ```javascript
+// Accessibility shows: [textbox] "Email" → [name="email"]
 (() => {
-    // Find the label, then find its associated input
-    const label = Array.from(document.querySelectorAll('label'))
-        .find(l => l.textContent.includes('LABEL_TEXT'));
-    const input = label?.querySelector('input,textarea,select')
-        || label?.nextElementSibling
-        || document.querySelector('input[placeholder*="PLACEHOLDER_TEXT"]');
-    if (!input) return 'input not found';
-    input.focus();
-    input.value = 'YOUR_VALUE';
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.dispatchEvent(new Event('change', { bubbles: true }));
+    const el = document.querySelector('[name="email"]');
+    if (!el) return 'not found';
+    el.focus();
+    el.value = 'user@example.com';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
     return 'filled';
 })()
 ```
 
-For checkboxes/radios: set `.checked = true`, then dispatch `change`.
-For `<select>`: set `.value`, then dispatch `change`.
-
-### Scroll the page
-
-`window.scrollBy()` often fails because the real scroll container is an inner `<div>`, not `window`. Use this instead:
+### Click by Index (No Unique ID)
 
 ```javascript
+// Accessibility shows: [button] "Cancel" → button, [role="button"] (idx: 2)
+// Use the EXACT selector with querySelectorAll:
 (() => {
-    // Find the actual scrollable container
-    const el = Array.from(document.querySelectorAll('*'))
-        .filter(e => e.scrollHeight > e.clientHeight
-            && getComputedStyle(e).overflowY !== 'visible'
-            && e.scrollHeight - e.clientHeight > 100)
-        .sort((a, b) => (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight))[0];
-    if (el) { el.scrollBy(0, 400); return 'scrolled'; }
-    // Fallback to window
-    window.scrollBy(0, 400);
-    return 'scrolled window';
+    const selector = 'button, [role="button"]';
+    const idx = 2;
+    const els = document.querySelectorAll(selector);
+    if (els[idx]) { els[idx].click(); return 'clicked idx ' + idx; }
+    return 'not found';
+})()
+```
+
+### Toggle Checkbox
+
+```javascript
+// Accessibility shows: [checkbox] "Remember me" → #remember
+(() => {
+    const el = document.querySelector('#remember');
+    if (!el) return 'not found';
+    el.checked = true;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    return 'checked';
 })()
 ```
 
 ---
 
-## When Templates Don't Work
+## Beyond Accessibility Elements
 
-### Step 1: Dispatch Full Event Sequence (React/Vue Required)
+You can execute **any JavaScript** to interact with the page. Use `javascript_execute` freely to: search DOM, click by text, scroll, extract data, handle iframes, work with Shadow DOM, or any other browser operation. You have full flexibility.
 
-Some frameworks (React, Vue) ignore `.click()`. Simulate the real mouse interaction:
+## Action Reference
 
-```javascript
-(() => {
-    const text = 'YOUR_TEXT';
-    const leaf = Array.from(document.querySelectorAll('*'))
-        .find(el => el.children.length === 0 && el.textContent.includes(text));
-    if (!leaf) return 'not found';
-    const target = leaf.closest('a, button, [role="button"], [onclick], tr, li')
-        || leaf.parentElement || leaf;
-    ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(type => {
-        target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true }));
-    });
-    return 'events dispatched: ' + target.tagName;
-})()
-```
-
-Also try `dblclick` for file explorers, tree views, or items that open on double-click.
-
-### Step 2: Inspect Structure First
-
-When text appears multiple times or element not found, scan the page first:
-
-```javascript
-(() => {
-    const keyword = 'YOUR_TEXT';
-    return Array.from(document.querySelectorAll('*'))
-        .filter(el => el.children.length === 0 && el.textContent.includes(keyword))
-        .map(el => ({
-            tag: el.tagName,
-            text: el.textContent.trim().substring(0, 60),
-            id: el.id,
-            class: el.className?.toString?.().substring(0, 60),
-            parentTag: el.parentElement?.tagName,
-            parentClass: el.parentElement?.className?.toString?.().substring(0, 60)
-        }));
-})()
-```
-
-### Step 3: Diagnostic Checklist
-
-If still not working, check these in order:
-
-1. **Page still loading?** Check `document.readyState`
-2. **Inside an iframe?** Access via `document.querySelector('iframe').contentDocument`
-3. **Inside Shadow DOM?** Access via `element.shadowRoot`
-4. **Need to scroll first?** Content may be lazy-loaded — scroll down, wait, retry
-5. **Text mismatch?** Check for extra whitespace, different casing, or special characters
-
-### Step 4: Alternative - Direct URL Navigation
-
-When UI interaction is complex or unreliable, navigate directly via URL:
-
-```javascript
-window.location.href = "https://example.com/target-page";
-```
-
-**Common use cases:**
-- Region/zone switching (e.g., `.../rdsList/cn-shanghai`)
-- Page navigation when menus are complex
-- Bypassing multi-step wizards
-
----
-
-## Other Operations
-
-**Extract data:**
-```javascript
-({ title: document.title, url: location.href })
-```
-
-**Wait for content (requires await_promise):**
-```javascript
-new Promise(resolve => {
-    const check = () => {
-        const el = document.querySelector('.loaded');
-        if (el) resolve(el.textContent); else setTimeout(check, 100);
-    };
-    check();
-})
-```
-
----
-
-## Common Errors
-
-| Error | Fix |
-|-------|-----|
-| `Illegal return statement` | Wrap in IIFE: `(() => { return value; })()` |
-| `:contains()` is not valid | That's jQuery-only. Use `.textContent.includes()` instead |
-| Circular structure to JSON | Return `.textContent` / `.href` / `.value`, not the element itself |
-
----
-
-## 2. tab
+### 1. javascript_execute
 
 ```json
-{
-  "type": "tab",
-  "action": "open",
-  "url": "https://example.com",
-  "tab_id": 123
-}
+{ "type": "javascript_execute", "script": "your code here" }
 ```
 
-**Actions:** `init` | `open` | `close` | `switch` | `list` | `refresh`
-- `init` / `open` require `url`
-- `close` / `switch` / `refresh` require `tab_id`
+- 30-second timeout
+- Return JSON-serializable values only (no DOM nodes)
+- Use IIFE `(() => { ... })()` for return statements
+- `console.log()` output is captured
 
----
-
-## 3. handle_dialog
-
-When JavaScript triggers a dialog (alert, confirm, prompt), the browser pauses execution. OpenBrowser detects dialogs automatically:
-
-- **alert**: Auto-accepted (notification only)
-- **confirm**: Requires decision - use `handle_dialog`
-- **prompt**: Requires decision and text input - use `handle_dialog`
+### 2. tab
 
 ```json
-{
-  "type": "handle_dialog",
-  "dialog_action": "accept",
-  "prompt_text": "optional text for prompt dialogs"
-}
+{ "type": "tab", "action": "init", "url": "https://example.com" }
+{ "type": "tab", "action": "open", "url": "https://example.com" }
+{ "type": "tab", "action": "close", "tab_id": 123 }
+{ "type": "tab", "action": "switch", "tab_id": 123 }
+{ "type": "tab", "action": "list" }
 ```
 
-**Parameters:**
-- `dialog_action`: Required - either `"accept"` or `"dismiss"`
-- `prompt_text`: Optional - text to enter for prompt dialogs
+### 3. handle_dialog
 
-**Cascading Dialogs:**
-After handling one dialog, another may appear (e.g., confirm → alert). OpenBrowser:
-1. Returns info about the new dialog
-2. Auto-accepts alerts
-3. Requires another `handle_dialog` for confirm/prompt
-
-**Example Flow:**
-1. Click triggers `confirm('Delete?')`
-2. OpenBrowser returns: `dialog_opened: true, dialog: {type: "confirm", message: "Delete?", needsDecision: true}`
-3. You respond: `{"type": "handle_dialog", "dialog_action": "accept"}`
-4. If alert follows, OpenBrowser auto-accepts and shows result
-
----
-
-## 4. view
-
-Capture a screenshot to see the current page state.
+When JavaScript triggers alert/confirm/prompt:
 
 ```json
-{
-  "type": "view"
-}
+{ "type": "handle_dialog", "dialog_action": "accept" }
+{ "type": "handle_dialog", "dialog_action": "dismiss" }
+{ "type": "handle_dialog", "dialog_action": "accept", "prompt_text": "my text" }
 ```
 
-**When to use:**
-- After navigation (`tab init` / `tab open`) to verify page loaded correctly
-- When UI structure is unknown and you need to "see" the page before interacting
-- After multiple operations to verify the final state
-- When you encounter unexpected behavior and need visual debugging
+- `alert`: Auto-accepted
+- `confirm`/`prompt`: You must respond with `handle_dialog`
 
-**When NOT to use:**
-- After every single operation (wasteful)
-- When JavaScript can extract the information you need (use `javascript_execute` instead)
+### 4. view
 
-**Example workflow:**
 ```json
-{"type": "tab", "action": "init", "url": "https://example.com"}  // Text result only
-{"type": "view"}  // Now see the page
-{"type": "javascript_execute", "script": "...click..."}  // Text result
-{"type": "view"}  // Verify the result
+{ "type": "view" }
 ```
+
+Capture screenshot for visual verification.
 
 ---
 
 ## Workflow Summary
 
-1. **Navigate** to the page using `tab init` or `tab open` (text result)
-2. **View** the page to understand its structure: `{"type": "view"}`
-3. **Interact** using `javascript_execute` with the universal templates (text result)
-4. **Verify** with another `view` when needed
-5. **Escalate** if operations fail (follow the 2-Strike Rule):
-   - **1st failure**: Try full event sequence
-   - **2nd failure**: Inspect structure, check iframes/Shadow DOM
-   - **Still failing**: Consider direct URL navigation
+1. **Navigate**: `tab init` or `tab open` → receive accessibility delta
+2. **Read**: Check accessibility elements for available interactions
+3. **Act**: `javascript_execute` using the selector from accessibility
+4. **Verify**: Check result; use `view` if needed
+5. **Handle**: If dialog opens, use `handle_dialog`
 
-**Efficiency Tip**: Use `view` sparingly. Most operations can be verified with JavaScript result checks or console output."""
+## Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| Selector not found | Element may have been removed; check delta again |
+| Click doesn't work | Try full event sequence for React/Vue |
+| Page loading | Check `document.readyState` |
+| Inside iframe | Access via `iframe.contentDocument` |
+| Shadow DOM | Access via `element.shadowRoot` |
+
+**2-Strike Rule**: If same action fails twice, try:
+1. Full event sequence (pointerdown → mousedown → click)
+2. Search DOM structure manually
+3. Direct URL navigation"""
+
+
+
 
 
 class OpenBrowserTool(ToolDefinition[OpenBrowserAction, OpenBrowserObservation]):
