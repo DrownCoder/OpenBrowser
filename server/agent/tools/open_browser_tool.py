@@ -51,7 +51,7 @@ class OpenBrowserAction(Action):
         description="Text to enter for prompt dialogs (only for handle_dialog with prompt)"
     )
     max_a11y_elements: Optional[int] = Field(
-        default=100,
+        default=50,
         description="Maximum number of accessible elements to return (default: 100). Set higher if you need more elements."
     )
 
@@ -255,7 +255,7 @@ class OpenBrowserObservation(Observation):
             elements = self.a11y_elements
             text_parts.append(f"**Found {len(elements)} interactive elements:**")
             text_parts.append("")
-            for el in elements[:100]:
+            for el in elements:
                 idx_info = f" (idx:{el.get('index')})" if el.get('index') is not None else ""
                 extra_info = []
                 if el.get('href'):
@@ -270,10 +270,7 @@ class OpenBrowserObservation(Observation):
                     extra_info.append("disabled")
                 extra_str = f" [{', '.join(extra_info)}]" if extra_info else ""
                 text_parts.append(f"  - [{el.get('role')}] \"{el.get('name')}\" → {el.get('selector')}{idx_info}{extra_str}")
-            if len(elements) > 100:
-                text_parts.append(f"  ... and {len(elements) - 100} more (set max_a11y_elements to see all)")
-            else:
-                text_parts.append(f" (if you find accessible elements unhelpful, set max_a11y_elements to 0 to ignore all)")
+                text_parts.append(f" (set max_a11y_elements to 0 to ignore all; or raise it to see more)")
             text_parts.append("")
         
         # Browser State Section
@@ -705,9 +702,44 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
 _OPEN_BROWSER_DESCRIPTION = """
 Browser automation tool with accessibility-first interaction.
 
-## Core Concept: Accessibility Elements
+## Three Golden Rules
 
-Every action returns a **list of accessible interactive elements** on the page. This is your PRIMARY way to find and interact with elements.
+### Rule 1: Verify Significant Changes with `view`
+
+After any **significant browser state change**, you MUST use `view` to confirm:
+- Tab opened: `tab open` → `view`
+- Tab switched: `tab switch` → `view`
+- Page navigation or reload
+- Any action where visual confirmation matters
+
+**Why**: `view` captures a screenshot so you can SEE the result. Don't guess—verify.
+
+### Rule 2: Accessibility Elements First
+
+**Always try accessible elements FIRST.** They are your primary interaction method.
+
+Every action returns an **a11y_elements** list with:
+- `role`: button, link, textbox, checkbox, etc.
+- `name`: Visible text or aria-label
+- `selector`: CSS selector to find the element
+- `idx`: Index for `querySelectorAll` when multiple matches
+
+Use these selectors—don't invent your own unless they fail.
+
+### Rule 3: Creative JavaScript as Fallback
+
+If accessibility elements fail (not found, wrong element, doesn't work),
+THEN you may use creative JavaScript:
+- Click by visible text
+- Search DOM manually
+- Handle iframes / Shadow DOM
+- Work around dynamic content
+
+**This is a fallback, not your first choice.**
+
+---
+
+## Accessible Elements Guide
 
 ### What You Get
 
@@ -757,15 +789,18 @@ If you see "... and N more" at the end, set `max_a11y_elements` to see all:
 ```json
 { "type": "javascript_execute", "script": "...", "max_a11y_elements": 500 }
 ```
+
 ---
 
-## How to Interact
+## Interaction Patterns
 
-### Step 1: Read the Accessible Elements
+### Pattern A: Using Accessibility Elements (Preferred)
+
+**Step 1: Read the Accessible Elements**
 
 The list tells you exactly what elements are available and how to select them.
 
-### Step 2: Use the Selector
+**Step 2: Use the Selector**
 
 ```json
 {
@@ -774,74 +809,31 @@ The list tells you exactly what elements are available and how to select them.
 }
 ```
 
-### Step 3: Check Result
+**Step 3: Check Result**
 
 - Success: Element was found and action completed
-- "not found": Selector failed, element may have been removed
+- "not found": Selector failed → try Pattern B
+
+### Pattern B: Creative JavaScript (Fallback)
+
+When accessibility elements don't work, use your creativity:
+
+```javascript
+// Click by visible text (works on any element)
+(() => {
+    const text = 'YOUR_TEXT';
+    const leaf = Array.from(document.querySelectorAll('*'))
+        .find(el => el.children.length === 0 && el.textContent.includes(text));
+    if (!leaf) return 'not found';
+    const target = leaf.closest('a, button, [role=\"button\"]') || leaf;
+    target.click();
+    return 'clicked: ' + target.tagName;
+})()
+```
+
+You can also: search DOM, scroll, extract data, handle iframes, Shadow DOM, etc.
 
 ---
-
-## Common Patterns
-
-### Click a Button
-
-```javascript
-// Accessibility shows: [button] "Submit" → #submit-btn
-(() => {
-    const el = document.querySelector('#submit-btn');
-    if (!el) return 'not found';
-    el.click();
-    return 'clicked';
-})()
-```
-
-### Fill a Text Field
-
-```javascript
-// Accessibility shows: [textbox] "Email" → [name="email"]
-(() => {
-    const el = document.querySelector('[name="email"]');
-    if (!el) return 'not found';
-    el.focus();
-    el.value = 'user@example.com';
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    return 'filled';
-})()
-```
-
-### Click by Index (No Unique ID)
-
-```javascript
-// Accessibility shows: [button] "Cancel" → button, [role="button"] (idx: 2)
-// Use the EXACT selector with querySelectorAll:
-(() => {
-    const selector = 'button, [role="button"]';
-    const idx = 2;
-    const els = document.querySelectorAll(selector);
-    if (els[idx]) { els[idx].click(); return 'clicked idx ' + idx; }
-    return 'not found';
-})()
-```
-
-### Toggle Checkbox
-
-```javascript
-// Accessibility shows: [checkbox] "Remember me" → #remember
-(() => {
-    const el = document.querySelector('#remember');
-    if (!el) return 'not found';
-    el.checked = true;
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    return 'checked';
-})()
-```
-
----
-
-## Beyond Accessibility Elements
-
-You can execute **any JavaScript** to interact with the page. Use `javascript_execute` freely to: search DOM, click by text, scroll, extract data, handle iframes, work with Shadow DOM, or any other browser operation. You have full flexibility.
 
 ## Action Reference
 
@@ -866,6 +858,8 @@ You can execute **any JavaScript** to interact with the page. Use `javascript_ex
 { "type": "tab", "action": "list" }
 ```
 
+**After `init`, `open`, or `switch`: ALWAYS use `view` to verify.**
+
 ### 3. handle_dialog
 
 When JavaScript triggers alert/confirm/prompt:
@@ -885,23 +879,24 @@ When JavaScript triggers alert/confirm/prompt:
 { "type": "view" }
 ```
 
-Capture screenshot for visual verification.
+Capture screenshot for visual verification. **Use after significant changes.**
 
 ---
 
 ## Workflow Summary
 
-1. **Navigate**: `tab init` or `tab open` → receive accessibility delta
+1. **Navigate**: `tab init` or `tab open` → **`view` to verify**
 2. **Read**: Check accessibility elements for available interactions
-3. **Act**: `javascript_execute` using the selector from accessibility
-4. **Verify**: Check result; use `view` if needed
-5. **Handle**: If dialog opens, use `handle_dialog`
+3. **Act**: Use accessibility selectors FIRST (Rule 2)
+4. **Fallback**: If accessibility fails, use creative JavaScript (Rule 3)
+5. **Verify**: Use `view` when you need to SEE the result (Rule 1)
+6. **Handle**: If dialog opens, use `handle_dialog`
 
 ## Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
-| Selector not found | Element may have been removed; check delta again |
+| Selector not found | Try creative JavaScript (Pattern B) |
 | Click doesn't work | Try full event sequence for React/Vue |
 | Page loading | Check `document.readyState` |
 | Inside iframe | Access via `iframe.contentDocument` |
@@ -909,7 +904,7 @@ Capture screenshot for visual verification.
 
 **2-Strike Rule**: If same action fails twice, try:
 1. Full event sequence (pointerdown → mousedown → click)
-2. Search DOM structure manually
+2. Creative JavaScript to search DOM
 3. Direct URL navigation"""
 
 
