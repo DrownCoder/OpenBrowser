@@ -226,6 +226,65 @@ class GetAccessibilityTreeCommand(BaseCommand):
         description="Maximum number of elements to return (1-500, default 50)"
     )
 
+
+class HighlightElementsCommand(BaseCommand):
+    """Highlight interactive elements on the page for visual selection"""
+    type: Literal["highlight_elements"] = "highlight_elements"
+    element_types: Optional[List[str]] = Field(
+        default=["clickable"],
+        description="Types of elements to highlight (e.g., 'clickable', 'input', 'link')"
+    )
+    limit: Optional[int] = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Maximum number of elements to highlight (1-100)"
+    )
+    offset: Optional[int] = Field(
+        default=0,
+        ge=0,
+        description="Offset for pagination (0-based)"
+    )
+
+
+class ClickElementCommand(BaseCommand):
+    """Click a highlighted element by its ID"""
+    type: Literal["click_element"] = "click_element"
+    element_id: str = Field(
+        description="Element ID from highlight response"
+    )
+
+
+class HoverElementCommand(BaseCommand):
+    """Hover over a highlighted element by its ID"""
+    type: Literal["hover_element"] = "hover_element"
+    element_id: str = Field(
+        description="Element ID from highlight response"
+    )
+
+
+class ScrollElementCommand(BaseCommand):
+    """Scroll a highlighted element in a direction"""
+    type: Literal["scroll_element"] = "scroll_element"
+    element_id: str = Field(
+        description="Element ID from highlight response"
+    )
+    direction: str = Field(
+        default="down",
+        description="Scroll direction: 'up', 'down', 'left', 'right'"
+    )
+
+
+class KeyboardInputCommand(BaseCommand):
+    """Type text into a highlighted element by its ID"""
+    type: Literal["keyboard_input"] = "keyboard_input"
+    element_id: str = Field(
+        description="Element ID from highlight response"
+    )
+    text: str = Field(
+        description="Text to input into the element"
+    )
+
 class CommandResponse(BaseModel):
     """Response from command execution"""
     success: bool
@@ -267,6 +326,11 @@ Command = Union[
     HandleDialogCommand,
     GetGroundedElementsCommand,
     GetAccessibilityTreeCommand,
+    HighlightElementsCommand,
+    ClickElementCommand,
+    HoverElementCommand,
+    ScrollElementCommand,
+    KeyboardInputCommand,
 ]
 
 
@@ -291,6 +355,11 @@ def parse_command(data: dict) -> Command:
         "handle_dialog": HandleDialogCommand,
         "get_grounded_elements": GetGroundedElementsCommand,
         "get_accessibility_tree": GetAccessibilityTreeCommand,
+        "highlight_elements": HighlightElementsCommand,
+        "click_element": ClickElementCommand,
+        "hover_element": HoverElementCommand,
+        "scroll_element": ScrollElementCommand,
+        "keyboard_input": KeyboardInputCommand,
     }
     
     if cmd_type not in command_map:
