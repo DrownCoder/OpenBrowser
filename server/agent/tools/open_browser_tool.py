@@ -33,28 +33,41 @@ logger = logging.getLogger(__name__)
 
 
 class OpenBrowserAction(Action):
-    """Browser automation action with unified parameter system"""
-    type: str = Field(description="Type of browser operation: 'javascript_execute', 'tab', 'handle_dialog', 'view'")
-    # JavaScript execution parameters
-    script: Optional[str] = Field(default=None, description="JavaScript code to execute for javascript_execute")
+    """Browser automation action with visual-first interaction support"""
+    
+    type: str = Field(
+        description="Type of browser operation: 'tab', 'highlight_elements', 'click_element', 'hover_element', 'scroll_element', 'keyboard_input', 'handle_dialog', 'javascript_execute'"
+    )
+    
     # Tab operation parameters
-    action: Optional[str] = Field(default=None, description="Action for tab operations: 'init', 'open', 'close', 'switch', 'list', 'refresh'")
-    url: Optional[str] = Field(default=None, description="URL for tab operations (required for init and open)")
-    tab_id: Optional[int] = Field(default=None, description="Tab ID for tab operations (required for close, switch, refresh)")
-    # Dialog handling parameters
-    dialog_action: Optional[str] = Field(
-        default=None, 
-        description="Action for dialog handling: 'accept' or 'dismiss'"
-    )
-    prompt_text: Optional[str] = Field(
-        default=None,
-        description="Text to enter for prompt dialogs (only for handle_dialog with prompt)"
-    )
+    action: Optional[str] = Field(default=None, description="Tab action: init/open/close/switch/list/refresh")
+    url: Optional[str] = Field(default=None, description="URL for tab operations")
+    tab_id: Optional[int] = Field(default=None, description="Tab ID for operations")
+    
+    # Visual interaction parameters
+    element_types: Optional[List[str]] = Field(default=None, description="Types to highlight: clickable/scrollable/inputable/hoverable")
+    element_id: Optional[str] = Field(default=None, description="Element ID from highlight response")
+    limit: Optional[int] = Field(default=10, description="Max elements to return")
+    offset: Optional[int] = Field(default=0, description="Pagination offset")
+    
+    # Scroll parameters
+    direction: Optional[str] = Field(default="down", description="Scroll direction: up/down/left/right")
+    
+    # Keyboard input parameters
+    text: Optional[str] = Field(default=None, description="Text to input")
+    
+    # Dialog handling
+    dialog_action: Optional[str] = Field(default=None, description="Dialog action: accept/dismiss")
+    prompt_text: Optional[str] = Field(default=None, description="Text for prompt dialogs")
+    
+    # Accessibility context
     max_a11y_elements: Optional[int] = Field(
         default=50,
-        description="Maximum number of accessible elements to return (default: 100). Set higher if you need more elements."
+        description="Maximum number of accessible elements to return (default: 50). Set higher if you need more elements."
     )
-
+    
+    # JavaScript execution (fallback)
+    script: Optional[str] = Field(default=None, description="JavaScript code (fallback)")
 # --- Supported Action Types and Their Parameters ---
 """
 Supported action types and their parameters:
@@ -118,7 +131,19 @@ class OpenBrowserObservation(Observation):
         default=None,
         description="List of accessible interactive elements with selectors"
     )
-
+    # Visual interaction results
+    highlighted_elements: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="List of elements highlighted on the screenshot"
+    )
+    total_elements: Optional[int] = Field(
+        default=None,
+        description="Total number of elements found"
+    )
+    element_id: Optional[str] = Field(
+        default=None,
+        description="ID of the element that was acted upon"
+    )
     @property
     def to_llm_content(self) -> Sequence[TextContent | ImageContent]:
         """Convert observation to LLM content format"""
@@ -273,7 +298,25 @@ class OpenBrowserObservation(Observation):
                 text_parts.append(f" (set max_a11y_elements to 0 to ignore all; or raise it to see more)")
             text_parts.append("")
         
-        # Browser State Section
+        # Highlighted Elements Section (if applicable)
+        if self.highlighted_elements:
+            text_parts.append("## Highlighted Elements")
+            text_parts.append("")
+            text_parts.append(f"**Total Elements**: {self.total_elements if self.total_elements is not None else len(self.highlighted_elements)}")
+            text_parts.append("")
+            for el in self.highlighted_elements:
+                el_id = el.get('id', 'unknown')
+                el_type = el.get('type', 'unknown')
+                el_label = el.get('label', '')
+                text_parts.append(f"  - [{el_id}] {el_type}: \"{el_label}\"")
+            text_parts.append("")
+        
+        if self.element_id:
+            text_parts.append("## Element Action Result")
+            text_parts.append("")
+            text_parts.append(f"**Element ID**: {self.element_id}")
+            text_parts.append("")
+        
         # Browser State Section
         if self.tabs:
             text_parts.append("## Browser State")
@@ -699,156 +742,112 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
 
 # --- Tool Definition ---
 
-_OPEN_BROWSER_DESCRIPTION = """
-Browser automation tool with accessibility-first interaction.
+_OPEN_BROWSER_DESCRIPTION = """Browser automation with visual-first interaction.
 
-## Three Golden Rules
+## Core Philosophy
 
-### Rule 1: Verify Significant Changes with `view`
+You SEE the page through screenshots. You IDENTIFY targets through visual element IDs. You OPERATE using those IDs.
 
-After any **significant browser state change**, you MUST use `view` to confirm:
-- Tab opened: `tab open` → `view`
-- Tab switched: `tab switch` → `view`
-- Page navigation or reload
-- Any action where visual confirmation matters
-
-**Why**: `view` captures a screenshot so you can SEE the result. Don't guess—verify.
-
-### Rule 2: Accessibility Elements First
-
-**Always try accessible elements FIRST.** They are your primary interaction method.
-
-Every action returns an **a11y_elements** list with:
-- `role`: button, link, textbox, checkbox, etc.
-- `name`: Visible text or aria-label
-- `selector`: CSS selector to find the element
-- `idx`: Index for `querySelectorAll` when multiple matches
-
-Use these selectors—don't invent your own unless they fail.
-
-### Rule 3: Creative JavaScript as Fallback
-
-If accessibility elements fail (not found, wrong element, doesn't work),
-THEN you may use creative JavaScript:
-- Click by visible text
-- Search DOM manually
-- Handle iframes / Shadow DOM
-- Work around dynamic content
-
-**This is a fallback, not your first choice.**
+JavaScript is a fallback, not your primary tool.
 
 ---
 
-## Accessible Elements Guide
-
-### What You Get
-
-After `javascript_execute`, `tab init/open/switch`, you receive:
+## Visual-First Workflow
 
 ```
-## Accessible Elements
-
-**Found 5 interactive elements:**
-
-  - [button] "Submit" → #submit-btn (idx: 0)
-  - [button] "Cancel" → button, [role="button"] (idx: 2)
-  - [textbox] "Email" → [name="email"] (idx: 0) [placeholder="Enter email"]
-  - [link] "Learn More" → a, [role="link"] (idx: 3) [href=/learn]
-  - [checkbox] "Remember me" → #remember (idx: 0) [checked=false]
+1. highlight_elements - Capture screenshot with numbered visual markers
+2. Identify target by element_id from the image (e.g., click-3, type-1)
+3. Use click_element, hover_element, scroll_element, keyboard_input
+4. Take screenshot to verify the result
+5. If dialog appears, use handle_dialog
+6. javascript_execute only as fallback for complex operations
 ```
 
-### Element Format
+### Example Flow
 
-Each element provides:
-- **role**: Semantic type (`button`, `link`, `textbox`, `checkbox`, etc.)
-- **name**: Visible text or aria-label
-- **selector**: CSS selector for `querySelectorAll()` - use with index
-- **idx**: Array index for `querySelectorAll(selector)[idx]`
-- **href**: URL for links
-- **placeholder/value**: For text inputs
-- **checked**: For checkboxes/radios
-
-### How to Use Selectors
-
-**With ID/name/data-testid** (unique selector):
-```javascript
-document.querySelector('#submit-btn')  // idx is 0, can use querySelector
-```
-
-**With compound selector** (multiple element types):
-```javascript
-// selector is "button, [role=\"button\"]" , idx is 2
-document.querySelectorAll('button, [role="button"]')[2]
-```
-
-IMPORTANT: Always use the **exact selector shown** with `querySelectorAll`, then access by **idx**.
-
-### Getting More Elements
-
-If you see "... and N more" at the end, set `max_a11y_elements` to see all:
-```json
-{ "type": "javascript_execute", "script": "...", "max_a11y_elements": 500 }
-```
+1. `highlight_elements()` → You see screenshot with buttons labeled [click-1], [click-2], [type-1]
+2. You want to click "Submit" which is labeled [click-3]
+3. `click_element(element_id="click-3")`
+4. Take screenshot to confirm the click worked
+5. If a confirmation dialog appears, use `handle_dialog(dialog_action="accept")`
 
 ---
 
-## Interaction Patterns
+## Element ID Format
 
-### Pattern A: Using Accessibility Elements (Preferred)
+Element IDs follow the pattern `{type}-{number}`:
 
-**Step 1: Read the Accessible Elements**
+| Type | ID Pattern | Examples |
+|------|------------|----------|
+| Clickable | click-N | click-1, click-2, click-3 |
+| Text Input | type-N | type-1, type-2 |
+| Scrollable | scroll-N | scroll-1, scroll-2 |
 
-The list tells you exactly what elements are available and how to select them.
-
-**Step 2: Use the Selector**
-
-```json
-{
-  "type": "javascript_execute",
-  "script": "(() => { const el = document.querySelector('#submit-btn'); if (el) { el.click(); return 'clicked'; } return 'not found'; })()"
-}
-```
-
-**Step 3: Check Result**
-
-- Success: Element was found and action completed
-- "not found": Selector failed → try Pattern B
-
-### Pattern B: Creative JavaScript (Fallback)
-
-When accessibility elements don't work, use your creativity:
-
-```javascript
-// Click by visible text (works on any element)
-(() => {
-    const text = 'YOUR_TEXT';
-    const leaf = Array.from(document.querySelectorAll('*'))
-        .find(el => el.children.length === 0 && el.textContent.includes(text));
-    if (!leaf) return 'not found';
-    const target = leaf.closest('a, button, [role=\"button\"]') || leaf;
-    target.click();
-    return 'clicked: ' + target.tagName;
-})()
-```
-
-You can also: search DOM, scroll, extract data, handle iframes, Shadow DOM, etc.
+The number is assigned based on reading order (top-to-bottom, left-to-right).
 
 ---
 
-## Action Reference
+## Command Reference
 
-### 1. javascript_execute
+### highlight_elements
+
+Capture a screenshot with visual markers showing all interactive elements.
 
 ```json
-{ "type": "javascript_execute", "script": "your code here" }
+{ "type": "highlight_elements" }
+{ "type": "highlight_elements", "limit": 20, "offset": 0 }
 ```
 
-- 30-second timeout
-- Return JSON-serializable values only (no DOM nodes)
-- Use IIFE `(() => { ... })()` for return statements
-- `console.log()` output is captured
+Parameters:
+- `limit`: Max elements to show (default 50)
+- `offset`: For pagination when many elements exist
 
-### 2. tab
+Returns a screenshot with numbered markers. Match the number in the image to the element_id.
+
+### click_element
+
+Click an element by its visual ID.
+
+```json
+{ "type": "click_element", "element_id": "click-3" }
+```
+
+Use this for buttons, links, and any clickable element you identified from highlight_elements.
+
+### hover_element
+
+Hover over an element by its visual ID.
+
+```json
+{ "type": "hover_element", "element_id": "click-2" }
+```
+
+Use this to reveal tooltips, dropdown menus, or hover states.
+
+### scroll_element
+
+Scroll within an element by its visual ID.
+
+```json
+{ "type": "scroll_element", "element_id": "scroll-1", "direction": "down" }
+{ "type": "scroll_element", "element_id": "scroll-1", "direction": "up" }
+```
+
+Use this to scroll within specific containers (not the main page scroll).
+
+### keyboard_input
+
+Type text into an input element by its visual ID.
+
+```json
+{ "type": "keyboard_input", "element_id": "type-1", "text": "hello@example.com" }
+```
+
+Use this for text inputs, textareas, and search boxes.
+
+### tab
+
+Manage browser tabs.
 
 ```json
 { "type": "tab", "action": "init", "url": "https://example.com" }
@@ -858,54 +857,75 @@ You can also: search DOM, scroll, extract data, handle iframes, Shadow DOM, etc.
 { "type": "tab", "action": "list" }
 ```
 
-**After `init`, `open`, or `switch`: ALWAYS use `view` to verify.**
+- `init`: Create new session with isolated tab group
+- `open`: Open URL in new tab
+- `close`: Close specific tab
+- `switch`: Switch to specific tab
+- `list`: List all tabs
 
-### 3. handle_dialog
+### handle_dialog
 
-When JavaScript triggers alert/confirm/prompt:
+Handle browser dialogs (alert, confirm, prompt).
 
 ```json
 { "type": "handle_dialog", "dialog_action": "accept" }
 { "type": "handle_dialog", "dialog_action": "dismiss" }
-{ "type": "handle_dialog", "dialog_action": "accept", "prompt_text": "my text" }
+{ "type": "handle_dialog", "dialog_action": "accept", "prompt_text": "my response" }
 ```
 
-- `alert`: Auto-accepted
-- `confirm`/`prompt`: You must respond with `handle_dialog`
+Dialog types:
+- `alert`: Auto-accepted, no action needed
+- `confirm`: Use accept or dismiss
+- `prompt`: Use accept with prompt_text, or dismiss
 
-### 4. view
+### javascript_execute (Fallback)
+
+Execute arbitrary JavaScript. Use only when visual commands cannot accomplish your goal.
 
 ```json
-{ "type": "view" }
+{ "type": "javascript_execute", "script": "(() => { return document.title; })()" }
 ```
 
-Capture screenshot for visual verification. **Use after significant changes.**
+Guidelines:
+- 30-second timeout
+- Return JSON-serializable values only (no DOM nodes)
+- Use IIFE `(() => { ... })()` for return statements
+- `console.log()` output is captured
 
 ---
 
 ## Workflow Summary
 
-1. **Navigate**: `tab init` or `tab open` → **`view` to verify**
-2. **Read**: Check accessibility elements for available interactions
-3. **Act**: Use accessibility selectors FIRST (Rule 2)
-4. **Fallback**: If accessibility fails, use creative JavaScript (Rule 3)
-5. **Verify**: Use `view` when you need to SEE the result (Rule 1)
+1. **Navigate**: `tab init` or `tab open`
+2. **See**: `highlight_elements` to get visual markers
+3. **Identify**: Find target element_id from the screenshot
+4. **Act**: Use `click_element`, `keyboard_input`, `hover_element`, `scroll_element`
+5. **Verify**: Take screenshot to confirm
 6. **Handle**: If dialog opens, use `handle_dialog`
+7. **Fallback**: Use `javascript_execute` only for complex operations
+
+---
+
+## Important Notes
+
+- **Always verify with screenshot** after significant operations
+- **Use limit/offset** for pagination when highlight_elements shows "...and N more"
+- **Hover before click** if you need to reveal hidden elements (menus, tooltips)
+- **JavaScript is fallback** - try visual commands first
+
+---
 
 ## Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
-| Selector not found | Try creative JavaScript (Pattern B) |
-| Click doesn't work | Try full event sequence for React/Vue |
-| Page loading | Check `document.readyState` |
-| Inside iframe | Access via `iframe.contentDocument` |
-| Shadow DOM | Access via `element.shadowRoot` |
+| Element not found | Refresh with highlight_elements, check element_id |
+| Click has no effect | Try hover_element first to reveal |
+| Too many elements | Use limit/offset for pagination |
+| Complex interaction | Use javascript_execute as fallback |
+| Page still loading | Wait and retry highlight_elements |
 
-**2-Strike Rule**: If same action fails twice, try:
-1. Full event sequence (pointerdown → mousedown → click)
-2. Creative JavaScript to search DOM
-3. Direct URL navigation"""
+**2-Strike Rule**: If visual command fails twice, switch to javascript_execute fallback."""
 
 
 
