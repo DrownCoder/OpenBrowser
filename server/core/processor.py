@@ -10,7 +10,9 @@ from server.models.commands import (
     ResetMouseCommand,
     KeyboardTypeCommand, KeyboardPressCommand, ScreenshotCommand,
     TabCommand, GetTabsCommand, JavascriptExecuteCommand,
-    HandleDialogCommand, GetGroundedElementsCommand, GetAccessibilityTreeCommand
+    HandleDialogCommand, GetGroundedElementsCommand, GetAccessibilityTreeCommand,
+    HighlightElementsCommand, ClickElementCommand, HoverElementCommand,
+    ScrollElementCommand, KeyboardInputCommand,
 )
 from server.websocket.manager import ws_manager
 from server.core.config import config
@@ -171,6 +173,16 @@ class CommandProcessor:
                 return await self._execute_get_grounded_elements(command)
             elif isinstance(command, GetAccessibilityTreeCommand):
                 return await self._execute_get_accessibility_tree(command)
+            elif isinstance(command, HighlightElementsCommand):
+                return await self._execute_highlight_elements(command)
+            elif isinstance(command, ClickElementCommand):
+                return await self._execute_click_element(command)
+            elif isinstance(command, HoverElementCommand):
+                return await self._execute_hover_element(command)
+            elif isinstance(command, ScrollElementCommand):
+                return await self._execute_scroll_element(command)
+            elif isinstance(command, KeyboardInputCommand):
+                return await self._execute_keyboard_input(command)
             else:
                 raise ValueError(f"Unknown command type: {command.type}")
                 
@@ -285,6 +297,26 @@ class CommandProcessor:
         """Get accessibility tree from the page"""
         response = await self._send_prepared_command(command)
         return response
+    
+    async def _execute_highlight_elements(self, command: HighlightElementsCommand) -> CommandResponse:
+        """Highlight interactive elements on the page"""
+        return await self._send_prepared_command(command)
+    
+    async def _execute_click_element(self, command: ClickElementCommand) -> CommandResponse:
+        """Click a highlighted element by its ID"""
+        return await self._send_prepared_command(command)
+    
+    async def _execute_hover_element(self, command: HoverElementCommand) -> CommandResponse:
+        """Hover over a highlighted element by its ID"""
+        return await self._send_prepared_command(command)
+    
+    async def _execute_scroll_element(self, command: ScrollElementCommand) -> CommandResponse:
+        """Scroll a highlighted element in a direction"""
+        return await self._send_prepared_command(command)
+    
+    async def _execute_keyboard_input(self, command: KeyboardInputCommand) -> CommandResponse:
+        """Type text into a highlighted element by its ID"""
+        return await self._send_prepared_command(command)
         
     def set_current_tab(self, tab_id: int, conversation_id: str = None):
         """Set current active tab ID for a specific conversation"""
