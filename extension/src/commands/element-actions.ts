@@ -1,3 +1,4 @@
+import type { ElementActionResult } from '../types';
 /**
  * Element Actions - Element-based interaction commands
  *
@@ -10,7 +11,6 @@
  * - Handles dialog events using the same pattern as javascript.ts
  */
 
-import type { ElementActionResult } from '../types';
 import { elementCache } from './element-cache';
 import { executeJavaScript, type JavaScriptResult } from './javascript';
 import { captureScreenshot } from './screenshot';
@@ -20,6 +20,14 @@ import { captureScreenshot } from './screenshot';
  */
 export interface ClickResult extends ElementActionResult {
   clicked: boolean;
+  staleElement?: boolean;
+}
+
+/**
+ * Result type for element hover operation
+ */
+export interface HoverResult extends ElementActionResult {
+  hovered: boolean;
   staleElement?: boolean;
 }
 
@@ -233,8 +241,601 @@ export async function performElementClick(
 }
 
 /**
+ * Result type for element hover operation
+ */
+export interface HoverResult extends ElementActionResult {
+  hovered: boolean;
+  staleElement?: boolean;
+}
+
+/**
+ * Perform a hover on an element identified by its cached element_id
+ *
+ * Flow:
+ * 1. Look up element from cache
+ * 2. Build JavaScript to dispatch hover events
+ * 3. Execute JavaScript
+ * 4. Capture screenshot for verification
+ * 5. Return result
+ *
+ * @param conversationId Session ID for element cache lookup
+ * @param elementId Cached element ID (e.g., "click-1", "scroll-1")
+ * @param tabId Target tab ID
+ * @param timeout Maximum execution time in milliseconds (default: 30000)
+ * @returns Hover result with success status and screenshot
+ */
+export async function performElementHover(
+  conversationId: string,
+  elementId: string,
+  tabId: number,
+  timeout: number = 30000
+): Promise<HoverResult> {
+  console.log(
+    `🖱️ [ElementHover] Hovering element ${elementId} in conversation ${conversationId} on tab ${tabId}`
+  );
+
+  // ============================================================
+  // STEP 1: Look up element from cache
+  // ============================================================
+  const element = elementCache.getElementById(conversationId, elementId);
+  if (!element) {
+    console.log(`❌ [ElementHover] Element ${elementId} not found in cache`);
+    return {
+      success: false,
+      elementId,
+      hovered: false,
+      staleElement: false,
+    };
+  }
+
+  console.log(`✅ [ElementHover] Found element: selector="${element.selector}"`);
+
+  // ============================================================
+  // STEP 2: Build JavaScript to dispatch hover events
+  // ============================================================
+  const escapedSelector = element.selector.replace(/"/g, '\\"');
+
+  const script = `
+    (function() {
+      const selector = "${escapedSelector}";
+      const el = document.querySelector(selector);
+
+      if (!el) {
+        return { hovered: false, error: "Element not found in DOM", stale: true };
+      }
+
+      // Check if element is still visible
+      const style = window.getComputedStyle(el);
+
+      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+        return { hovered: false, error: "Element is not visible", stale: false };
+      }
+
+      // Hover event sequence for React/Vue compatibility
+      try {
+        // Pointer events (enter/over)
+        const pointerEnterEvents = ['pointerenter', 'pointerover'];
+        for (const eventType of pointerEnterEvents) {
+          const event = new PointerEvent(eventType, {
+            bubbles: true,
+            cancelable: true,
+            view: window,
+            pointerType: 'mouse',
+            isPrimary: true,
+          });
+          el.dispatchEvent(event);
+        }
+
+        // Mouse events (enter/over)
+        const mouseEnterEvents = ['mouseenter', 'mouseover'];
+        for (const eventType of mouseEnterEvents) {
+          const event = new MouseEvent(eventType, {
+            bubbles: true,
+            cancelable: true,
+            view: window,
+          });
+          el.dispatchEvent(event);
+        }
+
+        return { hovered: true };
+      } catch (e) {
+        return { hovered: false, error: e.message || String(e) };
+      }
+    })();
+  `;
+
+  // ============================================================
+  // STEP 3: Execute JavaScript
+  // ============================================================
+  let jsResult: JavaScriptResult;
+
+  try {
+    jsResult = await executeJavaScript(tabId, conversationId, script, true, false, timeout);
+  } catch (error) {
+    console.error(`❌ [ElementHover] JavaScript execution error:`, error);
+    return {
+      success: false,
+      elementId,
+      hovered: false,
+      staleElement: false,
+    };
+  }
+
+  // ============================================================
+  // STEP 4: Process result
+  // ============================================================
+  if (!jsResult.success) {
+    console.log(`❌ [ElementHover] Hover execution failed: ${jsResult.error}`);
+    return {
+      success: false,
+      elementId,
+      hovered: false,
+      staleElement: false,
+    };
+  }
+
+  // Check the result from the script
+  const hoverResult = jsResult.result as { hovered: boolean; error?: string; stale?: boolean } | undefined;
+
+  if (!hoverResult?.hovered) {
+    const isStale = hoverResult?.stale === true;
+    console.log(
+      `❌ [ElementHover] Hover failed: ${hoverResult?.error || 'Unknown error'}, stale=${isStale}`
+    );
+
+    return {
+      success: false,
+      elementId,
+      hovered: false,
+      staleElement: isStale,
+    };
+  }
+
+  // ============================================================
+  // STEP 5: Capture screenshot for verification
+  // ============================================================
+  console.log(`✅ [ElementHover] Hover executed successfully`);
+
+  let screenshotDataUrl: string | undefined;
+  try {
+    const screenshotResult = await captureScreenshot(tabId, conversationId, false, 80);
+    screenshotDataUrl = screenshotResult?.dataUrl;
+  } catch (screenshotError) {
+    console.warn(`⚠️ [ElementHover] Failed to capture screenshot:`, screenshotError);
+    // Continue without screenshot
+  }
+
+  return {
+    success: true,
+    elementId,
+    hovered: true,
+    screenshotDataUrl,
+  };
+}
+
+
+/**
+ * Scroll direction type
+ */
+export type ScrollDirection = 'up' | 'down' | 'left' | 'right';
+
+/**
+ * Result type for element scroll operation
+ */
+export interface ScrollResult extends ElementActionResult {
+  scrolled: boolean;
+  scrollPosition?: { x: number; y: number };
+  staleElement?: boolean;
+}
+
+/**
+ * Perform a scroll on an element identified by its cached element_id
+ *
+ * Flow:
+ * 1. Look up element from cache
+ * 2. Build JavaScript to scroll element
+ * 3. Execute and return with screenshot
+ *
+ * @param conversationId Session ID for element cache lookup
+ * @param elementId Cached element ID (e.g., "scroll-1")
+ * @param direction Scroll direction ('up', 'down', 'left', 'right')
+ * @param tabId Target tab ID
+ * @param timeout Maximum execution time in milliseconds (default: 30000)
+ * @returns Scroll result with success status, screenshot, and scroll position
+ */
+export async function performElementScroll(
+  conversationId: string,
+  elementId: string,
+  direction: ScrollDirection,
+  tabId: number,
+  timeout: number = 30000
+): Promise<ScrollResult> {
+  console.log(
+    `📜 [ElementScroll] Scrolling element ${elementId} ${direction} in conversation ${conversationId} on tab ${tabId}`
+  );
+
+  // ============================================================
+  // STEP 1: Look up element from cache
+  // ============================================================
+  const element = elementCache.getElementById(conversationId, elementId);
+  if (!element) {
+    console.log(`❌ [ElementScroll] Element ${elementId} not found in cache`);
+    return {
+      success: false,
+      elementId,
+      scrolled: false,
+    };
+  }
+
+  console.log(`✅ [ElementScroll] Found element: selector="${element.selector}"`);
+
+  // ============================================================
+  // STEP 2: Build JavaScript to scroll element
+  // ============================================================
+  const escapedSelector = element.selector.replace(/"/g, '\\"');
+
+  // Calculate scroll amounts based on direction
+  const scrollAmounts: Record<ScrollDirection, { x: number; y: number }> = {
+    up: { x: 0, y: -300 },
+    down: { x: 0, y: 300 },
+    left: { x: -300, y: 0 },
+    right: { x: 300, y: 0 },
+  };
+
+  const { x: scrollX, y: scrollY } = scrollAmounts[direction];
+
+  const script = `
+    (function() {
+      const selector = "${escapedSelector}";
+      const el = document.querySelector(selector);
+
+      if (!el) {
+        return { scrolled: false, error: "Element not found in DOM", stale: true };
+      }
+
+      // Determine the scrollable element
+      // For page-level elements, use document.scrollingElement
+      // For containers, use the element itself if it's scrollable
+      let scrollTarget = el;
+
+      // Check if this is a page-level selector (html, body, or document)
+      const isPageLevel = selector === 'html' || selector === 'body' ||
+                          selector.includes('document.scrollingElement');
+
+      if (isPageLevel) {
+        scrollTarget = document.scrollingElement || document.documentElement;
+      } else {
+        // Check if element itself is scrollable
+        const style = window.getComputedStyle(el);
+        const isScrollable = (style.overflowX === 'auto' || style.overflowX === 'scroll' ||
+                              style.overflowY === 'auto' || style.overflowY === 'scroll' ||
+                              style.overflow === 'auto' || style.overflow === 'scroll');
+
+        // If not scrollable, try to find a scrollable parent or use page
+        if (!isScrollable) {
+          scrollTarget = document.scrollingElement || document.documentElement;
+        }
+      }
+
+      try {
+        // Use scrollBy for smooth relative scrolling
+        scrollTarget.scrollBy({
+          left: ${scrollX},
+          top: ${scrollY},
+          behavior: 'instant'
+        });
+
+        return {
+          scrolled: true,
+          scrollPosition: {
+            x: scrollTarget.scrollLeft,
+            y: scrollTarget.scrollTop
+          }
+        };
+      } catch (e) {
+        return { scrolled: false, error: e.message || String(e) };
+      }
+    })();
+  `;
+
+  // ============================================================
+  // STEP 3: Execute JavaScript
+  // ============================================================
+  let jsResult: JavaScriptResult;
+
+  try {
+    jsResult = await executeJavaScript(tabId, conversationId, script, true, false, timeout);
+  } catch (error) {
+    console.error(`❌ [ElementScroll] JavaScript execution error:`, error);
+    return {
+      success: false,
+      elementId,
+      scrolled: false,
+    };
+  }
+
+  // Check for execution errors
+  if (!jsResult.success) {
+    console.log(`❌ [ElementScroll] Scroll execution failed: ${jsResult.error}`);
+    return {
+      success: false,
+      elementId,
+      scrolled: false,
+    };
+  }
+
+  // Check the result from the script
+  const scrollResult = jsResult.result as { scrolled: boolean; error?: string; stale?: boolean; scrollPosition?: { x: number; y: number } } | undefined;
+
+  if (!scrollResult?.scrolled) {
+    const isStale = scrollResult?.stale === true;
+    console.log(
+      `❌ [ElementScroll] Scroll failed: ${scrollResult?.error || 'Unknown error'}, stale=${isStale}`
+    );
+
+    return {
+      success: false,
+      elementId,
+      scrolled: false,
+      staleElement: isStale,
+    };
+  }
+
+  // ============================================================
+  // STEP 4: Capture screenshot for verification
+  // ============================================================
+  console.log(`✅ [ElementScroll] Scroll executed successfully`);
+
+  let screenshotDataUrl: string | undefined;
+  try {
+    const screenshotResult = await captureScreenshot(tabId, conversationId, false, 80);
+    screenshotDataUrl = screenshotResult?.dataUrl;
+  } catch (screenshotError) {
+    console.warn(`⚠️ [ElementScroll] Failed to capture screenshot:`, screenshotError);
+    // Continue without screenshot
+  }
+
+  return {
+    success: true,
+    elementId,
+    scrolled: true,
+    scrollPosition: scrollResult.scrollPosition,
+    screenshotDataUrl,
+  };
+}
+
+/**
+ * Result type for keyboard input operation
+ */
+export interface InputResult extends ElementActionResult {
+  input: boolean;
+  value?: string;
+  staleElement?: boolean;
+}
+
+/**
+ * Perform keyboard input on an element identified by its cached element_id
+ *
+ * Flow:
+ * 1. Look up element from cache
+ * 2. Build JavaScript to focus, set value, and dispatch events
+ * 3. Execute with dialog detection
+ * 4. Capture screenshot for verification
+ * 5. Return result with input value
+ *
+ * @param conversationId Session ID for element cache lookup
+ * @param elementId Cached element ID (e.g., "input-1", "textarea-1")
+ * @param text Text to input into the element
+ * @param tabId Target tab ID
+ * @param timeout Maximum execution time in milliseconds (default: 30000)
+ * @returns Input result with success status, screenshot, and input value
+ */
+export async function performKeyboardInput(
+  conversationId: string,
+  elementId: string,
+  text: string,
+  tabId: number,
+  timeout: number = 30000
+): Promise<InputResult> {
+  console.log(
+    `⌨️ [KeyboardInput] Inputting text to element ${elementId} in conversation ${conversationId} on tab ${tabId}`
+  );
+
+  // ============================================================
+  // STEP 1: Look up element from cache
+  // ============================================================
+  const element = elementCache.getElementById(conversationId, elementId);
+  if (!element) {
+    console.log(`❌ [KeyboardInput] Element ${elementId} not found in cache`);
+    return {
+      success: false,
+      elementId,
+      input: false,
+      staleElement: false,
+    };
+  }
+
+  console.log(`✅ [KeyboardInput] Found element: selector="${element.selector}"`);
+
+  // ============================================================
+  // STEP 2: Build JavaScript to input text
+  // ============================================================
+  // Escape quotes and backslashes in selector and text for safe injection
+  const escapedSelector = element.selector.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const escapedText = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
+  const script = `
+    (function() {
+      const selector = "${escapedSelector}";
+      const text = "${escapedText}";
+      const el = document.querySelector(selector);
+
+      if (!el) {
+        return { input: false, error: "Element not found in DOM", stale: true };
+      }
+
+      // Check if element is still visible
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+        return { input: false, error: "Element is not visible", stale: false };
+      }
+
+      // Scroll element into view if needed
+      const rect = el.getBoundingClientRect();
+      if (rect.top < 0 || rect.bottom > window.innerHeight ||
+          rect.left < 0 || rect.right > window.innerWidth) {
+        el.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
+      }
+
+      try {
+        // Focus the element first
+        if (typeof el.focus === 'function') {
+          el.focus();
+        }
+
+        // Set value based on element type
+        const tagName = el.tagName.toLowerCase();
+        const isContentEditable = el.isContentEditable || el.contentEditable === 'true';
+
+        if (tagName === 'input' || tagName === 'textarea') {
+          // For input and textarea, use value property
+          el.value = text;
+        } else if (isContentEditable) {
+          // For contenteditable elements, use textContent
+          el.textContent = text;
+        } else {
+          return { input: false, error: "Element is not an input, textarea, or contenteditable" };
+        }
+
+        // Dispatch input event for React/Vue compatibility
+        const inputEvent = new InputEvent('input', {
+          bubbles: true,
+          cancelable: true,
+          inputType: 'insertText',
+          data: text,
+        });
+        el.dispatchEvent(inputEvent);
+
+        // Dispatch change event
+        const changeEvent = new Event('change', {
+          bubbles: true,
+          cancelable: true,
+        });
+        el.dispatchEvent(changeEvent);
+
+        // Return the actual value set
+        const finalValue = tagName === 'input' || tagName === 'textarea' ? el.value : el.textContent;
+        return { input: true, value: finalValue };
+      } catch (e) {
+        return { input: false, error: e.message || String(e) };
+      }
+    })();
+  `;
+
+  // ============================================================
+  // STEP 3: Execute JavaScript with dialog detection
+  // ============================================================
+  let jsResult: JavaScriptResult;
+
+  try {
+    jsResult = await executeJavaScript(tabId, conversationId, script, true, false, timeout);
+  } catch (error) {
+    console.error(`❌ [KeyboardInput] JavaScript execution error:`, error);
+    return {
+      success: false,
+      elementId,
+      input: false,
+      staleElement: false,
+    };
+  }
+
+  // ============================================================
+  // STEP 4: Process result and handle dialog
+  // ============================================================
+
+  // If dialog opened during input
+  if (jsResult.dialog_opened && jsResult.dialog) {
+    console.log(`💬 [KeyboardInput] Dialog opened during input: type=${jsResult.dialog.type}`);
+
+    // Try to capture screenshot even with dialog (may fail)
+    let screenshotDataUrl: string | undefined;
+    try {
+      const screenshotResult = await captureScreenshot(tabId, conversationId, false, 80);
+      screenshotDataUrl = screenshotResult?.dataUrl;
+    } catch {
+      // Screenshot may fail with dialog open, that's okay
+    }
+
+    return {
+      success: true,
+      elementId,
+      input: true,
+      dialogOpened: true,
+      dialog: {
+        type: jsResult.dialog.type,
+        message: jsResult.dialog.message,
+      },
+      screenshotDataUrl,
+    };
+  }
+
+  // Check for execution errors
+  if (!jsResult.success) {
+    console.log(`❌ [KeyboardInput] Input execution failed: ${jsResult.error}`);
+    return {
+      success: false,
+      elementId,
+      input: false,
+      staleElement: false,
+    };
+  }
+
+  // Check the result from the script
+  const inputResult = jsResult.result as { input: boolean; error?: string; stale?: boolean; value?: string } | undefined;
+
+  if (!inputResult?.input) {
+    const isStale = inputResult?.stale === true;
+    console.log(
+      `❌ [KeyboardInput] Input failed: ${inputResult?.error || 'Unknown error'}, stale=${isStale}`
+    );
+
+    return {
+      success: false,
+      elementId,
+      input: false,
+      staleElement: isStale,
+    };
+  }
+
+  // ============================================================
+  // STEP 5: Capture screenshot for verification
+  // ============================================================
+  console.log(`✅ [KeyboardInput] Input executed successfully, value="${inputResult.value}"`);
+
+  let screenshotDataUrl: string | undefined;
+  try {
+    const screenshotResult = await captureScreenshot(tabId, conversationId, false, 80);
+    screenshotDataUrl = screenshotResult?.dataUrl;
+  } catch (screenshotError) {
+    console.warn(`⚠️ [KeyboardInput] Failed to capture screenshot:`, screenshotError);
+    // Continue without screenshot
+  }
+
+  return {
+    success: true,
+    elementId,
+    input: true,
+    value: inputResult.value,
+    screenshotDataUrl,
+  };
+}
+
+/**
  * Export element actions module
  */
 export const elementActions = {
   performElementClick,
+  performElementHover,
+  performElementScroll,
+  performKeyboardInput,
 };
