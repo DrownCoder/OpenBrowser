@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 from server.core.processor import command_processor
 from server.models.commands import (
-    ScreenshotCommand,
     TabCommand, GetTabsCommand, JavascriptExecuteCommand,
     HandleDialogCommand, DialogAction,
     TabAction
@@ -85,14 +84,7 @@ Supported action types and their parameters:
      "url": str (optional),  # URL for open/init actions
      "tab_id": int (optional)  # Tab ID for close, switch, and refresh actions
    }
-
-3. view - Capture screenshot to see current page state
-   Parameters: {
-     "type": "view"  # No additional parameters needed
-   }
 """
-
-
 # --- Observation ---
 
 class OpenBrowserObservation(Observation):
@@ -536,12 +528,7 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 
                 message = f"Dialog handled: {dialog_action_str}"
                 
-            elif action_type == "view":
-                # View action: capture screenshot to see current page state
-                # No server command needed - just capture screenshot
-                result_dict = None
-                message = "Captured page view"
-                
+
             else:
                 raise ValueError(f"Unknown action type: {action_type}")
             
@@ -550,33 +537,7 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
             mouse_position = None
             screenshot_data_url = None
             
-            # Only capture screenshot for 'view' action
-            if action_type == "view":
-                logger.debug(f"DEBUG: Getting screenshot for view action (sync)...")
-                # Wait for page to render
-                time.sleep(1)
-                screenshot_result = self._get_screenshot_sync()
-                logger.debug(f"DEBUG: screenshot_result: success={screenshot_result.get('success')}, data keys={list(screenshot_result.get('data', {}).keys()) if screenshot_result.get('data') else 'None'}")
-                
-                if screenshot_result.get('success') and screenshot_result.get('data'):
-                    # Try to extract image data
-                    image_data = None
-                    data = screenshot_result['data']
-                    if 'imageData' in data:
-                        image_data = data['imageData']
-                    elif 'image_data' in data:
-                        image_data = data['image_data']
-                    
-                    if image_data:
-                        # Ensure it's a data URL
-                        if isinstance(image_data, str) and image_data.startswith('data:image/'):
-                            screenshot_data_url = image_data
-                        elif isinstance(image_data, str):
-                            # Convert base64 to data URL
-                            screenshot_data_url = f"data:image/png;base64,{image_data}"
-                        else:
-                            logger.debug(f"DEBUG: Unexpected image_data type: {type(image_data)}")
-            
+
             # Collect tabs data only for tab operations
             if action_type == "tab":
                 logger.debug(f"DEBUG: Getting tabs after tab action (sync)...")
@@ -587,7 +548,7 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                     tabs_data = tabs_result['data']['tabs']
             
             # Extract success and dialog info from result_dict
-            success = True  # Default to True for view action
+            success = True  # Default to True
             error = None
             dialog_opened = None
             dialog = None
@@ -726,18 +687,6 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
         logger.debug(f"DEBUG: _get_tabs_sync result: success={result.get('success')}, data keys={list(result.get('data', {}).keys()) if result.get('data') else 'None'}")
         return result
 
-    def _get_screenshot_sync(self) -> Any:
-        """Capture screenshot synchronously"""
-        logger.debug(f"DEBUG: _get_screenshot_sync called, sending ScreenshotCommand via HTTP")
-        command = ScreenshotCommand(
-            include_cursor=True,
-            include_visual_mouse=True,
-            quality=90,
-            conversation_id=self.conversation_id  # ✅ FIX: Pass conversation_id
-        )
-        result = self._execute_command_sync(command)
-        logger.debug(f"DEBUG: _get_screenshot_sync result: success={result.get('success')}, data keys={list(result.get('data', {}).keys()) if result.get('data') else 'None'}")
-        return result
 
 
 # --- Tool Definition ---
