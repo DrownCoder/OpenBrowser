@@ -476,7 +476,7 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
 
         const maxElements = command.max_elements || 100;
         const includeHidden = command.include_hidden || false;
-        const result = await extractGroundedElements(activeTabId, maxElements, includeHidden);
+        const result = await extractGroundedElements(activeTabId, conversationId, maxElements, includeHidden);
 
         return {
           success: true,

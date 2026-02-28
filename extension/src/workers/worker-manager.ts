@@ -5,9 +5,7 @@
 
 import type {
   ResizeImageRequest,
-  ResizeImageResponse,
   WorkerStatusResponse,
-  WorkerRequest,
   WorkerResponse,
 } from './image-processor.worker';
 
@@ -27,7 +25,7 @@ export class WorkerManager {
     {
       resolve: (value: any) => void;
       reject: (error: Error) => void;
-      timeoutId: NodeJS.Timeout;
+      timeoutId: ReturnType<typeof setTimeout>;
     }
   >();
   private requestCounter = 0;
@@ -142,7 +140,7 @@ export class WorkerManager {
     const response = event.data;
     
     // Handle status responses (not tied to specific requests)
-    if (response.type === 'status') {
+    if ('type' in response && response.type === 'status') {
       console.log('📊 [WorkerManager] Worker status:', response);
       return;
     }
@@ -172,7 +170,7 @@ export class WorkerManager {
     console.error('❌ [WorkerManager] Worker error:', error);
     
     // Reject all pending requests
-    for (const [requestId, pendingRequest] of this.pendingRequests.entries()) {
+    for (const [_requestId, pendingRequest] of this.pendingRequests.entries()) {
       clearTimeout(pendingRequest.timeoutId);
       pendingRequest.reject(new Error(`Worker error: ${error.message}`));
     }
@@ -599,7 +597,7 @@ export class WorkerManager {
    */
   cleanup(): void {
     // Clear all pending requests
-    for (const [requestId, pendingRequest] of this.pendingRequests.entries()) {
+    for (const [_requestId, pendingRequest] of this.pendingRequests.entries()) {
       clearTimeout(pendingRequest.timeoutId);
       pendingRequest.reject(new Error('Worker manager cleaned up'));
     }

@@ -13,7 +13,7 @@ console.log('🖥️ OpenBrowser content script loaded', {
 });
 
 // Listen for messages from background script
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   console.log('Content script received message:', message);
   
   // Handle different message types

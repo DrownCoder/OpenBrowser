@@ -459,25 +459,6 @@ async function captureScreenshotWithCDP(
 
 
 
-/**
- * DEPRECATED: Legacy screenshot method using captureVisibleTab
- * 
- * This method is DEPRECATED and should NOT be used because:
- * 1. It captures the currently visible tab, not the target tab
- * 2. It may cause tab switching/flashing
- * 3. It does not work for background tabs
- * 
- * This function is kept for reference only and will throw an error if called.
- * 
- * @deprecated Use CDP method instead
- */
-function _captureScreenshotLegacy(): never {
-  throw new Error(
-    '[Screenshot] Legacy screenshot method is DEPRECATED and should not be used. ' +
-    'Use CDP method instead. If CDP method fails, the error should be investigated and fixed, ' +
-    'not silently ignored with a fallback.'
-  );
-}
 
 /**
  * Capture screenshot of a tab

@@ -106,6 +106,12 @@ export interface GetGroundedElementsCommand extends BaseCommand {
   include_hidden?: boolean;
 }
 
+
+export interface GetAccessibilityTreeCommand extends BaseCommand {
+  type: 'get_accessibility_tree';
+  max_elements?: number;
+}
+
 export interface GroundedElementsResponse {
   success: boolean;
   data?: {
@@ -133,7 +139,8 @@ export type Command =
   | JavascriptExecuteCommand
   | CleanupSessionCommand
   | HandleDialogCommand
-  | GetGroundedElementsCommand;
+  | GetGroundedElementsCommand
+  | GetAccessibilityTreeCommand;
 
 export interface CommandResponse {
   success: boolean;

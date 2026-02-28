@@ -114,10 +114,37 @@ the system checks for new dialogs within 150ms.
 - **NEVER use `.click()` for React/Vue** - Dispatch full event sequence instead
 - **NEVER suppress type errors** - `as any`, `@ts-ignore` forbidden
 - **NEVER ignore dialog_opened** - AI must handle dialogs before continuing
+## VISUAL INTERACTION WORKFLOW
+
+OpenBrowser uses a visual-first approach where the AI sees elements before interacting:
+
+### Workflow
+```
+1. highlight_elements → Returns list of interactive elements with IDs
+2. screenshot → AI sees numbered overlays on elements
+3. click_element(id="click-3") → Interact with specific element
+```
+
+### Element ID Format
+Elements are identified by type-prefix + number:
+- `click-N` - Clickable elements (buttons, links)
+- `scroll-N` - Scrollable elements
+- `input-N` - Input fields
+- `hover-N` - Hoverable elements
+
+### Commands
+| Command | Purpose | Example |
+|---------|---------|--------|
+| `highlight_elements` | Highlight & list interactive elements | `{element_types: ["clickable"], limit: 10}` |
+| `click_element` | Click by element ID | `{element_id: "click-3"}` |
+| `hover_element` | Hover by element ID | `{element_id: "hover-1"}` |
+| `scroll_element` | Scroll by element ID | `{element_id: "scroll-2", direction: "down"}` |
+| `keyboard_input` | Type into element | `{element_id: "input-1", text: "hello"}` |
+
 ## UNIQUE PATTERNS
 
-### JavaScript-First Automation
-All page interactions via `javascript_execute`:
+### JavaScript-First Automation (Fallback)
+For complex interactions not covered by visual commands:
 ```javascript
 // Click by visible text (universal pattern)
 (() => {

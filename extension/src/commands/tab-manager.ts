@@ -34,7 +34,6 @@ export class TabManager {
   // ✅ Multi-session support: Map conversation_id -> TabGroupState
   private sessions: Map<string, TabGroupState> = new Map();
   private statusUpdateInterval: number | null = null;
-  private globalStatus: 'active' | 'idle' | 'disconnected' = 'idle';
   
   // Event listeners for tab switching
   private tabSwitchedListeners: Array<(conversationId: string, tabId: number) => void> = [];
@@ -157,7 +156,7 @@ export class TabManager {
    * Create a new tab group for a conversation
    * Note: This now just prepares the group, no dummy tab needed
    */
-  private async createTabGroup(windowId: number, conversationId: string): Promise<number> {
+  private async createTabGroup(_windowId: number, conversationId: string): Promise<number> {
     try {
       const session = this.getOrCreateSession(conversationId);
       const groupName = this.generateGroupName(conversationId);
@@ -528,7 +527,6 @@ export class TabManager {
    * Update global status (for backward compatibility)
    */
   updateStatus(status: 'active' | 'idle' | 'disconnected'): void {
-    this.globalStatus = status;
     // Update all sessions with the global status
     for (const conversationId of this.sessions.keys()) {
       this.updateSessionStatus(conversationId, status);
@@ -788,7 +786,7 @@ export class TabManager {
     // Listen for tab updates (title changes, URL changes)
     chrome.tabs.onUpdated.addListener((tabId, changeInfo, _tab) => {
       // Find which session this tab belongs to
-      for (const [conversationId, session] of this.sessions.entries()) {
+      for (const [_conversationId, session] of this.sessions.entries()) {
         if (session.managedTabs.has(tabId)) {
           const managedTab = session.managedTabs.get(tabId)!;
           
