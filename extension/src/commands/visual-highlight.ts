@@ -64,9 +64,21 @@ export async function drawHighlights(
   }
 
   try {
-    // Convert data URL to Blob and create ImageBitmap
-    const response = await fetch(screenshotDataUrl);
-    const blob = await response.blob();
+    // Convert data URL to Blob (service workers can't fetch data: URLs)
+    // Extract base64 data from data URL
+    const dataUrlParts = screenshotDataUrl.split(',');
+    const mimeType = dataUrlParts[0].split(':')[1].split(';')[0];
+    const base64Data = dataUrlParts[1];
+    
+    // Decode base64 to binary
+    const binaryString = atob(base64Data);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    
+    // Create Blob and ImageBitmap
+    const blob = new Blob([bytes], { type: mimeType });
     const imageBitmap = await createImageBitmap(blob);
 
     console.log(`🖼️ [VisualHighlight] Screenshot dimensions: ${imageBitmap.width}x${imageBitmap.height}`);
