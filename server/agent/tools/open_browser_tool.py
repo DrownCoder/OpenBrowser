@@ -25,7 +25,9 @@ from server.core.processor import command_processor
 from server.models.commands import (
     TabCommand, GetTabsCommand, JavascriptExecuteCommand,
     HandleDialogCommand, DialogAction,
-    TabAction
+    TabAction,
+    HighlightElementsCommand, ClickElementCommand, HoverElementCommand,
+    ScrollElementCommand, KeyboardInputCommand
 )
 
 logger = logging.getLogger(__name__)
@@ -527,7 +529,61 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 result_dict = self._execute_command_sync(command)
                 
                 message = f"Dialog handled: {dialog_action_str}"
-                
+
+            elif action_type == "highlight_elements":
+                element_types = action.element_types or ["clickable", "scrollable", "inputable", "hoverable"]
+                command = HighlightElementsCommand(
+                    element_types=element_types,
+                    limit=action.limit or 10,
+                    offset=action.offset or 0,
+                    conversation_id=self.conversation_id
+                )
+                result_dict = self._execute_command_sync(command)
+                message = f"Highlighted {len(result_dict.get('data', {}).get('elements', []))} elements"
+
+            elif action_type == "click_element":
+                if not action.element_id:
+                    raise ValueError("click_element requires element_id parameter")
+                command = ClickElementCommand(
+                    element_id=action.element_id,
+                    conversation_id=self.conversation_id
+                )
+                result_dict = self._execute_command_sync(command)
+                message = f"Clicked element: {action.element_id}"
+
+            elif action_type == "hover_element":
+                if not action.element_id:
+                    raise ValueError("hover_element requires element_id parameter")
+                command = HoverElementCommand(
+                    element_id=action.element_id,
+                    conversation_id=self.conversation_id
+                )
+                result_dict = self._execute_command_sync(command)
+                message = f"Hovered element: {action.element_id}"
+
+            elif action_type == "scroll_element":
+                if not action.element_id:
+                    raise ValueError("scroll_element requires element_id parameter")
+                command = ScrollElementCommand(
+                    element_id=action.element_id,
+                    direction=action.direction or "down",
+                    conversation_id=self.conversation_id
+                )
+                result_dict = self._execute_command_sync(command)
+                message = f"Scrolled element: {action.element_id} {action.direction or 'down'}"
+
+            elif action_type == "keyboard_input":
+                if not action.element_id:
+                    raise ValueError("keyboard_input requires element_id parameter")
+                if not action.text:
+                    raise ValueError("keyboard_input requires text parameter")
+                command = KeyboardInputCommand(
+                    element_id=action.element_id,
+                    text=action.text,
+                    conversation_id=self.conversation_id
+                )
+                result_dict = self._execute_command_sync(command)
+                message = f"Input text to element: {action.element_id}"
 
             else:
                 raise ValueError(f"Unknown action type: {action_type}")
