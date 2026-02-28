@@ -166,3 +166,40 @@ export interface WebSocketMessage {
   type: string;
   [key: string]: any;
 }
+
+// Visual interaction types
+export type ElementType = 'clickable' | 'scrollable' | 'inputable' | 'hoverable';
+
+export interface InteractiveElement {
+  id: string;                    // Element ID like "click-1", "scroll-1"
+  type: ElementType;             // Type of interactive element
+  tagName: string;               // HTML tag name
+  selector: string;              // CSS selector to find element
+  text?: string;                 // Visible text content
+  bbox: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  isVisible: boolean;            // Is element visible
+  isInViewport: boolean;         // Is element in viewport
+}
+
+export interface HighlightOptions {
+  elementTypes?: ElementType[];  // Types to highlight
+  limit?: number;                // Max elements to return
+  offset?: number;               // Pagination offset
+}
+
+export interface ElementActionResult {
+  success: boolean;
+  elementId: string;
+  screenshotDataUrl?: string;
+  dialogOpened?: boolean;
+  dialog?: {
+    type: 'alert' | 'confirm' | 'prompt' | 'beforeunload';
+    message: string;
+    defaultValue?: string;
+  };
+}
