@@ -14,7 +14,7 @@ import { debuggerSessionManager } from '../commands/debugger-manager';
 import { dialogManager } from '../commands/dialog';
 import { extractGroundedElements } from '../commands/grounded-elements';
 import { handleGetAccessibilityTree } from '../commands/accessibility';
-import { detectInteractiveElements, sortInteractiveElements } from '../commands/interactive-elements';
+
 import { drawHighlights } from '../commands/visual-highlight';
 import { elementCache } from '../commands/element-cache';
 import { performElementClick, performElementHover, performElementScroll, performKeyboardInput } from '../commands/element-actions';
@@ -905,17 +905,136 @@ return {
         const limit = command.limit || 10;
         const offset = command.offset || 0;
         
-        // Detect and sort elements
-        const allElements = detectInteractiveElements({ elementTypes });
-        const sortedElements = sortInteractiveElements(allElements);
+        // Build script to detect elements IN PAGE CONTEXT
+        const detectionScript = `
+          (function() {
+            const elementTypes = ${JSON.stringify(elementTypes)};
+            
+            function isVisible(el) {
+              const style = window.getComputedStyle(el);
+              return style.display !== 'none' && 
+                     style.visibility !== 'hidden' && 
+                     style.opacity !== '0';
+            }
+            
+            function isInViewport(el) {
+              const rect = el.getBoundingClientRect();
+              return rect.width > 0 && rect.height > 0 &&
+                     rect.top < window.innerHeight && rect.bottom > 0;
+            }
+            
+            function getBBox(el) {
+              const rect = el.getBoundingClientRect();
+              return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+            }
+            
+            function generateSelector(el) {
+              if (el.id) return '#' + el.id;
+              if (el.getAttribute('data-testid')) return '[data-testid="' + el.getAttribute('data-testid') + '"]';
+              return el.tagName.toLowerCase() + (el.className ? '.' + el.className.split(' ').join('.') : '');
+            }
+            
+            function isClickable(el) {
+              const tag = el.tagName.toLowerCase();
+              const clickableTags = ['a', 'button', 'input', 'select', 'textarea'];
+              const clickableTypes = ['submit', 'button'];
+              if (clickableTags.includes(tag)) return true;
+              if (tag === 'input' && clickableTypes.includes(el.type)) return true;
+              if (el.getAttribute('role') === 'button') return true;
+              if (el.onclick || el.getAttribute('onclick')) return true;
+              if (el.getAttribute('ng-click') || el.getAttribute('@click')) return true;
+              return false;
+            }
+            
+            function isScrollable(el) {
+              const style = window.getComputedStyle(el);
+              const overflow = style.overflow + style.overflowY + style.overflowX;
+              return (overflow.includes('auto') || overflow.includes('scroll')) && 
+                     el.scrollHeight > el.clientHeight;
+            }
+            
+            function isInputable(el) {
+              const tag = el.tagName.toLowerCase();
+              if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+              if (el.getAttribute('contenteditable') === 'true') return true;
+              return false;
+            }
+            
+            function isHoverable(el) {
+              const style = window.getComputedStyle(el);
+              return style.cursor === 'pointer';
+            }
+            
+            const counts = { clickable: 0, scrollable: 0, inputable: 0, hoverable: 0 };
+            const elements = [];
+            const allElements = Array.from(document.querySelectorAll('*'));
+            
+            for (const el of allElements) {
+              if (!isVisible(el)) continue;
+              if (!isInViewport(el)) continue;
+              
+              let type = null;
+              if (elementTypes.includes('clickable') && isClickable(el)) type = 'clickable';
+              else if (elementTypes.includes('scrollable') && isScrollable(el)) type = 'scrollable';
+              else if (elementTypes.includes('inputable') && isInputable(el)) type = 'inputable';
+              else if (elementTypes.includes('hoverable') && isHoverable(el)) type = 'hoverable';
+              
+              if (type) {
+                const bbox = getBBox(el);
+                if (bbox.width > 0 && bbox.height > 0) {
+                  elements.push({
+                    id: type + '-' + (counts[type] + 1),
+                    type: type,
+                    tagName: el.tagName.toLowerCase(),
+                    selector: generateSelector(el),
+                    text: el.textContent ? el.textContent.trim().slice(0, 50) : undefined,
+                    bbox: bbox,
+                    isVisible: true,
+                    isInViewport: true
+                  });
+                  counts[type]++;
+                }
+              }
+            }
+            
+            // Sort by area (larger elements first)
+            elements.sort((a, b) => {
+              const aArea = a.bbox.width * a.bbox.height;
+              const bArea = b.bbox.width * b.bbox.height;
+              return bArea - aArea;
+            });
+            
+            return { elements, counts };
+          })();
+        `;
+        
+        // Execute detection script in page context
+        const detectionResult = await javascript.executeJavaScript(
+          activeTabId,
+          conversationId,
+          detectionScript,
+          true,  // returnByValue
+          false, // awaitPromise
+          5000   // timeout
+        );
+        
+        if (!detectionResult.success || !detectionResult.result?.value) {
+          return {
+            success: false,
+            error: detectionResult.error || 'Failed to detect elements',
+            timestamp: Date.now(),
+          };
+        }
+        
+        const allElements = detectionResult.result.value.elements || [];
         
         // Paginate
-        const paginatedElements = sortedElements.slice(offset, offset + limit);
+        const paginatedElements = allElements.slice(offset, offset + limit);
         
         // Cache elements for later operations
-        elementCache.storeElements(conversationId, sortedElements);
+        elementCache.storeElements(conversationId, allElements);
         
-        // Capture screenshot with highlights
+        // Capture screenshot
         const screenshotResult = await captureScreenshot(activeTabId, conversationId, true, 90, false, 0);
         
         // Draw highlights on screenshot
@@ -925,7 +1044,7 @@ return {
           success: true,
           data: {
             elements: paginatedElements,
-            totalElements: sortedElements.length,
+            totalElements: allElements.length,
             screenshot: highlightedScreenshot,
           },
           timestamp: Date.now(),
