@@ -931,7 +931,7 @@ return {
             function generateSelector(el) {
               if (el.id) return '#' + el.id;
               if (el.getAttribute('data-testid')) return '[data-testid="' + el.getAttribute('data-testid') + '"]';
-              return el.tagName.toLowerCase() + (el.className ? '.' + el.className.split(' ').join('.') : '');
+              return el.tagName.toLowerCase() + (el.classList && el.classList.length ? '.' + Array.from(el.classList).join('.') : '');
             }
             
             function isClickable(el) {
