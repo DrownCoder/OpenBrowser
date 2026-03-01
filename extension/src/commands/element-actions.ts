@@ -21,6 +21,7 @@ import { captureScreenshot } from './screenshot';
 export interface ClickResult extends ElementActionResult {
   clicked: boolean;
   staleElement?: boolean;
+  error?: string;
 }
 
 /**
@@ -29,6 +30,7 @@ export interface ClickResult extends ElementActionResult {
 export interface HoverResult extends ElementActionResult {
   hovered: boolean;
   staleElement?: boolean;
+  error?: string;
 }
 
 /**
@@ -68,6 +70,7 @@ export async function performElementClick(
       elementId,
       clicked: false,
       staleElement: false,
+      error: `Element '${elementId}' not found in cache. The element cache expires after 2 minutes. Call highlight_elements() first to refresh the cache and get updated element IDs.`,
     };
   }
 
@@ -103,16 +106,24 @@ export async function performElementClick(
       }
 
       // Full event sequence for React/Vue compatibility
-      // Using PointerEvent for modern browsers, falls back to MouseEvent
+      // NOTE: Synthetic events have isTrusted=false, which some frameworks check
       const eventOptions = {
         bubbles: true,
         cancelable: true,
+        composed: true,  // Allow events to cross shadow DOM boundaries
         view: window,
         button: 0,
         buttons: 1,
       };
 
       try {
+        // Focus the element BEFORE events (important for React/Vue form validation)
+        if (typeof el.focus === 'function') {
+          el.focus();
+          // Dispatch focus event for frameworks
+          el.dispatchEvent(new FocusEvent('focus', { bubbles: true, composed: true }));
+        }
+
         // Pointer events sequence
         const pointerEvents = ['pointerdown', 'pointerup'];
         for (const eventType of pointerEvents) {
@@ -131,9 +142,12 @@ export async function performElementClick(
           el.dispatchEvent(event);
         }
 
-        // Focus the element if it's focusable
-        if (typeof el.focus === 'function') {
-          el.focus();
+        // Native click as fallback - some frameworks only respond to native clicks
+        // This is a no-op if synthetic events already triggered the action
+        try {
+          el.click();
+        } catch (nativeClickError) {
+          // Ignore native click errors, synthetic events may have already worked
         }
 
         return { clicked: true };
@@ -202,7 +216,15 @@ export async function performElementClick(
   }
 
   // Check the result from the script
-  const clickResult = jsResult.result as { clicked: boolean; error?: string; stale?: boolean } | undefined;
+  const clickResult = jsResult.result?.value as { clicked: boolean; error?: string; stale?: boolean } | undefined;
+  // Debug: Log JavaScript result for diagnosis
+  console.log(`🔍 [ElementClick] JavaScript result.value:`, JSON.stringify(jsResult.result?.value, null, 2));
+  console.log(`🔍 [ElementClick] Full JavaScript result:`, jsResult);
+
+  // Check result structure
+  if (!jsResult.result?.value || typeof jsResult.result.value !== 'object') {
+    console.error(`❌ [ElementClick] Invalid JavaScript result.value structure:`, jsResult.result?.value);
+  }
 
   if (!clickResult?.clicked) {
     const isStale = clickResult?.stale === true;
@@ -285,6 +307,7 @@ export async function performElementHover(
       elementId,
       hovered: false,
       staleElement: false,
+      error: `Element '${elementId}' not found in cache. Cache expires after 2 minutes. Call highlight_elements() first.`,
     };
   }
 
@@ -375,7 +398,7 @@ export async function performElementHover(
   }
 
   // Check the result from the script
-  const hoverResult = jsResult.result as { hovered: boolean; error?: string; stale?: boolean } | undefined;
+  const hoverResult = jsResult.result?.value as { hovered: boolean; error?: string; stale?: boolean } | undefined;
 
   if (!hoverResult?.hovered) {
     const isStale = hoverResult?.stale === true;
@@ -426,6 +449,7 @@ export interface ScrollResult extends ElementActionResult {
   scrolled: boolean;
   scrollPosition?: { x: number; y: number };
   staleElement?: boolean;
+  error?: string;
 }
 
 /**
@@ -464,6 +488,7 @@ export async function performElementScroll(
       success: false,
       elementId,
       scrolled: false,
+      error: `Element '${elementId}' not found in cache. Cache expires after 2 minutes. Call highlight_elements() first.`,
     };
   }
 
@@ -565,7 +590,7 @@ export async function performElementScroll(
   }
 
   // Check the result from the script
-  const scrollResult = jsResult.result as { scrolled: boolean; error?: string; stale?: boolean; scrollPosition?: { x: number; y: number } } | undefined;
+  const scrollResult = jsResult.result?.value as { scrolled: boolean; error?: string; stale?: boolean; scrollPosition?: { x: number; y: number } } | undefined;
 
   if (!scrollResult?.scrolled) {
     const isStale = scrollResult?.stale === true;
@@ -611,6 +636,7 @@ export interface InputResult extends ElementActionResult {
   input: boolean;
   value?: string;
   staleElement?: boolean;
+  error?: string;
 }
 
 /**
@@ -652,6 +678,7 @@ export async function performKeyboardInput(
       elementId,
       input: false,
       staleElement: false,
+      error: `Element '${elementId}' not found in cache. Cache expires after 2 minutes. Call highlight_elements() first.`,
     };
   }
 
@@ -791,7 +818,7 @@ export async function performKeyboardInput(
   }
 
   // Check the result from the script
-  const inputResult = jsResult.result as { input: boolean; error?: string; stale?: boolean; value?: string } | undefined;
+  const inputResult = jsResult.result?.value as { input: boolean; error?: string; stale?: boolean; value?: string } | undefined;
 
   if (!inputResult?.input) {
     const isStale = inputResult?.stale === true;

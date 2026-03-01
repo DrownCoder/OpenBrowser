@@ -10,7 +10,7 @@ interface CacheEntry {
   timestamp: number;
 }
 
-const CACHE_TTL_MS = 30000; // 30 seconds
+const CACHE_TTL_MS = 120000; // 2 minutes (increased from 30s)
 const MAX_ELEMENTS_PER_SESSION = 100;
 
 class ElementCacheImpl {
