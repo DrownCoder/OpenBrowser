@@ -46,11 +46,9 @@ class OpenBrowserAction(Action):
     tab_id: Optional[int] = Field(default=None, description="Tab ID for operations")
     
     # Visual interaction parameters
-    element_types: Optional[List[str]] = Field(default=None, description="Types to highlight: clickable/scrollable/inputable/hoverable")
+    element_type: Optional[str] = Field(default="clickable", description="Single element type: clickable/scrollable/inputable/hoverable")
     element_id: Optional[str] = Field(default=None, description="Element ID from highlight response")
-    limit: Optional[int] = Field(default=10, description="Max elements to return")
-    offset: Optional[int] = Field(default=0, description="Pagination offset")
-    
+    page: Optional[int] = Field(default=1, ge=1, description="Page number for collision-aware pagination (1-indexed)")
     # Scroll parameters
     direction: Optional[str] = Field(default="down", description="Scroll direction: up/down/left/right")
     
@@ -268,29 +266,29 @@ class OpenBrowserObservation(Observation):
                 text_parts.append("**Note**: This dialog was auto-accepted (no decision needed).")
             text_parts.append("")
         
-        if getattr(self, "a11y_elements", None) is not None:
-            text_parts.append("## Accessible Elements")
-            text_parts.append("")
-            elements = self.a11y_elements
-            text_parts.append(f"**Found {len(elements)} interactive elements:**")
-            text_parts.append("")
-            for el in elements:
-                idx_info = f" (idx:{el.get('index')})" if el.get('index') is not None else ""
-                extra_info = []
-                if el.get('href'):
-                    extra_info.append(f"href={el.get('href')[:60]}")
-                if el.get('placeholder'):
-                    extra_info.append(f"placeholder=\"{el.get('placeholder')[:30]}\"")
-                if el.get('value') and el.get('role') in ('textbox', 'searchbox'):
-                    extra_info.append(f"value=\"{el.get('value')[:30]}\"")
-                if el.get('checked') is not None:
-                    extra_info.append(f"checked={el.get('checked')}")
-                if el.get('disabled'):
-                    extra_info.append("disabled")
-                extra_str = f" [{', '.join(extra_info)}]" if extra_info else ""
-                text_parts.append(f"  - [{el.get('role')}] \"{el.get('name')}\" → {el.get('selector')}{idx_info}{extra_str}")
-                text_parts.append(f" (set max_a11y_elements to 0 to ignore all; or raise it to see more)")
-            text_parts.append("")
+        # if getattr(self, "a11y_elements", None) is not None:
+        #     text_parts.append("## Accessible Elements")
+        #     text_parts.append("")
+        #     elements = self.a11y_elements
+        #     text_parts.append(f"**Found {len(elements)} interactive elements:**")
+        #     text_parts.append("")
+        #     for el in elements:
+        #         idx_info = f" (idx:{el.get('index')})" if el.get('index') is not None else ""
+        #         extra_info = []
+        #         if el.get('href'):
+        #             extra_info.append(f"href={el.get('href')[:60]}")
+        #         if el.get('placeholder'):
+        #             extra_info.append(f"placeholder=\"{el.get('placeholder')[:30]}\"")
+        #         if el.get('value') and el.get('role') in ('textbox', 'searchbox'):
+        #             extra_info.append(f"value=\"{el.get('value')[:30]}\"")
+        #         if el.get('checked') is not None:
+        #             extra_info.append(f"checked={el.get('checked')}")
+        #         if el.get('disabled'):
+        #             extra_info.append("disabled")
+        #         extra_str = f" [{', '.join(extra_info)}]" if extra_info else ""
+        #         text_parts.append(f"  - [{el.get('role')}] \"{el.get('name')}\" → {el.get('selector')}{idx_info}{extra_str}")
+        #         text_parts.append(f" (set max_a11y_elements to 0 to ignore all; or raise it to see more)")
+        #     text_parts.append("")
         
         # Highlighted Elements Section (if applicable)
         if self.highlighted_elements:
@@ -531,11 +529,12 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 message = f"Dialog handled: {dialog_action_str}"
 
             elif action_type == "highlight_elements":
-                element_types = action.element_types or ["clickable", "scrollable", "inputable", "hoverable"]
+                # Single element type for stable collision-aware pagination
+                element_type = action.element_type or "clickable"
+                page = action.page or 1
                 command = HighlightElementsCommand(
-                    element_types=element_types,
-                    limit=action.limit or 10,
-                    offset=action.offset or 0,
+                    element_type=element_type,
+                    page=page,
                     conversation_id=self.conversation_id
                 )
                 result_dict = self._execute_command_sync(command)
@@ -548,8 +547,9 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                     raise RuntimeError(f"Chrome extension failed to highlight elements: {ext_error}")
                 
                 elements = result_dict.get('data', {}).get('elements', [])
-                message = f"Highlighted {len(elements)} elements"
-
+                total_elements = result_dict.get('data', {}).get('totalElements', 0)
+                current_page = result_dict.get('data', {}).get('page', 1)
+                message = f"Found {len(elements)} {element_type} elements on page {current_page}/{total_elements} (total: {total_elements})"
             elif action_type == "click_element":
                 if not action.element_id:
                     raise ValueError("click_element requires element_id parameter")
@@ -849,19 +849,28 @@ The number is assigned based on reading order (top-to-bottom, left-to-right).
 
 ### highlight_elements
 
-Capture a screenshot with visual markers showing all interactive elements.
+Capture a screenshot with visual markers showing interactive elements of ONE type.
+Uses collision-aware pagination to ensure no overlapping highlights.
+
+**Important**: Each call highlights only ONE element type for stable, predictable pagination.
 
 ```json
-{ "type": "highlight_elements" }
-{ "type": "highlight_elements", "limit": 20, "offset": 0 }
+{ "type": "highlight_elements" }                           // Default: clickable elements, page 1
+{ "type": "highlight_elements", "element_type": "inputable" }  // Input fields
+{ "type": "highlight_elements", "element_type": "scrollable" } // Scrollable areas
+{ "type": "highlight_elements", "element_type": "hoverable" }  // Hoverable elements
+{ "type": "highlight_elements", "page": 2 }                 // Next page of clickable elements
 ```
 
 Parameters:
-- `limit`: Max elements to show (default 50)
-- `offset`: For pagination when many elements exist
+- `element_type`: Single type to highlight - "clickable" (default), "scrollable", "inputable", or "hoverable"
+- `page`: Page number for collision-aware pagination (1-indexed, default 1)
 
-Returns a screenshot with numbered markers. Match the number in the image to the element_id.
-
+**Pagination Strategy**:
+- Page 1 returns a maximal set of non-colliding elements
+- Call page=2, page=3, etc. to see remaining elements
+- Each page is guaranteed to have no overlapping markers
+- Use the same element_type across pages for consistent results
 ### click_element
 
 Click an element by its visual ID.
@@ -967,7 +976,7 @@ Guidelines:
 ## Important Notes
 
 - **Always verify with screenshot** after significant operations
-- **Use limit/offset** for pagination when highlight_elements shows "...and N more"
+- **Use page parameter** for collision-aware pagination when highlight_elements returns many elements
 - **Hover before click** if you need to reveal hidden elements (menus, tooltips)
 - **JavaScript is fallback** - try visual commands first
 
@@ -976,15 +985,15 @@ Guidelines:
 ## Troubleshooting
 
 | Issue | Solution |
-|-------|----------|
+|---|----------|
 | Element not found | Refresh with highlight_elements, check element_id |
 | Click has no effect | Try hover_element first to reveal |
-| Too many elements | Use limit/offset for pagination |
+| Too many elements | Increase page number to see next batch (collision-aware pagination) |
 | Complex interaction | Use javascript_execute as fallback |
 | Page still loading | Wait and retry highlight_elements |
 
-**2-Strike Rule**: If visual command fails twice, switch to javascript_execute fallback."""
-
+**2-Strike Rule**: If visual command fails twice, switch to javascript_execute fallback.
+"""
 
 
 

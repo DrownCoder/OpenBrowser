@@ -44,7 +44,6 @@ export async function drawHighlights(
   options?: HighlightOptions & { scale?: number; viewportWidth?: number; viewportHeight?: number },
 ): Promise<string> {
   console.log(`🎨 [VisualHighlight] Drawing highlights for ${elements.length} elements...`);
-  console.log(`🎨 [VisualHighlight] Drawing highlights for ${elements.length} elements...`);
 
   // Check OffscreenCanvas availability
   if (typeof OffscreenCanvas === 'undefined') {
@@ -159,42 +158,175 @@ export async function drawHighlights(
     // Close the bitmap to free memory
     imageBitmap.close();
 
-    // Filter by element types if specified (caller already paginated)
-    // Note: DO NOT re-paginate here - the caller has already done pagination
-    if (options?.elementTypes && options.elementTypes.length > 0) {
-      const typeFiltered = elements.filter((el) => options.elementTypes!.includes(el.type));
-      console.log(
-        `🎨 [VisualHighlight] Drawing ${typeFiltered.length} elements (type filter: ${options.elementTypes.join(',')}, scale=${scale})`,
-      );
-    } else {
-      console.log(
-        `🎨 [VisualHighlight] Drawing ${elements.length} elements (no type filter, scale=${scale})`,
-      );
-    }
+    // Note: Single-type design - caller already filtered by element_type
+    // All elements passed here are of the same type
+    console.log(
+      `🎨 [VisualHighlight] Drawing ${elements.length} elements (type: ${elements[0]?.type || 'none'}, scale=${scale})`,
+    );
+
+    const elementsToDraw = elements;
 
     // Draw each element's bounding box and label
     // Scale coordinates from CSS pixels to device pixels
-    for (const element of (options?.elementTypes ? typeFiltered : elements)) {
+    for (const element of elementsToDraw) {
       drawBoundingBox(ctx, element, scale);
     }
 
     const resultBlob = await canvas.convertToBlob({ type: 'image/png' });
 
     // Convert blob to data URL
-    return new Promise((resolve, reject) => {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        const resultDataUrl = reader.result as string;
-        console.log(`✅ [VisualHighlight] Highlights drawn successfully`);
-        resolve(resultDataUrl);
-      };
+      reader.onloadend = () => resolve(reader.result as string);
       reader.onerror = () => reject(new Error('[VisualHighlight] Failed to convert result to data URL'));
       reader.readAsDataURL(resultBlob);
     });
+
+    // Compress if too large (>10MB)
+    const MAX_SIZE = 10 * 1024 * 1024; // 10MB limit
+    const compressedDataUrl = await compressDataUrl(dataUrl, MAX_SIZE);
+    
+    console.log(`✅ [VisualHighlight] Highlights drawn successfully, size: ${compressedDataUrl.length} bytes`);
+    return compressedDataUrl;
   } catch (error) {
     const errorMsg = `[VisualHighlight] Error drawing highlights: ${error instanceof Error ? error.message : error}`;
     console.error(`❌ ${errorMsg}`);
     throw new Error(errorMsg);
+  }
+}
+
+/**
+ * Compress a data URL if it exceeds the maximum size
+ * Uses JPEG encoding with quality reduction
+ * 
+ * @param dataUrl - Original data URL (PNG or JPEG)
+ * @param maxSize - Maximum allowed size in bytes
+ * @returns Compressed data URL (JPEG if compression was needed)
+ */
+async function compressDataUrl(dataUrl: string, maxSize: number): Promise<string> {
+  if (dataUrl.length <= maxSize) {
+    console.log(`🖼️ [Compress] Image size ${dataUrl.length} bytes is within limit ${maxSize} bytes`);
+    return dataUrl;
+  }
+
+  console.log(`⚠️ [Compress] Image size ${dataUrl.length} bytes exceeds limit ${maxSize} bytes, compressing...`);
+
+  // Check if OffscreenCanvas is available
+  if (typeof OffscreenCanvas === 'undefined' || typeof createImageBitmap === 'undefined') {
+    console.warn('[Compress] OffscreenCanvas not available, returning original image');
+    return dataUrl;
+  }
+
+  try {
+    // Convert data URL to Blob
+    const response = await fetch(dataUrl);
+    const blob = await response.blob();
+
+    // Create ImageBitmap
+    const imageBitmap = await createImageBitmap(blob);
+    const { width, height } = imageBitmap;
+
+    console.log(`🖼️ [Compress] Original dimensions: ${width}x${height}`);
+
+    // Try different JPEG qualities
+    const qualities = [0.8, 0.7, 0.6, 0.5, 0.4];
+    
+    for (const quality of qualities) {
+      const canvas = new OffscreenCanvas(width, height);
+      const ctx = canvas.getContext('2d');
+      
+      if (!ctx) {
+        throw new Error('[Compress] Failed to get 2d context');
+      }
+
+      // Fill with white background (for JPEG)
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(imageBitmap, 0, 0);
+
+      const compressedBlob = await canvas.convertToBlob({ 
+        type: 'image/jpeg', 
+        quality: quality 
+      });
+
+      // Convert to data URL
+      const compressedDataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error('[Compress] Failed to read compressed blob'));
+        reader.readAsDataURL(compressedBlob);
+      });
+
+      console.log(`🖼️ [Compress] JPEG quality=${quality}: ${compressedDataUrl.length} bytes`);
+
+      if (compressedDataUrl.length <= maxSize) {
+        console.log(`✅ [Compress] Compressed to ${compressedDataUrl.length} bytes with quality=${quality}`);
+        return compressedDataUrl;
+      }
+    }
+
+    // If still too large, try reducing dimensions
+    console.log(`⚠️ [Compress] Quality reduction not enough, trying to reduce dimensions...`);
+    
+    const scales = [0.75, 0.5, 0.4];
+    for (const scale of scales) {
+      const newWidth = Math.round(width * scale);
+      const newHeight = Math.round(height * scale);
+      
+      const canvas = new OffscreenCanvas(newWidth, newHeight);
+      const ctx = canvas.getContext('2d');
+      
+      if (!ctx) {
+        throw new Error('[Compress] Failed to get 2d context');
+      }
+
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, newWidth, newHeight);
+      ctx.drawImage(imageBitmap, 0, 0, newWidth, newHeight);
+
+      const compressedBlob = await canvas.convertToBlob({ 
+        type: 'image/jpeg', 
+        quality: 0.6 
+      });
+
+      const compressedDataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error('[Compress] Failed to read compressed blob'));
+        reader.readAsDataURL(compressedBlob);
+      });
+
+      console.log(`🖼️ [Compress] Scale=${scale} (${newWidth}x${newHeight}): ${compressedDataUrl.length} bytes`);
+
+      if (compressedDataUrl.length <= maxSize) {
+        console.log(`✅ [Compress] Compressed to ${compressedDataUrl.length} bytes with scale=${scale}`);
+        return compressedDataUrl;
+      }
+    }
+
+    // Return the smallest version even if still over limit
+    console.warn(`⚠️ [Compress] Could not compress below ${maxSize} bytes, returning smallest version`);
+    
+    // Return 50% scale JPEG with 0.4 quality as final fallback
+    const finalCanvas = new OffscreenCanvas(Math.round(width * 0.5), Math.round(height * 0.5));
+    const finalCtx = finalCanvas.getContext('2d');
+    if (finalCtx) {
+      finalCtx.fillStyle = '#FFFFFF';
+      finalCtx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
+      finalCtx.drawImage(imageBitmap, 0, 0, finalCanvas.width, finalCanvas.height);
+      const finalBlob = await finalCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.4 });
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error('[Compress] Failed to read final blob'));
+        reader.readAsDataURL(finalBlob);
+      });
+    }
+
+    return dataUrl;
+  } catch (error) {
+    console.error(`❌ [Compress] Compression failed: ${error instanceof Error ? error.message : error}`);
+    return dataUrl;
   }
 }
 

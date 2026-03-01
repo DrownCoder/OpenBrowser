@@ -115,9 +115,8 @@ export interface GetAccessibilityTreeCommand extends BaseCommand {
 // Visual interaction commands
 export interface HighlightElementsCommand extends BaseCommand {
   type: 'highlight_elements';
-  element_types?: ElementType[];
-  limit?: number;
-  offset?: number;
+  element_type?: ElementType;  // Single element type for stable pagination
+  page?: number;  // 1-indexed page number for collision-aware pagination
 }
 
 export interface ClickElementCommand extends BaseCommand {
@@ -230,9 +229,8 @@ export interface InteractiveElement {
 }
 
 export interface HighlightOptions {
-  elementTypes?: ElementType[];  // Types to highlight
-  limit?: number;                // Max elements to return
-  offset?: number;               // Pagination offset
+  elementType?: ElementType;   // Single type to highlight (for stable pagination)
+  page?: number;                 // 1-indexed page number for collision-aware pagination
   scale?: number;                // Device pixel ratio for coordinate scaling
 }
 

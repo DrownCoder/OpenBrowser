@@ -228,24 +228,37 @@ class GetAccessibilityTreeCommand(BaseCommand):
 
 
 class HighlightElementsCommand(BaseCommand):
-    """Highlight interactive elements on the page for visual selection"""
+    """Highlight interactive elements on the page for visual selection
+    
+    Uses collision-aware pagination to ensure no overlapping highlights.
+    Each page returns a maximal set of non-colliding elements.
+    Only one element type per call for stable, predictable pagination.
+    """
+    type: Literal["highlight_elements"] = "highlight_elements"
+    element_type: Optional[str] = Field(
+        default="clickable",
+        description="Single element type to highlight: 'clickable', 'scrollable', 'inputable', or 'hoverable'"
+    )
+    page: Optional[int] = Field(
+        default=1,
+        ge=1,
+        description="Page number for collision-aware pagination (1-indexed)"
+    )
+    """Highlight interactive elements on the page for visual selection
+    
+    Uses collision-aware pagination to ensure no overlapping highlights.
+    Each page returns a maximal set of non-colliding elements.
+    """
     type: Literal["highlight_elements"] = "highlight_elements"
     element_types: Optional[List[str]] = Field(
         default=["clickable"],
         description="Types of elements to highlight (e.g., 'clickable', 'input', 'link')"
     )
-    limit: Optional[int] = Field(
-        default=10,
+    page: Optional[int] = Field(
+        default=1,
         ge=1,
-        le=100,
-        description="Maximum number of elements to highlight (1-100)"
+        description="Page number for collision-aware pagination (1-indexed)"
     )
-    offset: Optional[int] = Field(
-        default=0,
-        ge=0,
-        description="Offset for pagination (0-based)"
-    )
-
 
 class ClickElementCommand(BaseCommand):
     """Click a highlighted element by its ID"""

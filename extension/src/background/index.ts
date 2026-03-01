@@ -18,8 +18,103 @@ import { handleGetAccessibilityTree } from '../commands/accessibility';
 import { drawHighlights } from '../commands/visual-highlight';
 import { elementCache } from '../commands/element-cache';
 import { performElementClick, performElementHover, performElementScroll, performKeyboardInput } from '../commands/element-actions';
-import type { Command, CommandResponse } from '../types';
+import type { Command, CommandResponse, InteractiveElement } from '../types';
 console.log('🚀 OpenBrowser extension starting (Strict Mode)...');
+
+// ============================================================================
+// Collision-Aware Pagination for Element Highlighting
+// ============================================================================
+
+/**
+ * Label dimensions for collision detection (must match visual-highlight.ts)
+ */
+const LABEL_FONT_SIZE = 16;
+const LABEL_PADDING = 5;
+const LABEL_HEIGHT = LABEL_FONT_SIZE + LABEL_PADDING * 2; // 26px total
+
+interface BBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+
+/**
+ * Check if two bounding boxes intersect
+ */
+function bboxesIntersect(a: BBox, b: BBox): boolean {
+  return !(
+    a.x + a.width < b.x ||
+    b.x + b.width < a.x ||
+    a.y + a.height < b.y ||
+    b.y + b.height < a.y
+  );
+}
+
+/**
+ * Expand bbox to include label area (label is drawn above the element)
+ */
+function expandBBoxWithLabel(bbox: BBox): BBox {
+  return {
+    x: bbox.x,
+    y: bbox.y - LABEL_HEIGHT, // Extend upward for label
+    width: bbox.width,
+    height: bbox.height + LABEL_HEIGHT,
+  };
+}
+
+/**
+ * Check if two elements collide (including their labels)
+ */
+function elementsCollide(a: InteractiveElement, b: InteractiveElement): boolean {
+  const expandedA = expandBBoxWithLabel(a.bbox);
+  const expandedB = expandBBoxWithLabel(b.bbox);
+  return bboxesIntersect(expandedA, expandedB);
+}
+
+/**
+ * Select a collision-free page of elements using greedy algorithm
+ * 
+ * @param elements - All elements sorted by priority
+ * @param page - 1-indexed page number
+ * @returns Elements for the requested page (collision-free)
+ */
+function selectCollisionFreePage(
+  elements: InteractiveElement[],
+  page: number
+): InteractiveElement[] {
+  if (elements.length === 0 || page < 1) {
+    return [];
+  }
+
+  let remaining = [...elements];
+  let result: InteractiveElement[] = [];
+
+  for (let p = 1; p <= page; p++) {
+    const selected: InteractiveElement[] = [];
+
+    for (const elem of remaining) {
+      // Check if this element collides with any already selected in this page
+      const collides = selected.some(s => elementsCollide(elem, s));
+      if (!collides) {
+        selected.push(elem);
+      }
+    }
+
+    if (p === page) {
+      result = selected;
+      break;
+    }
+
+    // Remove selected elements from remaining for next page
+    const selectedIds = new Set(selected.map(e => e.id));
+    remaining = remaining.filter(e => !selectedIds.has(e.id));
+  }
+
+  return result;
+}
+
 
 // ============================================================================
 // Command Queue Management System
@@ -901,14 +996,13 @@ return {
           throw new Error(`No active tab for conversation ${conversationId}`);
         }
         
-        const elementTypes = command.element_types || ['clickable', 'scrollable', 'inputable', 'hoverable'];
-        const limit = command.limit || 10;
-        const offset = command.offset || 0;
+        const elementType = command.element_type || 'clickable';
+        const page = command.page || 1;  // 1-indexed page for collision-aware pagination
         
         // Build script to detect elements IN PAGE CONTEXT
         const detectionScript = `
           (function() {
-            const elementTypes = ${JSON.stringify(elementTypes)};
+            const elementType = "${elementType}";
             
             function isVisible(el) {
               const style = window.getComputedStyle(el);
@@ -1073,10 +1167,10 @@ return {
               if (!isInViewport(el)) continue;
               
               let type = null;
-              if (elementTypes.includes('clickable') && isClickable(el)) type = 'clickable';
-              else if (elementTypes.includes('scrollable') && isScrollable(el)) type = 'scrollable';
-              else if (elementTypes.includes('inputable') && isInputable(el)) type = 'inputable';
-              else if (elementTypes.includes('hoverable') && isHoverable(el)) type = 'hoverable';
+              if (elementType === 'clickable' && isClickable(el)) type = 'clickable';
+              else if (elementType === 'scrollable' && isScrollable(el)) type = 'scrollable';
+              else if (elementType === 'inputable' && isInputable(el)) type = 'inputable';
+              else if (elementType === 'hoverable' && isHoverable(el)) type = 'hoverable';
               
               if (type) {
                 const bbox = getBBox(el);
@@ -1183,8 +1277,8 @@ return {
         
         const allElements = detectionResult.result.value.elements || [];
         
-        // Paginate
-        const paginatedElements = allElements.slice(offset, offset + limit);
+        // Collision-aware pagination
+        const paginatedElements = selectCollisionFreePage(allElements, page);
         
         // Cache elements for later operations
         elementCache.storeElements(conversationId, allElements);
@@ -1217,8 +1311,6 @@ return {
         
         // Draw highlights on screenshot (scale coordinates by DPR)
         const highlightedScreenshot = await drawHighlights(screenshotResult.imageData, paginatedElements, { 
-          limit, 
-          offset, 
           scale: devicePixelRatio,
           viewportWidth,
           viewportHeight
@@ -1229,6 +1321,7 @@ return {
           data: {
             elements: paginatedElements,
             totalElements: allElements.length,
+            page: page,
             screenshot: highlightedScreenshot,
           },
           timestamp: Date.now(),

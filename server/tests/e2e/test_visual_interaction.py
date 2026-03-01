@@ -22,48 +22,41 @@ from server.models.commands import (
 
 
 class TestHighlightElementsCommand:
-    """Tests for HighlightElementsCommand parsing."""
+    """Tests for HighlightElementsCommand parsing with single-type design."""
 
     def test_parse_minimal(self):
         """Test parsing with minimal required fields."""
         cmd = HighlightElementsCommand()
         assert cmd.type == "highlight_elements"
-        assert cmd.element_types == ["clickable"]
-        assert cmd.limit == 10
-        assert cmd.offset == 0
+        assert cmd.element_type == "clickable"  # Default single type
+        assert cmd.page == 1  # Default page is 1
         assert cmd.command_id is None
         assert cmd.tab_id is None
         assert cmd.conversation_id is None
 
-    def test_parse_with_element_types(self):
-        """Test parsing with custom element types."""
+    def test_parse_with_element_type(self):
+        """Test parsing with custom element type (single)."""
         data = {
             "type": "highlight_elements",
-            "element_types": ["clickable", "input", "link"],
+            "element_type": "inputable",
         }
         cmd = HighlightElementsCommand(**data)
-        assert cmd.element_types == ["clickable", "input", "link"]
+        assert cmd.element_type == "inputable"
 
     def test_parse_with_all_element_types(self):
-        """Test parsing with all supported element types."""
-        element_types = ["clickable", "scrollable", "inputable", "hoverable"]
-        data = {
-            "type": "highlight_elements",
-            "element_types": element_types,
-        }
-        cmd = HighlightElementsCommand(**data)
-        assert cmd.element_types == element_types
+        """Test parsing with all supported element types (one at a time)."""
+        for element_type in ["clickable", "scrollable", "inputable", "hoverable"]:
+            cmd = HighlightElementsCommand(element_type=element_type)
+            assert cmd.element_type == element_type
 
     def test_parse_with_pagination(self):
-        """Test parsing with pagination parameters."""
+        """Test parsing with page parameter for collision-aware pagination."""
         data = {
             "type": "highlight_elements",
-            "limit": 50,
-            "offset": 100,
+            "page": 2,
         }
         cmd = HighlightElementsCommand(**data)
-        assert cmd.limit == 50
-        assert cmd.offset == 100
+        assert cmd.page == 2
 
     def test_parse_with_metadata(self):
         """Test parsing with command metadata."""
@@ -80,34 +73,27 @@ class TestHighlightElementsCommand:
         assert cmd.conversation_id == "conv-abc"
         assert cmd.timestamp == 1709000000.0
 
-    def test_limit_validation_min(self):
-        """Test limit must be at least 1."""
+    def test_page_validation_min(self):
+        """Test page must be at least 1."""
         with pytest.raises(ValidationError):
-            HighlightElementsCommand(limit=0)
+            HighlightElementsCommand(page=0)
 
-    def test_limit_validation_max(self):
-        """Test limit cannot exceed 100."""
+    def test_page_validation_negative(self):
+        """Test page cannot be negative."""
         with pytest.raises(ValidationError):
-            HighlightElementsCommand(limit=101)
-
-    def test_offset_validation_negative(self):
-        """Test offset cannot be negative."""
-        with pytest.raises(ValidationError):
-            HighlightElementsCommand(offset=-1)
+            HighlightElementsCommand(page=-1)
 
     def test_via_parse_command(self):
         """Test parsing via parse_command helper."""
         data = {
             "type": "highlight_elements",
-            "element_types": ["hoverable"],
-            "limit": 25,
-            "offset": 10,
+            "page": 3,
+            "element_type": "scrollable",
         }
         cmd = parse_command(data)
         assert isinstance(cmd, HighlightElementsCommand)
-        assert cmd.element_types == ["hoverable"]
-        assert cmd.limit == 25
-        assert cmd.offset == 10
+        assert cmd.page == 3
+        assert cmd.element_type == "scrollable"
 
 
 class TestClickElementCommand:
@@ -333,86 +319,69 @@ class TestKeyboardInputCommand:
         assert cmd.text == "This is a test comment."
 
 
-class TestPaginationParameters:
-    """Tests for pagination parameters (limit/offset)."""
+class TestCollisionAwarePagination:
+    """Tests for collision-aware pagination with single-type design."""
 
-    def test_limit_boundary_min(self):
-        """Test minimum valid limit value."""
-        cmd = HighlightElementsCommand(limit=1)
-        assert cmd.limit == 1
+    def test_default_element_type(self):
+        """Test default element type is clickable."""
+        cmd = HighlightElementsCommand()
+        assert cmd.element_type == "clickable"
 
-    def test_limit_boundary_max(self):
-        """Test maximum valid limit value."""
-        cmd = HighlightElementsCommand(limit=100)
-        assert cmd.limit == 100
+    def test_default_page(self):
+        """Test default page is 1."""
+        cmd = HighlightElementsCommand()
+        assert cmd.page == 1
 
-    def test_offset_zero(self):
-        """Test offset at start (zero)."""
-        cmd = HighlightElementsCommand(offset=0)
-        assert cmd.offset == 0
+    def test_single_type_pagination(self):
+        """Test pagination with single element type."""
+        # First page of clickable elements
+        cmd1 = HighlightElementsCommand(element_type="clickable", page=1)
+        assert cmd1.element_type == "clickable"
+        assert cmd1.page == 1
 
-    def test_offset_large(self):
-        """Test large offset value."""
-        cmd = HighlightElementsCommand(offset=9999)
-        assert cmd.offset == 9999
+        # Second page of clickable elements
+        cmd2 = HighlightElementsCommand(element_type="clickable", page=2)
+        assert cmd2.element_type == "clickable"
+        assert cmd2.page == 2
 
-    def test_pagination_combination(self):
-        """Test typical pagination combination."""
-        # First page
-        cmd1 = HighlightElementsCommand(limit=20, offset=0)
-        assert cmd1.limit == 20
-        assert cmd1.offset == 0
+        # Different type - independent pagination
+        cmd3 = HighlightElementsCommand(element_type="inputable", page=1)
+        assert cmd3.element_type == "inputable"
+        assert cmd3.page == 1
 
-        # Second page
-        cmd2 = HighlightElementsCommand(limit=20, offset=20)
-        assert cmd2.limit == 20
-        assert cmd2.offset == 20
+    def test_page_boundary_min(self):
+        """Test minimum valid page value."""
+        cmd = HighlightElementsCommand(page=1)
+        assert cmd.page == 1
 
-        # Third page
-        cmd3 = HighlightElementsCommand(limit=20, offset=40)
-        assert cmd3.limit == 20
-        assert cmd3.offset == 40
+    def test_page_boundary_large(self):
+        """Test large page value."""
+        cmd = HighlightElementsCommand(page=100)
+        assert cmd.page == 100
 
 
 class TestElementTypes:
-    """Tests for all element types supported by visual interaction."""
+    """Tests for single element type selection."""
 
     def test_clickable_elements(self):
         """Test highlighting clickable elements."""
-        cmd = HighlightElementsCommand(element_types=["clickable"])
-        assert "clickable" in cmd.element_types
+        cmd = HighlightElementsCommand(element_type="clickable")
+        assert cmd.element_type == "clickable"
 
     def test_scrollable_elements(self):
         """Test highlighting scrollable elements."""
-        cmd = HighlightElementsCommand(element_types=["scrollable"])
-        assert "scrollable" in cmd.element_types
+        cmd = HighlightElementsCommand(element_type="scrollable")
+        assert cmd.element_type == "scrollable"
 
     def test_inputable_elements(self):
         """Test highlighting inputable elements."""
-        cmd = HighlightElementsCommand(element_types=["inputable"])
-        assert "inputable" in cmd.element_types
+        cmd = HighlightElementsCommand(element_type="inputable")
+        assert cmd.element_type == "inputable"
 
     def test_hoverable_elements(self):
         """Test highlighting hoverable elements."""
-        cmd = HighlightElementsCommand(element_types=["hoverable"])
-        assert "hoverable" in cmd.element_types
-
-    def test_multiple_element_types(self):
-        """Test highlighting multiple element types at once."""
-        all_types = ["clickable", "scrollable", "inputable", "hoverable"]
-        cmd = HighlightElementsCommand(element_types=all_types)
-        assert cmd.element_types == all_types
-
-    def test_element_types_with_pagination(self):
-        """Test combining element types with pagination."""
-        cmd = HighlightElementsCommand(
-            element_types=["clickable", "inputable"],
-            limit=25,
-            offset=50,
-        )
-        assert cmd.element_types == ["clickable", "inputable"]
-        assert cmd.limit == 25
-        assert cmd.offset == 50
+        cmd = HighlightElementsCommand(element_type="hoverable")
+        assert cmd.element_type == "hoverable"
 
 
 class TestCommandTypeRouting:
@@ -451,5 +420,4 @@ class TestCommandTypeRouting:
     def test_missing_type_raises_error(self):
         """Test that missing type field raises ValueError."""
         with pytest.raises(ValueError, match="must have 'type' field"):
-
             parse_command({})
