@@ -112,6 +112,36 @@ export interface GetAccessibilityTreeCommand extends BaseCommand {
   max_elements?: number;
 }
 
+// Visual interaction commands
+export interface HighlightElementsCommand extends BaseCommand {
+  type: 'highlight_elements';
+  element_types?: ElementType[];
+  limit?: number;
+  offset?: number;
+}
+
+export interface ClickElementCommand extends BaseCommand {
+  type: 'click_element';
+  element_id: string;
+}
+
+export interface HoverElementCommand extends BaseCommand {
+  type: 'hover_element';
+  element_id: string;
+}
+
+export interface ScrollElementCommand extends BaseCommand {
+  type: 'scroll_element';
+  element_id: string;
+  direction?: ScrollDirection;
+}
+
+export interface KeyboardInputCommand extends BaseCommand {
+  type: 'keyboard_input';
+  element_id: string;
+  text: string;
+}
+
 export interface GroundedElementsResponse {
   success: boolean;
   data?: {
@@ -140,7 +170,13 @@ export type Command =
   | CleanupSessionCommand
   | HandleDialogCommand
   | GetGroundedElementsCommand
-  | GetAccessibilityTreeCommand;
+  | GetAccessibilityTreeCommand
+  // Visual interaction commands
+  | HighlightElementsCommand
+  | ClickElementCommand
+  | HoverElementCommand
+  | ScrollElementCommand
+  | KeyboardInputCommand;
 
 export interface CommandResponse {
   success: boolean;
@@ -197,6 +233,7 @@ export interface HighlightOptions {
   elementTypes?: ElementType[];  // Types to highlight
   limit?: number;                // Max elements to return
   offset?: number;               // Pagination offset
+  scale?: number;                // Device pixel ratio for coordinate scaling
 }
 
 export interface ElementActionResult {

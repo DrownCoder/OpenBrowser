@@ -1037,8 +1037,37 @@ return {
         // Capture screenshot
         const screenshotResult = await captureScreenshot(activeTabId, conversationId, true, 90, false, 0);
         
-        // Draw highlights on screenshot
-        const highlightedScreenshot = await drawHighlights(screenshotResult.dataUrl, paginatedElements, { limit, offset });
+        // Validate screenshot result
+        if (!screenshotResult?.success || !screenshotResult?.imageData) {
+          return {
+            success: false,
+            error: `Failed to capture screenshot: ${screenshotResult?.success === false ? 'Screenshot command failed' : 'No image data returned'}`,
+            timestamp: Date.now(),
+          };
+        }
+        console.log(`📸 [HighlightElements] Screenshot captured, size: ${screenshotResult.imageData.length} bytes`);
+        
+        // Get device pixel ratio for coordinate scaling
+        const devicePixelRatio = screenshotResult.metadata?.devicePixelRatio || 1;
+        const viewportWidth = screenshotResult.metadata?.viewportWidth || 0;
+        const viewportHeight = screenshotResult.metadata?.viewportHeight || 0;
+        console.log(`📐 [HighlightElements] Device pixel ratio: ${devicePixelRatio}`);
+        console.log(`📐 [HighlightElements] Viewport: ${viewportWidth}x${viewportHeight} CSS pixels`);
+        console.log(`📐 [HighlightElements] Expected image size: ${viewportWidth * devicePixelRatio}x${viewportHeight * devicePixelRatio} device pixels`);
+        
+        // Log first few element bboxes for debugging
+        if (paginatedElements.length > 0) {
+          console.log(`📍 [HighlightElements] First element bbox:`, JSON.stringify(paginatedElements[0].bbox));
+        }
+        
+        // Draw highlights on screenshot (scale coordinates by DPR)
+        const highlightedScreenshot = await drawHighlights(screenshotResult.imageData, paginatedElements, { 
+          limit, 
+          offset, 
+          scale: devicePixelRatio,
+          viewportWidth,
+          viewportHeight
+        });
         
         return {
           success: true,
@@ -1057,11 +1086,11 @@ return {
         if (!activeTabId) throw new Error('No active tab');
         
         const result = await performElementClick(command.conversation_id, command.element_id, activeTabId);
-        const screenshot = await captureScreenshot(activeTabId, command.conversation_id, true, 90, false, 0);
+        const screenshotResult = await captureScreenshot(activeTabId, command.conversation_id, true, 90, false, 0);
         
         return {
           success: result.success,
-          data: { ...result, screenshot },
+          data: { ...result, screenshot: screenshotResult?.imageData },
           timestamp: Date.now(),
         };
       }
@@ -1072,9 +1101,9 @@ return {
         if (!activeTabId) throw new Error('No active tab');
         
         const result = await performElementHover(command.conversation_id, command.element_id, activeTabId);
-        const screenshot = await captureScreenshot(activeTabId, command.conversation_id, true, 90, false, 0);
+        const screenshotResult = await captureScreenshot(activeTabId, command.conversation_id, true, 90, false, 0);
         
-        return { success: result.success, data: { ...result, screenshot }, timestamp: Date.now() };
+        return { success: result.success, data: { ...result, screenshot: screenshotResult?.imageData }, timestamp: Date.now() };
       }
 
       case 'scroll_element': {
@@ -1083,9 +1112,9 @@ return {
         if (!activeTabId) throw new Error('No active tab');
         
         const result = await performElementScroll(command.conversation_id, command.element_id, command.direction || 'down', activeTabId);
-        const screenshot = await captureScreenshot(activeTabId, command.conversation_id, true, 90, false, 0);
+        const screenshotResult = await captureScreenshot(activeTabId, command.conversation_id, true, 90, false, 0);
         
-        return { success: result.success, data: { ...result, screenshot }, timestamp: Date.now() };
+        return { success: result.success, data: { ...result, screenshot: screenshotResult?.imageData }, timestamp: Date.now() };
       }
 
       case 'keyboard_input': {
@@ -1094,9 +1123,9 @@ return {
         if (!activeTabId) throw new Error('No active tab');
         
         const result = await performKeyboardInput(command.conversation_id, command.element_id, command.text, activeTabId);
-        const screenshot = await captureScreenshot(activeTabId, command.conversation_id, true, 90, false, 0);
+        const screenshotResult = await captureScreenshot(activeTabId, command.conversation_id, true, 90, false, 0);
         
-        return { success: result.success, data: { ...result, screenshot }, timestamp: Date.now() };
+        return { success: result.success, data: { ...result, screenshot: screenshotResult?.imageData }, timestamp: Date.now() };
       }
 
 default:

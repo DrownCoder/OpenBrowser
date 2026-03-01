@@ -37,14 +37,15 @@ const LABEL_PADDING = 4;
  * 
  * @param screenshotDataUrl - Base64 data URL of the screenshot
  * @param elements - Array of interactive elements to highlight
- * @param options - Highlight options (limit, offset, elementTypes filter)
+ * @param options - Highlight options (limit, offset, elementTypes filter, scale)
  * @returns Promise resolving to base64 PNG data URL with highlights drawn
  */
 export async function drawHighlights(
   screenshotDataUrl: string,
   elements: InteractiveElement[],
-  options?: HighlightOptions,
+  options?: HighlightOptions & { scale?: number; viewportWidth?: number; viewportHeight?: number },
 ): Promise<string> {
+  console.log(`🎨 [VisualHighlight] Drawing highlights for ${elements.length} elements...`);
   console.log(`🎨 [VisualHighlight] Drawing highlights for ${elements.length} elements...`);
 
   // Check OffscreenCanvas availability
@@ -64,23 +65,86 @@ export async function drawHighlights(
   }
 
   try {
-    // Convert data URL to Blob (service workers can't fetch data: URLs)
-    // Extract base64 data from data URL
+    // ========================================
+    // STEP 1: Validate screenshot data URL format
+    // ========================================
+    if (!screenshotDataUrl || typeof screenshotDataUrl !== 'string') {
+      throw new Error(
+        '[VisualHighlight] Invalid screenshot data: expected a data URL string, got ' +
+          (screenshotDataUrl === null ? 'null' : screenshotDataUrl === undefined ? 'undefined' : typeof screenshotDataUrl),
+      );
+    }
+
+    if (!screenshotDataUrl.startsWith('data:')) {
+      throw new Error(
+        '[VisualHighlight] Invalid screenshot data URL: must start with "data:" prefix. ' +
+          `Got: "${screenshotDataUrl.substring(0, 50)}..."`,
+      );
+    }
+
+    if (!screenshotDataUrl.includes(',')) {
+      throw new Error(
+        '[VisualHighlight] Invalid screenshot data URL: must contain comma separator between header and data. ' +
+          `Got: "${screenshotDataUrl.substring(0, 100)}..."`,
+      );
+    }
+
+    // ========================================
+    // STEP 2: Parse data URL into components
+    // ========================================
     const dataUrlParts = screenshotDataUrl.split(',');
-    const mimeType = dataUrlParts[0].split(':')[1].split(';')[0];
+    const headerPart = dataUrlParts[0];
+    const colonIndex = headerPart.indexOf(':');
+    const semicolonIndex = headerPart.indexOf(';');
+
+    if (colonIndex === -1 || semicolonIndex === -1) {
+      throw new Error(
+        '[VisualHighlight] Invalid screenshot data URL header: expected format "data:image/format;base64". ' +
+          `Got: "${headerPart}"`,
+      );
+    }
+
+    const mimeType = headerPart.substring(colonIndex + 1, semicolonIndex);
     const base64Data = dataUrlParts[1];
-    
-    // Decode base64 to binary
+
+    if (!base64Data || base64Data.length === 0) {
+      throw new Error('[VisualHighlight] Screenshot data URL contains no image data after header');
+    }
+
+    // ========================================
+    // STEP 3: Decode base64 to binary
+    // ========================================
     const binaryString = atob(base64Data);
     const bytes = new Uint8Array(binaryString.length);
     for (let i = 0; i < binaryString.length; i++) {
       bytes[i] = binaryString.charCodeAt(i);
     }
-    
-    // Create Blob and ImageBitmap
+
+    // ========================================
+    // STEP 4: Create Blob and ImageBitmap
+    // ========================================
     const blob = new Blob([bytes], { type: mimeType });
     const imageBitmap = await createImageBitmap(blob);
 
+    // Extract options before using them
+    const viewportWidth = options?.viewportWidth ?? 0;
+    const viewportHeight = options?.viewportHeight ?? 0;
+    
+    console.log(`🖼️ [VisualHighlight] Screenshot dimensions: ${imageBitmap.width}x${imageBitmap.height}`);
+    
+    // Calculate actual scale from screenshot dimensions (more reliable than trusting DPR)
+    const actualScaleX = viewportWidth > 0 ? imageBitmap.width / viewportWidth : 1;
+    const actualScaleY = viewportHeight > 0 ? imageBitmap.height / viewportHeight : 1;
+    const actualScale = (actualScaleX + actualScaleY) / 2; // Average in case of rounding
+    
+    console.log(`📐 [VisualHighlight] Calculated scale: ${actualScale.toFixed(3)} (from ${viewportWidth}x${viewportHeight} → ${imageBitmap.width}x${imageBitmap.height})`);
+    
+    // Prefer calculated scale if it differs significantly from provided scale
+    const providedScale = options?.scale ?? 1;
+    const scale = Math.abs(actualScale - providedScale) > 0.1 ? actualScale : providedScale;
+    console.log(`📐 [VisualHighlight] Using scale: ${scale.toFixed(3)} (provided: ${providedScale}, calculated: ${actualScale})`);
+
+    // Create OffscreenCanvas with same dimensions as screenshot
     console.log(`🖼️ [VisualHighlight] Screenshot dimensions: ${imageBitmap.width}x${imageBitmap.height}`);
 
     // Create OffscreenCanvas with same dimensions as screenshot
@@ -111,14 +175,14 @@ export async function drawHighlights(
     const paginatedElements = filteredElements.slice(offset, offset + limit);
 
     console.log(
-      `🎨 [VisualHighlight] Drawing ${paginatedElements.length} elements (filtered from ${elements.length}, offset=${offset}, limit=${limit})`,
+      `🎨 [VisualHighlight] Drawing ${paginatedElements.length} elements (filtered from ${elements.length}, offset=${offset}, limit=${limit}, scale=${scale})`,
     );
 
     // Draw each element's bounding box and label
+    // Scale coordinates from CSS pixels to device pixels
     for (const element of paginatedElements) {
-      drawBoundingBox(ctx, element);
+      drawBoundingBox(ctx, element, scale);
     }
-
     // Convert canvas to PNG blob
     const resultBlob = await canvas.convertToBlob({ type: 'image/png' });
 
@@ -145,16 +209,20 @@ export async function drawHighlights(
  * 
  * @param ctx - Canvas 2D rendering context
  * @param element - Interactive element to draw
+ * @param scale - Scale factor to convert CSS pixels to device pixels (default: 1)
  */
-function drawBoundingBox(ctx: OffscreenCanvasRenderingContext2D, element: InteractiveElement): void {
+function drawBoundingBox(ctx: OffscreenCanvasRenderingContext2D, element: InteractiveElement, scale: number = 1): void {
   const color = COLORS[element.type] || '#CCCCCC';
   const { x, y, width, height } = element.bbox;
 
-  // Apply padding
-  const boxX = x - BOX_PADDING;
-  const boxY = y - BOX_PADDING;
-  const boxWidth = width + BOX_PADDING * 2;
-  const boxHeight = height + BOX_PADDING * 2;
+  // Apply scale to convert CSS pixels to device pixels, then apply padding
+  // x, y are viewport-relative from getBoundingClientRect()
+  const boxX = Math.round(x * scale) - BOX_PADDING;
+  const boxY = Math.round(y * scale) - BOX_PADDING;
+  const boxWidth = Math.round(width * scale) + BOX_PADDING * 2;
+  const boxHeight = Math.round(height * scale) + BOX_PADDING * 2;
+
+  console.log(`[VisualHighlight] Drawing bbox for ${element.id}: CSS(${x}, ${y}, ${width}, ${height}) → Device(${boxX}, ${boxY}, ${boxWidth}, ${boxHeight}) scale=${scale}`);
 
   // Draw bounding box
   ctx.strokeStyle = color;
@@ -164,6 +232,8 @@ function drawBoundingBox(ctx: OffscreenCanvasRenderingContext2D, element: Intera
   // Draw element ID label
   drawLabel(ctx, element.id, boxX, boxY, color);
 }
+
+/**
 
 /**
  * Draw a label with background at the specified position

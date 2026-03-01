@@ -539,7 +539,16 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                     conversation_id=self.conversation_id
                 )
                 result_dict = self._execute_command_sync(command)
-                message = f"Highlighted {len(result_dict.get('data', {}).get('elements', []))} elements"
+                
+                # Check if command succeeded before accessing result data
+                if result_dict is None:
+                    raise RuntimeError("Chrome extension did not respond to highlight_elements command")
+                if not result_dict.get('success', False):
+                    ext_error = result_dict.get('error', 'Unknown error from Chrome extension')
+                    raise RuntimeError(f"Chrome extension failed to highlight elements: {ext_error}")
+                
+                elements = result_dict.get('data', {}).get('elements', [])
+                message = f"Highlighted {len(elements)} elements"
 
             elif action_type == "click_element":
                 if not action.element_id:
@@ -549,8 +558,15 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                     conversation_id=self.conversation_id
                 )
                 result_dict = self._execute_command_sync(command)
+                
+                # Check if command succeeded
+                if result_dict is None:
+                    raise RuntimeError("Chrome extension did not respond to click_element command")
+                if not result_dict.get('success', False):
+                    ext_error = result_dict.get('error', 'Unknown error from Chrome extension')
+                    raise RuntimeError(f"Chrome extension failed to click element: {ext_error}")
+                
                 message = f"Clicked element: {action.element_id}"
-
             elif action_type == "hover_element":
                 if not action.element_id:
                     raise ValueError("hover_element requires element_id parameter")
@@ -559,8 +575,15 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                     conversation_id=self.conversation_id
                 )
                 result_dict = self._execute_command_sync(command)
+                
+                # Check if command succeeded
+                if result_dict is None:
+                    raise RuntimeError("Chrome extension did not respond to hover_element command")
+                if not result_dict.get('success', False):
+                    ext_error = result_dict.get('error', 'Unknown error from Chrome extension')
+                    raise RuntimeError(f"Chrome extension failed to hover element: {ext_error}")
+                
                 message = f"Hovered element: {action.element_id}"
-
             elif action_type == "scroll_element":
                 if not action.element_id:
                     raise ValueError("scroll_element requires element_id parameter")
@@ -570,8 +593,15 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                     conversation_id=self.conversation_id
                 )
                 result_dict = self._execute_command_sync(command)
+                
+                # Check if command succeeded
+                if result_dict is None:
+                    raise RuntimeError("Chrome extension did not respond to scroll_element command")
+                if not result_dict.get('success', False):
+                    ext_error = result_dict.get('error', 'Unknown error from Chrome extension')
+                    raise RuntimeError(f"Chrome extension failed to scroll element: {ext_error}")
+                
                 message = f"Scrolled element: {action.element_id} {action.direction or 'down'}"
-
             elif action_type == "keyboard_input":
                 if not action.element_id:
                     raise ValueError("keyboard_input requires element_id parameter")
@@ -583,8 +613,15 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                     conversation_id=self.conversation_id
                 )
                 result_dict = self._execute_command_sync(command)
+                
+                # Check if command succeeded
+                if result_dict is None:
+                    raise RuntimeError("Chrome extension did not respond to keyboard_input command")
+                if not result_dict.get('success', False):
+                    ext_error = result_dict.get('error', 'Unknown error from Chrome extension')
+                    raise RuntimeError(f"Chrome extension failed to input text: {ext_error}")
+                
                 message = f"Input text to element: {action.element_id}"
-
             else:
                 raise ValueError(f"Unknown action type: {action_type}")
             
@@ -609,6 +646,8 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
             dialog_opened = None
             dialog = None
             a11y_elements = None
+            highlighted_elements = None
+            total_elements = None
             
             if result_dict:
                 success = result_dict.get('success', False)
@@ -632,7 +671,19 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 # Extract a11y_elements if present
                 if 'data' in result_dict and isinstance(result_dict['data'], dict):
                     a11y_elements = result_dict['data'].get('a11y_elements')
-            
+                    
+                    # Extract screenshot from visual interaction commands
+                    # highlight_elements returns data.screenshot (highlighted image)
+                    # click/hover/scroll/keyboard_input return data.screenshot
+                    if 'screenshot' in result_dict['data']:
+                        screenshot_data_url = result_dict['data']['screenshot']
+                        logger.debug(f"DEBUG: Extracted screenshot from result_dict['data']['screenshot'], length={len(screenshot_data_url) if screenshot_data_url else 0}")
+                    
+                    # Extract highlighted elements for highlight_elements action
+                    if 'elements' in result_dict['data']:
+                        highlighted_elements = result_dict['data']['elements']
+                    if 'totalElements' in result_dict['data']:
+                        total_elements = result_dict['data']['totalElements']
             return OpenBrowserObservation(
                 success=success,
                 message=message,
@@ -644,7 +695,9 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 console_output=console_output,
                 dialog_opened=dialog_opened,
                 dialog=dialog,
-                a11y_elements=a11y_elements
+                a11y_elements=a11y_elements,
+                highlighted_elements=highlighted_elements,
+                total_elements=total_elements
             )
             
         except ValueError as e:
