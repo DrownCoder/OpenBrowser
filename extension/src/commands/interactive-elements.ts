@@ -56,7 +56,83 @@ export function detectInteractiveElements(options?: DetectOptions): InteractiveE
     }
   }
 
-  return elements;
+  // Deduplicate: remove parent elements that contain smaller clickable children
+  const deduplicated = deduplicateElements(elements);
+  
+  return deduplicated;
+}
+
+/**
+ * Remove overlapping elements, keeping the most specific (smallest) ones.
+ * Uses overlap ratio instead of strict containment to handle padding/border cases.
+ */
+function deduplicateElements(elements: InteractiveElement[]): InteractiveElement[] {
+  if (elements.length <= 1) return elements;
+  
+  const toRemove = new Set<number>();
+  
+  for (let i = 0; i < elements.length; i++) {
+    const elemA = elements[i];
+    const areaA = elemA.bbox.width * elemA.bbox.height;
+    
+    for (let j = 0; j < elements.length; j++) {
+      if (i === j || toRemove.has(i)) continue;
+      
+      const elemB = elements[j];
+      const areaB = elemB.bbox.width * elemB.bbox.height;
+      
+      // Calculate overlap area between A and B
+      const overlapArea = calculateOverlapArea(elemA.bbox, elemB.bbox);
+      const smallerArea = Math.min(areaA, areaB);
+      
+      // If overlap ratio > 80% (elements mostly overlap)
+      if (smallerArea > 0 && overlapArea / smallerArea > 0.8) {
+        // Remove the larger element, keep the smaller one
+        if (areaA > areaB) {
+          toRemove.add(i);
+        } else if (areaB > areaA) {
+          toRemove.add(j);
+        }
+      }
+    }
+  }
+  
+  if (toRemove.size === 0) return elements;
+  
+  return elements.filter((_, index) => !toRemove.has(index));
+}
+
+/**
+ * Calculate the overlapping area of two bounding boxes
+ */
+function calculateOverlapArea(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number }
+): number {
+  const xOverlap = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
+  const yOverlap = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
+  return xOverlap * yOverlap;
+}
+
+/**
+ * Check if bbox 'outer' completely contains bbox 'inner'
+ */
+function bboxContains(
+  outer: { x: number; y: number; width: number; height: number },
+  inner: { x: number; y: number; width: number; height: number }
+): boolean {
+  const outerRight = outer.x + outer.width;
+  const outerBottom = outer.y + outer.height;
+  const innerRight = inner.x + inner.width;
+  const innerBottom = inner.y + inner.height;
+  
+  return (
+    outer.x <= inner.x &&
+    outer.y <= inner.y &&
+    outerRight >= innerRight &&
+    outerBottom >= innerBottom
+  );
+}
 }
 
 /**
@@ -85,15 +161,86 @@ function isClickable(el: Element): boolean {
   if (el.hasAttribute('ng-click')) return true;
   if (el.hasAttribute('@click')) return true;
 
-  // Check for cursor: pointer style
+  // Check for cursor: pointer style (broad indicator of interactivity)
+  // But exclude large container elements that might be styled this way
   const style = window.getComputedStyle(el);
   if (style.cursor === 'pointer') {
-    // Additional check: must have some interaction indicator
-    if (el.hasAttribute('tabindex') || el.getAttribute('role') === 'link') {
-      return true;
+    // Exclude body/html and very large container elements
+    if (tag === 'BODY' || tag === 'HTML') {
+      return false;
     }
+    
+    // Check if element is unreasonably large (more than 80% of viewport)
+    const rect = el.getBoundingClientRect();
+    const viewportArea = window.innerWidth * window.innerHeight;
+    const elementArea = rect.width * rect.height;
+    if (elementArea > viewportArea * 0.8) {
+      return false;
+    }
+    
+    // IMPORTANT: Skip container elements that have clickable children
+    // This prevents parent containers from overlapping with their children
+    if (hasClickableChildren(el)) {
+      return false;
+    }
+    
+    return true;
   }
 
+  return false;
+}
+
+/**
+ * Check if element contains any clickable children (recursively)
+ * This helps filter out container elements that are styled with cursor:pointer
+ * but their actual interaction is handled by child elements.
+ */
+function hasClickableChildren(el: Element): boolean {
+  // Only check direct children and grandchildren (depth 2)
+  // to avoid performance issues on large DOM trees
+  const children = el.children;
+  
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i];
+    const childStyle = window.getComputedStyle(child);
+    
+    // Check if child is a specific interactive element (button, link, etc.)
+    const childTag = child.tagName.toUpperCase();
+    if (childTag === 'BUTTON' || childTag === 'A' || 
+        childTag === 'INPUT' || childTag === 'SELECT' || childTag === 'TEXTAREA') {
+      return true;
+    }
+    
+    // Check if child has cursor: pointer and is smaller than parent
+    if (childStyle.cursor === 'pointer') {
+      const parentArea = el.getBoundingClientRect().width * el.getBoundingClientRect().height;
+      const childArea = child.getBoundingClientRect().width * child.getBoundingClientRect().height;
+      // If child is cursor:pointer and smaller than parent, skip the parent
+      if (childArea < parentArea * 0.9) {
+        return true;
+      }
+    }
+    
+    // Check grandchildren (depth 2)
+    const grandchildren = child.children;
+    for (let j = 0; j < grandchildren.length; j++) {
+      const grandchild = grandchildren[j];
+      const gcTag = grandchild.tagName.toUpperCase();
+      if (gcTag === 'BUTTON' || gcTag === 'A') {
+        return true;
+      }
+      
+      const gcStyle = window.getComputedStyle(grandchild);
+      if (gcStyle.cursor === 'pointer') {
+        const parentArea = el.getBoundingClientRect().width * el.getBoundingClientRect().height;
+        const gcArea = grandchild.getBoundingClientRect().width * grandchild.getBoundingClientRect().height;
+        if (gcArea < parentArea * 0.9) {
+          return true;
+        }
+      }
+    }
+  }
+  
   return false;
 }
 

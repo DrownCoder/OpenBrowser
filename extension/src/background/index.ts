@@ -962,9 +962,26 @@ return {
             
             function isHoverable(el) {
               const style = window.getComputedStyle(el);
-              return style.cursor === 'pointer';
+              if (style.cursor !== 'pointer') return false;
+              
+              // Exclude if element has a clickable ancestor (prevent duplicates)
+              let parent = el.parentElement;
+              while (parent && parent !== document.body) {
+                const parentTag = parent.tagName.toLowerCase();
+                // Check if parent is inherently clickable
+                if (['a', 'button', 'input', 'select', 'textarea'].includes(parentTag)) {
+                  return false;
+                }
+                // Check if parent has click handlers
+                if (parent.getAttribute('role') === 'button' || 
+                    parent.onclick || parent.getAttribute('onclick') ||
+                    parent.getAttribute('ng-click') || parent.getAttribute('@click')) {
+                  return false;
+                }
+                parent = parent.parentElement;
+              }
+              return true;
             }
-            
             const counts = { clickable: 0, scrollable: 0, inputable: 0, hoverable: 0 };
             const elements = [];
             const allElements = Array.from(document.querySelectorAll('*'));
@@ -1004,7 +1021,41 @@ return {
               return bArea - aArea;
             });
             
-            return { elements, counts };
+            // Deduplicate: Remove larger elements that mostly contain smaller elements
+            const deduplicated = [];
+            const SKIP_OVERLAP_RATIO = 0.6; // If smaller element overlaps >60% with larger, skip larger
+            
+            for (let i = 0; i < elements.length; i++) {
+              const larger = elements[i];
+              const largerArea = larger.bbox.width * larger.bbox.height;
+              let shouldSkip = false;
+              
+              // Check if this larger element mostly contains any smaller element already added
+              for (let j = i + 1; j < elements.length; j++) {
+                const smaller = elements[j];
+                const smallerArea = smaller.bbox.width * smaller.bbox.height;
+                
+                // Skip if not much smaller (allow 20% size difference)
+                if (smallerArea > largerArea * 0.8) continue;
+                
+                // Calculate overlap
+                const xOverlap = Math.max(0, Math.min(larger.bbox.x + larger.bbox.width, smaller.bbox.x + smaller.bbox.width) - Math.max(larger.bbox.x, smaller.bbox.x));
+                const yOverlap = Math.max(0, Math.min(larger.bbox.y + larger.bbox.height, smaller.bbox.y + smaller.bbox.height) - Math.max(larger.bbox.y, smaller.bbox.y));
+                const overlapArea = xOverlap * yOverlap;
+                
+                // If smaller element is mostly (>60%) inside the larger element, skip the larger
+                if (overlapArea / smallerArea > SKIP_OVERLAP_RATIO) {
+                  shouldSkip = true;
+                  break;
+                }
+              }
+              
+              if (!shouldSkip) {
+                deduplicated.push(larger);
+              }
+            }
+            
+            return { elements: deduplicated, counts };
           })();
         `;
         

@@ -22,15 +22,13 @@ const COLORS: Record<ElementType, string> = {
 const MAX_ELEMENTS = 50;
 
 /**
- * Padding around element bounding box (in pixels)
+ /**
+ * Base sizes in CSS pixels (will be multiplied by scale for device pixels)
  */
-const BOX_PADDING = 2;
-
-/**
- * Font settings for labels
- */
-const LABEL_FONT = 'bold 12px Arial';
-const LABEL_PADDING = 4;
+const BASE_FONT_SIZE = 16; // Font size at scale=1
+const BASE_LABEL_PADDING = 5; // Label padding at scale=1
+const BASE_BOX_PADDING = 3; // Box padding at scale=1
+const BASE_LINE_WIDTH = 2.5; // Box border width at scale=1
 
 /**
  * Draw highlights (bounding boxes with labels) on a screenshot
@@ -215,25 +213,27 @@ function drawBoundingBox(ctx: OffscreenCanvasRenderingContext2D, element: Intera
   const color = COLORS[element.type] || '#CCCCCC';
   const { x, y, width, height } = element.bbox;
 
+  // Calculate device-pixel values from base CSS sizes
+  const boxPadding = Math.round(BASE_BOX_PADDING * scale);
+  const lineWidth = BASE_LINE_WIDTH * scale;
+
   // Apply scale to convert CSS pixels to device pixels, then apply padding
   // x, y are viewport-relative from getBoundingClientRect()
-  const boxX = Math.round(x * scale) - BOX_PADDING;
-  const boxY = Math.round(y * scale) - BOX_PADDING;
-  const boxWidth = Math.round(width * scale) + BOX_PADDING * 2;
-  const boxHeight = Math.round(height * scale) + BOX_PADDING * 2;
+  const boxX = Math.round(x * scale) - boxPadding;
+  const boxY = Math.round(y * scale) - boxPadding;
+  const boxWidth = Math.round(width * scale) + boxPadding * 2;
+  const boxHeight = Math.round(height * scale) + boxPadding * 2;
 
   console.log(`[VisualHighlight] Drawing bbox for ${element.id}: CSS(${x}, ${y}, ${width}, ${height}) → Device(${boxX}, ${boxY}, ${boxWidth}, ${boxHeight}) scale=${scale}`);
 
   // Draw bounding box
   ctx.strokeStyle = color;
-  ctx.lineWidth = 2;
+  ctx.lineWidth = lineWidth;
   ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
 
   // Draw element ID label
-  drawLabel(ctx, element.id, boxX, boxY, color);
+  drawLabel(ctx, element.id, boxX, boxY, color, scale);
 }
-
-/**
 
 /**
  * Draw a label with background at the specified position
@@ -243,6 +243,7 @@ function drawBoundingBox(ctx: OffscreenCanvasRenderingContext2D, element: Intera
  * @param x - X position (top-left of bounding box)
  * @param y - Y position (top-left of bounding box)
  * @param bgColor - Background color for the label
+ * @param scale - Scale factor for device pixels
  */
 function drawLabel(
   ctx: OffscreenCanvasRenderingContext2D,
@@ -250,18 +251,23 @@ function drawLabel(
   x: number,
   y: number,
   bgColor: string,
+  scale: number,
 ): void {
+  // Calculate device-pixel values from base CSS sizes
+  const fontSize = Math.round(BASE_FONT_SIZE * scale);
+  const labelPadding = Math.round(BASE_LABEL_PADDING * scale);
+
   // Set font before measuring text
-  ctx.font = LABEL_FONT;
+  ctx.font = `bold ${fontSize}px Arial`;
 
   // Measure text width
   const metrics = ctx.measureText(text);
   const textWidth = metrics.width;
-  const textHeight = 12; // Approximate height for 12px font
+  const textHeight = fontSize; // Height matches font size
 
   // Calculate label dimensions
-  const labelWidth = textWidth + LABEL_PADDING * 2;
-  const labelHeight = textHeight + LABEL_PADDING * 2;
+  const labelWidth = textWidth + labelPadding * 2;
+  const labelHeight = textHeight + labelPadding * 2;
 
   // Position label above the box (or inside if at top edge)
   let labelX = x;
@@ -279,7 +285,7 @@ function drawLabel(
   // Draw label text (white for contrast)
   ctx.fillStyle = '#FFFFFF';
   ctx.textBaseline = 'top';
-  ctx.fillText(text, labelX + LABEL_PADDING, labelY + LABEL_PADDING);
+  ctx.fillText(text, labelX + labelPadding, labelY + labelPadding);
 }
 
 /**
