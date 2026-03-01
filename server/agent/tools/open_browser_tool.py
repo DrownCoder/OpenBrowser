@@ -58,13 +58,7 @@ class OpenBrowserAction(Action):
     # Dialog handling
     dialog_action: Optional[str] = Field(default=None, description="Dialog action: accept/dismiss")
     prompt_text: Optional[str] = Field(default=None, description="Text for prompt dialogs")
-    
-    # Accessibility context
-    max_a11y_elements: Optional[int] = Field(
-        default=50,
-        description="Maximum number of accessible elements to return (default: 50). Set higher if you need more elements."
-    )
-    
+
     # JavaScript execution (fallback)
     script: Optional[str] = Field(default=None, description="JavaScript code (fallback)")
 # --- Supported Action Types and Their Parameters ---
@@ -265,30 +259,6 @@ class OpenBrowserObservation(Observation):
             else:
                 text_parts.append("**Note**: This dialog was auto-accepted (no decision needed).")
             text_parts.append("")
-        
-        # if getattr(self, "a11y_elements", None) is not None:
-        #     text_parts.append("## Accessible Elements")
-        #     text_parts.append("")
-        #     elements = self.a11y_elements
-        #     text_parts.append(f"**Found {len(elements)} interactive elements:**")
-        #     text_parts.append("")
-        #     for el in elements:
-        #         idx_info = f" (idx:{el.get('index')})" if el.get('index') is not None else ""
-        #         extra_info = []
-        #         if el.get('href'):
-        #             extra_info.append(f"href={el.get('href')[:60]}")
-        #         if el.get('placeholder'):
-        #             extra_info.append(f"placeholder=\"{el.get('placeholder')[:30]}\"")
-        #         if el.get('value') and el.get('role') in ('textbox', 'searchbox'):
-        #             extra_info.append(f"value=\"{el.get('value')[:30]}\"")
-        #         if el.get('checked') is not None:
-        #             extra_info.append(f"checked={el.get('checked')}")
-        #         if el.get('disabled'):
-        #             extra_info.append("disabled")
-        #         extra_str = f" [{', '.join(extra_info)}]" if extra_info else ""
-        #         text_parts.append(f"  - [{el.get('role')}] \"{el.get('name')}\" → {el.get('selector')}{idx_info}{extra_str}")
-        #         text_parts.append(f" (set max_a11y_elements to 0 to ignore all; or raise it to see more)")
-        #     text_parts.append("")
         
         # Highlighted Elements Section (if applicable)
         if self.highlighted_elements:
@@ -740,9 +710,6 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
     def __call__(self, action: OpenBrowserAction, conversation) -> OpenBrowserObservation:
         """Execute a browser action and return observation"""
         self.conversation_id = str(conversation._state.id)
-
-        if action.max_a11y_elements is not None:
-            command_processor.set_max_a11y_elements(action.max_a11y_elements, self.conversation_id)
 
         logger.debug(f"DEBUG: OpenBrowserTool.__call__ called with action: {action.type}, conversation_id: {self.conversation_id}")
         logger.debug(f"DEBUG: Current thread: {threading.current_thread().name}")

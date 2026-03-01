@@ -26,7 +26,6 @@ class CommandProcessor:
     
     def __init__(self):
         self._current_tab_ids: Dict[str, Optional[int]] = {}
-        self._max_a11y_elements: Dict[str, int] = {}  # conversation_id -> max_elements
     
     def _get_current_tab_id(self, conversation_id: str = None) -> Optional[int]:
         """Get current tab ID for a specific conversation"""
@@ -38,16 +37,6 @@ class CommandProcessor:
         key = conversation_id or 'default'
         self._current_tab_ids[key] = tab_id
         logger.debug(f"Set current tab ID {tab_id} for conversation {key}")
-    
-    def set_max_a11y_elements(self, max_elements: int, conversation_id: str = None):
-        """Set max a11y elements for a specific conversation"""
-        key = conversation_id or 'default'
-        self._max_a11y_elements[key] = max_elements
-    
-    def _get_max_a11y_elements(self, conversation_id: str = None) -> int:
-        """Get max a11y elements for a specific conversation"""
-        key = conversation_id or 'default'
-        return self._max_a11y_elements.get(key, 100)
     
     async def _get_a11y_elements_for_conversation(
         self,
@@ -231,32 +220,20 @@ class CommandProcessor:
         # Update current tab based on action (conversation-aware)
         if response.success:
             conversation_id = command.conversation_id
-            needs_a11y_update = False
             
             if command.action == "switch" and command.tab_id:
                 self._set_current_tab_id(command.tab_id, conversation_id)
-                needs_a11y_update = True
             elif command.action == "init":
                 if response.data and 'tabId' in response.data:
                     self._set_current_tab_id(response.data['tabId'], conversation_id)
                 elif response.data and 'tab_id' in response.data:
                     self._set_current_tab_id(response.data['tab_id'], conversation_id)
-                needs_a11y_update = True
             elif command.action == "open":
                 if response.data and 'tabId' in response.data:
                     self._set_current_tab_id(response.data['tabId'], conversation_id)
                 elif response.data and 'tab_id' in response.data:
                     self._set_current_tab_id(response.data['tab_id'], conversation_id)
-                needs_a11y_update = True
-            
-            # Get accessibility elements for page navigation actions
-            if needs_a11y_update and conversation_id:
-                max_el = self._get_max_a11y_elements(conversation_id)
-                a11y_elements = await self._get_a11y_elements_for_conversation(conversation_id, max_el)
-                if a11y_elements:
-                    if response.data is None:
-                        response.data = {}
-                    response.data['a11y_elements'] = a11y_elements
+
         return response
         
     async def _execute_get_tabs(self, command: GetTabsCommand) -> CommandResponse:
@@ -272,15 +249,6 @@ class CommandProcessor:
     async def _execute_javascript_execute(self, command: JavascriptExecuteCommand) -> CommandResponse:
         """Execute JavaScript code in browser tab and return accessibility elements"""
         response = await self._send_prepared_command(command)
-        
-        # Get accessibility elements after JavaScript execution
-        if command.conversation_id:
-            max_el = self._get_max_a11y_elements(command.conversation_id)
-            a11y_elements = await self._get_a11y_elements_for_conversation(command.conversation_id, max_el)
-            if a11y_elements:
-                if response.data is None:
-                    response.data = {}
-                response.data['a11y_elements'] = a11y_elements
         return response
         
     async def _execute_handle_dialog(self, command: HandleDialogCommand) -> CommandResponse:
