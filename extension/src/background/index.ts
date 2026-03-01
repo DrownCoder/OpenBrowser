@@ -1477,6 +1477,7 @@ return {
         const activeTabId = tabManager.getCurrentActiveTabId(command.conversation_id);
         if (!activeTabId) throw new Error('No active tab');
         
+        // element_id is optional - if not provided, scrolls the entire page
         const result = await performElementScroll(command.conversation_id, command.element_id, command.direction || 'down', activeTabId);
         const screenshotResult = await captureScreenshot(activeTabId, command.conversation_id, true, 90, false, 0);
         

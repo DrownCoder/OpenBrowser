@@ -131,7 +131,7 @@ export interface HoverElementCommand extends BaseCommand {
 
 export interface ScrollElementCommand extends BaseCommand {
   type: 'scroll_element';
-  element_id: string;
+  element_id?: string;  // Optional: if not provided, scrolls the entire page
   direction?: ScrollDirection;
 }
 

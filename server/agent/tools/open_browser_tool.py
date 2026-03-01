@@ -586,10 +586,9 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 
                 message = f"Hovered element: {action.element_id}"
             elif action_type == "scroll_element":
-                if not action.element_id:
-                    raise ValueError("scroll_element requires element_id parameter")
+                # element_id is optional - if not provided, scrolls the entire page
                 command = ScrollElementCommand(
-                    element_id=action.element_id,
+                    element_id=action.element_id,  # Can be None for page-level scrolling
                     direction=action.direction or "down",
                     conversation_id=self.conversation_id
                 )
@@ -600,9 +599,12 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                     raise RuntimeError("Chrome extension did not respond to scroll_element command")
                 if not result_dict.get('success', False):
                     ext_error = result_dict.get('error', 'Unknown error from Chrome extension')
-                    raise RuntimeError(f"Chrome extension failed to scroll element: {ext_error}")
+                    raise RuntimeError(f"Chrome extension failed to scroll: {ext_error}")
                 
-                message = f"Scrolled element: {action.element_id} {action.direction or 'down'}"
+                if action.element_id:
+                    message = f"Scrolled element: {action.element_id} {action.direction or 'down'}"
+                else:
+                    message = f"Scrolled page {action.direction or 'down'}"
             elif action_type == "keyboard_input":
                 if not action.element_id:
                     raise ValueError("keyboard_input requires element_id parameter")
@@ -894,15 +896,21 @@ Use this to reveal tooltips, dropdown menus, or hover states.
 
 ### scroll_element
 
-Scroll within an element by its visual ID.
+Scroll within an element by its visual ID, or scroll the entire page if no element_id is provided.
 
 ```json
 { "type": "scroll_element", "element_id": "scroll-1", "direction": "down" }
 { "type": "scroll_element", "element_id": "scroll-1", "direction": "up" }
+{ "type": "scroll_element", "direction": "down" }  // Scroll entire page
 ```
 
-Use this to scroll within specific containers (not the main page scroll).
+Parameters:
+- `element_id`: (optional) Element ID from highlight response. If not provided, scrolls the entire page.
+- `direction`: "up", "down", "left", or "right" (default: "down")
 
+Use this to:
+- Scroll within specific containers (when element_id is provided)
+- Scroll the entire page (when element_id is omitted)
 ### keyboard_input
 
 Type text into an input element by its visual ID.

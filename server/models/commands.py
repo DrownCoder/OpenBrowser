@@ -277,16 +277,16 @@ class HoverElementCommand(BaseCommand):
 
 
 class ScrollElementCommand(BaseCommand):
-    """Scroll a highlighted element in a direction"""
+    """Scroll a highlighted element in a direction, or the entire page if element_id not provided"""
     type: Literal["scroll_element"] = "scroll_element"
-    element_id: str = Field(
-        description="Element ID from highlight response"
+    element_id: Optional[str] = Field(
+        default=None,
+        description="Element ID from highlight response. If not provided, scrolls the entire page"
     )
     direction: str = Field(
         default="down",
         description="Scroll direction: 'up', 'down', 'left', 'right'"
     )
-
 
 class KeyboardInputCommand(BaseCommand):
     """Type text into a highlighted element by its ID"""

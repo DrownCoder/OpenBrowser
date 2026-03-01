@@ -456,12 +456,12 @@ export interface ScrollResult extends ElementActionResult {
  * Perform a scroll on an element identified by its cached element_id
  *
  * Flow:
- * 1. Look up element from cache
- * 2. Build JavaScript to scroll element
+ * 1. If elementId provided, look up element from cache
+ * 2. Build JavaScript to scroll element or page
  * 3. Execute and return with screenshot
  *
  * @param conversationId Session ID for element cache lookup
- * @param elementId Cached element ID (e.g., "scroll-1")
+ * @param elementId Cached element ID (e.g., "scroll-1"). Optional - if not provided, scrolls the entire page
  * @param direction Scroll direction ('up', 'down', 'left', 'right')
  * @param tabId Target tab ID
  * @param timeout Maximum execution time in milliseconds (default: 30000)
@@ -469,35 +469,18 @@ export interface ScrollResult extends ElementActionResult {
  */
 export async function performElementScroll(
   conversationId: string,
-  elementId: string,
+  elementId: string | undefined,
   direction: ScrollDirection,
   tabId: number,
   timeout: number = 30000
 ): Promise<ScrollResult> {
   console.log(
-    `📜 [ElementScroll] Scrolling element ${elementId} ${direction} in conversation ${conversationId} on tab ${tabId}`
+    `📜 [ElementScroll] Scrolling ${elementId ? `element ${elementId}` : 'entire page'} ${direction} in conversation ${conversationId} on tab ${tabId}`
   );
 
   // ============================================================
-  // STEP 1: Look up element from cache
+  // STEP 1: Build JavaScript to scroll
   // ============================================================
-  const element = elementCache.getElementById(conversationId, elementId);
-  if (!element) {
-    console.log(`❌ [ElementScroll] Element ${elementId} not found in cache`);
-    return {
-      success: false,
-      elementId,
-      scrolled: false,
-      error: `Element '${elementId}' not found in cache. Cache expires after 2 minutes. Call highlight_elements() first.`,
-    };
-  }
-
-  console.log(`✅ [ElementScroll] Found element: selector="${element.selector}"`);
-
-  // ============================================================
-  // STEP 2: Build JavaScript to scroll element
-  // ============================================================
-  const escapedSelector = element.selector.replace(/"/g, '\\"');
 
   // Calculate scroll amounts based on direction
   const scrollAmounts: Record<ScrollDirection, { x: number; y: number }> = {
@@ -509,62 +492,107 @@ export async function performElementScroll(
 
   const { x: scrollX, y: scrollY } = scrollAmounts[direction];
 
-  const script = `
-    (function() {
-      const selector = "${escapedSelector}";
-      const el = document.querySelector(selector);
+  let script: string;
 
-      if (!el) {
-        return { scrolled: false, error: "Element not found in DOM", stale: true };
-      }
+  if (elementId) {
+    // Scroll a specific element
+    const element = elementCache.getElementById(conversationId, elementId);
+    if (!element) {
+      console.log(`❌ [ElementScroll] Element ${elementId} not found in cache`);
+      return {
+        success: false,
+        elementId,
+        scrolled: false,
+        error: `Element '${elementId}' not found in cache. Cache expires after 2 minutes. Call highlight_elements() first.`,
+      };
+    }
 
-      // Determine the scrollable element
-      // For page-level elements, use document.scrollingElement
-      // For containers, use the element itself if it's scrollable
-      let scrollTarget = el;
+    console.log(`✅ [ElementScroll] Found element: selector="${element.selector}"`);
+    const escapedSelector = element.selector.replace(/"/g, '\\"');
 
-      // Check if this is a page-level selector (html, body, or document)
-      const isPageLevel = selector === 'html' || selector === 'body' ||
-                          selector.includes('document.scrollingElement');
+    script = `
+      (function() {
+        const selector = "${escapedSelector}";
+        const el = document.querySelector(selector);
 
-      if (isPageLevel) {
-        scrollTarget = document.scrollingElement || document.documentElement;
-      } else {
-        // Check if element itself is scrollable
-        const style = window.getComputedStyle(el);
-        const isScrollable = (style.overflowX === 'auto' || style.overflowX === 'scroll' ||
-                              style.overflowY === 'auto' || style.overflowY === 'scroll' ||
-                              style.overflow === 'auto' || style.overflow === 'scroll');
-
-        // If not scrollable, try to find a scrollable parent or use page
-        if (!isScrollable) {
-          scrollTarget = document.scrollingElement || document.documentElement;
+        if (!el) {
+          return { scrolled: false, error: "Element not found in DOM", stale: true };
         }
-      }
 
-      try {
-        // Use scrollBy for smooth relative scrolling
-        scrollTarget.scrollBy({
-          left: ${scrollX},
-          top: ${scrollY},
-          behavior: 'instant'
-        });
+        // Determine the scrollable element
+        // For page-level elements, use document.scrollingElement
+        // For containers, use the element itself if it's scrollable
+        let scrollTarget = el;
 
-        return {
-          scrolled: true,
-          scrollPosition: {
-            x: scrollTarget.scrollLeft,
-            y: scrollTarget.scrollTop
+        // Check if this is a page-level selector (html, body, or document)
+        const isPageLevel = selector === 'html' || selector === 'body' ||
+                            selector.includes('document.scrollingElement');
+
+        if (isPageLevel) {
+          scrollTarget = document.scrollingElement || document.documentElement;
+        } else {
+          // Check if element itself is scrollable
+          const style = window.getComputedStyle(el);
+          const isScrollable = (style.overflowX === 'auto' || style.overflowX === 'scroll' ||
+                                style.overflowY === 'auto' || style.overflowY === 'scroll' ||
+                                style.overflow === 'auto' || style.overflow === 'scroll');
+
+          // If not scrollable, try to find a scrollable parent or use page
+          if (!isScrollable) {
+            scrollTarget = document.scrollingElement || document.documentElement;
           }
-        };
-      } catch (e) {
-        return { scrolled: false, error: e.message || String(e) };
-      }
-    })();
-  `;
+        }
+
+        try {
+          // Use scrollBy for smooth relative scrolling
+          scrollTarget.scrollBy({
+            left: ${scrollX},
+            top: ${scrollY},
+            behavior: 'instant'
+          });
+
+          return {
+            scrolled: true,
+            scrollPosition: {
+              x: scrollTarget.scrollLeft,
+              y: scrollTarget.scrollTop
+            }
+          };
+        } catch (e) {
+          return { scrolled: false, error: e.message || String(e) };
+        }
+      })();
+    `;
+  } else {
+    // Scroll the entire page (no element_id provided)
+    script = `
+      (function() {
+        // Use document.scrollingElement for cross-browser compatibility
+        const scrollTarget = document.scrollingElement || document.documentElement;
+
+        try {
+          scrollTarget.scrollBy({
+            left: ${scrollX},
+            top: ${scrollY},
+            behavior: 'instant'
+          });
+
+          return {
+            scrolled: true,
+            scrollPosition: {
+              x: scrollTarget.scrollLeft,
+              y: scrollTarget.scrollTop
+            }
+          };
+        } catch (e) {
+          return { scrolled: false, error: e.message || String(e) };
+        }
+      })();
+    `;
+  }
 
   // ============================================================
-  // STEP 3: Execute JavaScript
+  // STEP 2: Execute JavaScript
   // ============================================================
   let jsResult: JavaScriptResult;
 
@@ -607,7 +635,7 @@ export async function performElementScroll(
   }
 
   // ============================================================
-  // STEP 4: Capture screenshot for verification
+  // STEP 3: Capture screenshot for verification
   // ============================================================
   console.log(`✅ [ElementScroll] Scroll executed successfully`);
 
