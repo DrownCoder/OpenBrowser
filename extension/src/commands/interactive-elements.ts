@@ -133,7 +133,8 @@ function bboxContains(
     outerBottom >= innerBottom
   );
 }
-}
+
+
 
 /**
  * Check if element is clickable

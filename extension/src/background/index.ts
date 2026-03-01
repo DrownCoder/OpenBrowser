@@ -936,13 +936,95 @@ return {
             
             function isClickable(el) {
               const tag = el.tagName.toLowerCase();
-              const clickableTags = ['a', 'button', 'input', 'select', 'textarea'];
-              const clickableTypes = ['submit', 'button'];
-              if (clickableTags.includes(tag)) return true;
-              if (tag === 'input' && clickableTypes.includes(el.type)) return true;
+              
+              // Check tag names
+              if (tag === 'a' || tag === 'button') return true;
+              
+              // Check input types
+              if (tag === 'input') {
+                const type = el.type?.toLowerCase();
+                if (type === 'submit' || type === 'button' || type === 'image' || type === 'reset') {
+                  return true;
+                }
+                return false;
+              }
+              
+              // Check attributes
               if (el.getAttribute('role') === 'button') return true;
-              if (el.onclick || el.getAttribute('onclick')) return true;
-              if (el.getAttribute('ng-click') || el.getAttribute('@click')) return true;
+              if (el.hasAttribute('onclick')) return true;
+              if (el.hasAttribute('ng-click')) return true;
+              if (el.hasAttribute('@click')) return true;
+              
+              // Check for cursor: pointer style (broad indicator of interactivity)
+              // But exclude large container elements that might be styled this way
+              const style = window.getComputedStyle(el);
+              if (style.cursor === 'pointer') {
+                // Exclude body/html and very large container elements
+                if (tag === 'body' || tag === 'html') {
+                  return false;
+                }
+                
+                // Check if element is unreasonably large (more than 80% of viewport)
+                const rect = el.getBoundingClientRect();
+                const viewportArea = window.innerWidth * window.innerHeight;
+                const elementArea = rect.width * rect.height;
+                if (elementArea > viewportArea * 0.8) {
+                  return false;
+                }
+                
+                // IMPORTANT: Skip container elements that have clickable children
+                // This prevents parent containers from overlapping with their children
+                if (hasClickableChildren(el)) {
+                  return false;
+                }
+                
+                return true;
+              }
+              
+              return false;
+            }
+            
+            // Check if element contains any clickable children (depth 2)
+            // Only check for explicit interactive elements, not cursor: pointer (which may be inherited)
+            function hasClickableChildren(el) {
+              const children = el.children;
+              
+              for (let i = 0; i < children.length; i++) {
+                const child = children[i];
+                const childTag = child.tagName.toLowerCase();
+                
+                // Only check for explicit interactive elements
+                if (childTag === 'button' || childTag === 'a' || 
+                    childTag === 'input' || childTag === 'select' || childTag === 'textarea') {
+                  return true;
+                }
+                
+                // Check for explicit click attributes (not inherited cursor)
+                if (child.getAttribute('role') === 'button' || 
+                    child.hasAttribute('onclick') || 
+                    child.hasAttribute('ng-click') || 
+                    child.hasAttribute('@click')) {
+                  return true;
+                }
+                
+                // Check grandchildren (depth 2) - only explicit interactive elements
+                const grandchildren = child.children;
+                for (let j = 0; j < grandchildren.length; j++) {
+                  const grandchild = grandchildren[j];
+                  const gcTag = grandchild.tagName.toLowerCase();
+                  if (gcTag === 'button' || gcTag === 'a') {
+                    return true;
+                  }
+                  
+                  if (grandchild.getAttribute('role') === 'button' || 
+                      grandchild.hasAttribute('onclick') || 
+                      grandchild.hasAttribute('ng-click') || 
+                      grandchild.hasAttribute('@click')) {
+                    return true;
+                  }
+                }
+              }
+              
               return false;
             }
             
@@ -1014,11 +1096,33 @@ return {
               }
             }
             
-            // Sort by area (larger elements first)
+            // Smart sorting: prioritize action buttons over large containers
             elements.sort((a, b) => {
-              const aArea = a.bbox.width * a.bbox.height;
-              const bArea = b.bbox.width * b.bbox.height;
-              return bArea - aArea;
+              function getPriority(el) {
+                const tag = el.tagName.toLowerCase();
+                const area = el.bbox.width * el.bbox.height;
+                const viewportArea = window.innerWidth * window.innerHeight;
+                const sizeRatio = area / viewportArea;
+                let score = 0;
+                
+                // 1. BUTTON elements get highest priority
+                if (tag === 'button') score += 2000;
+                
+                // 2. Links get medium priority
+                if (tag === 'a') score += 1000;
+                
+                // 3. Penalize large containers (>5% of viewport)
+                if (sizeRatio > 0.05) score -= 1000;
+                
+                // 4. Boost small interactive elements (<0.5% of viewport)
+                if (sizeRatio < 0.005 && sizeRatio > 0.00001) score += 500;
+                
+                // 5. Position: top elements first (lower Y = higher priority)
+                score += Math.max(0, 2000 - el.bbox.y);
+                
+                return score;
+              }
+              return getPriority(b) - getPriority(a);
             });
             
             // Deduplicate: Remove larger elements that mostly contain smaller elements

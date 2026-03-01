@@ -159,29 +159,25 @@ export async function drawHighlights(
     // Close the bitmap to free memory
     imageBitmap.close();
 
-    // Filter and paginate elements
-    let filteredElements = elements;
-
-    // Filter by element types if specified
+    // Filter by element types if specified (caller already paginated)
+    // Note: DO NOT re-paginate here - the caller has already done pagination
     if (options?.elementTypes && options.elementTypes.length > 0) {
-      filteredElements = elements.filter((el) => options.elementTypes!.includes(el.type));
+      const typeFiltered = elements.filter((el) => options.elementTypes!.includes(el.type));
+      console.log(
+        `🎨 [VisualHighlight] Drawing ${typeFiltered.length} elements (type filter: ${options.elementTypes.join(',')}, scale=${scale})`,
+      );
+    } else {
+      console.log(
+        `🎨 [VisualHighlight] Drawing ${elements.length} elements (no type filter, scale=${scale})`,
+      );
     }
-
-    // Apply pagination
-    const offset = options?.offset ?? 0;
-    const limit = Math.min(options?.limit ?? MAX_ELEMENTS, MAX_ELEMENTS);
-    const paginatedElements = filteredElements.slice(offset, offset + limit);
-
-    console.log(
-      `🎨 [VisualHighlight] Drawing ${paginatedElements.length} elements (filtered from ${elements.length}, offset=${offset}, limit=${limit}, scale=${scale})`,
-    );
 
     // Draw each element's bounding box and label
     // Scale coordinates from CSS pixels to device pixels
-    for (const element of paginatedElements) {
+    for (const element of (options?.elementTypes ? typeFiltered : elements)) {
       drawBoundingBox(ctx, element, scale);
     }
-    // Convert canvas to PNG blob
+
     const resultBlob = await canvas.convertToBlob({ type: 'image/png' });
 
     // Convert blob to data URL
