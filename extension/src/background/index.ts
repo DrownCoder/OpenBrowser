@@ -1065,9 +1065,80 @@ return {
             }
             
             function generateSelector(el) {
-              if (el.id) return '#' + el.id;
-              if (el.getAttribute('data-testid')) return '[data-testid="' + el.getAttribute('data-testid') + '"]';
-              return el.tagName.toLowerCase() + (el.classList && el.classList.length ? '.' + Array.from(el.classList).join('.') : '');
+              // Priority 1: ID (most unique)
+              if (el.id) {
+                try {
+                  return '#' + CSS.escape(el.id);
+                } catch (e) {
+                  // Fallback if CSS.escape not available
+                  return '#' + el.id.replace(/([.#\[\],\s:+>~])/g, '\\$1');
+                }
+              }
+              
+              // Priority 2: name attribute
+              const name = el.getAttribute('name');
+              if (name) {
+                try {
+                  return '[name="' + CSS.escape(name) + '"]';
+                } catch (e) {
+                  return '[name="' + name.replace(/"/g, '\\"') + '"]';
+                }
+              }
+              
+              // Priority 3: data-testid
+              const dataTestId = el.getAttribute('data-testid');
+              if (dataTestId) {
+                try {
+                  return '[data-testid="' + CSS.escape(dataTestId) + '"]';
+                } catch (e) {
+                  return '[data-testid="' + dataTestId.replace(/"/g, '\\"') + '"]';
+                }
+              }
+              
+              // Priority 4: aria-label
+              const ariaLabel = el.getAttribute('aria-label');
+              if (ariaLabel) {
+                try {
+                  return '[aria-label="' + CSS.escape(ariaLabel) + '"]';
+                } catch (e) {
+                  return '[aria-label="' + ariaLabel.replace(/"/g, '\\"') + '"]';
+                }
+              }
+              
+              // Priority 5: Build full CSS path with nth-of-type for uniqueness
+              const path = [];
+              let current = el;
+              
+              while (current && current !== document.documentElement) {
+                let selector = current.tagName.toLowerCase();
+                
+                // Add nth-of-type if there are siblings with same tag
+                const parent = current.parentElement;
+                if (parent) {
+                  const siblings = Array.from(parent.children).filter(c => c.tagName === current.tagName);
+                  if (siblings.length > 1) {
+                    const index = siblings.indexOf(current) + 1;
+                    selector += ':nth-of-type(' + index + ')';
+                  }
+                }
+                
+                path.unshift(selector);
+                current = parent;
+                
+                // Stop if path is already unique
+                if (parent) {
+                  try {
+                    const testSelector = path.join(' > ');
+                    if (document.querySelectorAll(testSelector).length === 1) {
+                      break;
+                    }
+                  } catch (e) {
+                    // Invalid selector, continue building path
+                  }
+                }
+              }
+              
+              return path.join(' > ');
             }
             
             function isClickable(el) {
