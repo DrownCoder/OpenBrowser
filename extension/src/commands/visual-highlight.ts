@@ -7,7 +7,7 @@
 import type { InteractiveElement, ElementType, HighlightOptions } from '../types';
 
 /**
- * Color mapping for different element types
+ * Color mapping for different element types (with transparency for label backgrounds)
  */
 const COLORS: Record<ElementType, string> = {
   clickable: '#0066FF',
@@ -17,18 +17,28 @@ const COLORS: Record<ElementType, string> = {
 };
 
 /**
+ * Label background colors with transparency (RGBA)
+ */
+const LABEL_BG_COLORS: Record<ElementType, string> = {
+  clickable: 'rgba(0, 102, 255, 0.7)',
+  scrollable: 'rgba(0, 204, 102, 0.7)',
+  inputable: 'rgba(255, 153, 0, 0.7)',
+  hoverable: 'rgba(153, 102, 255, 0.7)',
+};
+
+/**
  * Maximum number of elements to draw at once to prevent performance issues
  */
 const MAX_ELEMENTS = 50;
 
 /**
- /**
+/**
  * Base sizes in CSS pixels (will be multiplied by scale for device pixels)
  */
 const BASE_FONT_SIZE = 16; // Font size at scale=1
-const BASE_LABEL_PADDING = 5; // Label padding at scale=1
-const BASE_BOX_PADDING = 3; // Box padding at scale=1
-const BASE_LINE_WIDTH = 2.5; // Box border width at scale=1
+const BASE_LABEL_PADDING = 4; // Label padding at scale=1 (reduced for less coverage)
+const BASE_BOX_PADDING = 1; // Box padding at scale=1 (minimal to avoid covering content)
+const BASE_LINE_WIDTH = 1.5; // Box border width at scale=1 (thinner to reduce overlap)
 
 /**
  * Draw highlights (bounding boxes with labels) on a screenshot
@@ -359,8 +369,9 @@ function drawBoundingBox(ctx: OffscreenCanvasRenderingContext2D, element: Intera
   ctx.lineWidth = lineWidth;
   ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
 
-  // Draw element ID label
-  drawLabel(ctx, element.id, boxX, boxY, color, scale);
+  // Draw element ID label with transparent background
+  const bgColor = LABEL_BG_COLORS[element.type] || 'rgba(200, 200, 200, 0.7)';
+  drawLabel(ctx, element.id, boxX, boxY, bgColor, scale);
 }
 
 /**

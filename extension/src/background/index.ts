@@ -31,6 +31,7 @@ console.log('🚀 OpenBrowser extension starting (Strict Mode)...');
 const LABEL_FONT_SIZE = 16;
 const LABEL_PADDING = 5;
 const LABEL_HEIGHT = LABEL_FONT_SIZE + LABEL_PADDING * 2; // 26px total
+const MAX_LABEL_WIDTH = 120; // Maximum label width for collision detection (e.g., "clickable-999")
 
 interface BBox {
   x: number;
@@ -56,10 +57,13 @@ function bboxesIntersect(a: BBox, b: BBox): boolean {
  * Expand bbox to include label area (label is drawn above the element)
  */
 function expandBBoxWithLabel(bbox: BBox): BBox {
+  // Label is drawn above the element, starting from element's left edge
+  // Label width may exceed element width, causing horizontal overlap
+  const labelWidth = Math.max(bbox.width, MAX_LABEL_WIDTH);
   return {
     x: bbox.x,
     y: bbox.y - LABEL_HEIGHT, // Extend upward for label
-    width: bbox.width,
+    width: labelWidth,          // Use max of element width and label width
     height: bbox.height + LABEL_HEIGHT,
   };
 }
@@ -113,6 +117,44 @@ function selectCollisionFreePage(
   }
 
   return result;
+}
+
+/**
+ * Calculate total number of collision-free pages
+ * This pre-computes the pagination to determine how many pages exist
+ * 
+ * @param elements - All elements sorted by priority
+ * @returns Total number of pages
+ */
+function calculateTotalPages(elements: InteractiveElement[]): number {
+  if (elements.length === 0) {
+    return 0;
+  }
+
+  let remaining = [...elements];
+  let totalPages = 0;
+
+  while (remaining.length > 0) {
+    const selected: InteractiveElement[] = [];
+
+    for (const elem of remaining) {
+      const collides = selected.some(s => elementsCollide(elem, s));
+      if (!collides) {
+        selected.push(elem);
+      }
+    }
+
+    // Safety check: if no elements were selected, break to prevent infinite loop
+    if (selected.length === 0) {
+      break;
+    }
+
+    totalPages++;
+    const selectedIds = new Set(selected.map(e => e.id));
+    remaining = remaining.filter(e => !selectedIds.has(e.id));
+  }
+
+  return totalPages;
 }
 
 
@@ -1280,6 +1322,10 @@ return {
         // Collision-aware pagination
         const paginatedElements = selectCollisionFreePage(allElements, page);
         
+        // Calculate total pages for pagination info
+        const totalPages = calculateTotalPages(allElements);
+        console.log(`📄 [HighlightElements] Page ${page}/${totalPages}, showing ${paginatedElements.length} of ${allElements.length} elements`);
+        
         // Cache elements for later operations
         elementCache.storeElements(conversationId, allElements);
         
@@ -1321,6 +1367,7 @@ return {
           data: {
             elements: paginatedElements,
             totalElements: allElements.length,
+            totalPages: totalPages,
             page: page,
             screenshot: highlightedScreenshot,
           },

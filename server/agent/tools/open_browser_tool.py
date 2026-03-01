@@ -548,8 +548,9 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 
                 elements = result_dict.get('data', {}).get('elements', [])
                 total_elements = result_dict.get('data', {}).get('totalElements', 0)
+                total_pages = result_dict.get('data', {}).get('totalPages', 1)
                 current_page = result_dict.get('data', {}).get('page', 1)
-                message = f"Found {len(elements)} {element_type} elements on page {current_page}/{total_elements} (total: {total_elements})"
+                message = f"Found {len(elements)} {element_type} elements on page {current_page}/{total_pages} (total: {total_elements})"
             elif action_type == "click_element":
                 if not action.element_id:
                     raise ValueError("click_element requires element_id parameter")
