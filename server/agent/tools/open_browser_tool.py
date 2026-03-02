@@ -527,7 +527,8 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                     raise ValueError("click_element requires element_id parameter")
                 command = ClickElementCommand(
                     element_id=action.element_id,
-                    conversation_id=self.conversation_id
+                    conversation_id=self.conversation_id,
+                    tab_id=action.tab_id
                 )
                 result_dict = self._execute_command_sync(command)
                 
@@ -544,7 +545,8 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                     raise ValueError("hover_element requires element_id parameter")
                 command = HoverElementCommand(
                     element_id=action.element_id,
-                    conversation_id=self.conversation_id
+                    conversation_id=self.conversation_id,
+                    tab_id=action.tab_id
                 )
                 result_dict = self._execute_command_sync(command)
                 
@@ -561,7 +563,8 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 command = ScrollElementCommand(
                     element_id=action.element_id,  # Can be None for page-level scrolling
                     direction=action.direction or "down",
-                    conversation_id=self.conversation_id
+                    conversation_id=self.conversation_id,
+                    tab_id=action.tab_id
                 )
                 result_dict = self._execute_command_sync(command)
                 
@@ -584,7 +587,8 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 command = KeyboardInputCommand(
                     element_id=action.element_id,
                     text=action.text,
-                    conversation_id=self.conversation_id
+                    conversation_id=self.conversation_id,
+                    tab_id=action.tab_id
                 )
                 result_dict = self._execute_command_sync(command)
                 

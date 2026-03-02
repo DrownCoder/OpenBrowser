@@ -17,6 +17,7 @@ import { handleGetAccessibilityTree } from '../commands/accessibility';
 
 import { drawHighlights } from '../commands/visual-highlight';
 import { elementCache } from '../commands/element-cache';
+import { generateElementId } from '../commands/hash-utils';
 import { performElementClick, performElementHover, performElementScroll, performKeyboardInput } from '../commands/element-actions';
 import type { Command, CommandResponse, InteractiveElement } from '../types';
 console.log('🚀 OpenBrowser extension starting (Strict Mode)...');
@@ -1289,7 +1290,7 @@ return {
                 const bbox = getBBox(el);
                 if (bbox.width > 0 && bbox.height > 0) {
                   elements.push({
-                    id: type + '-' + (counts[type] + 1),
+                    id: '',  // Placeholder - will be replaced by hash in background script
                     type: type,
                     tagName: el.tagName.toLowerCase(),
                     selector: generateSelector(el),
@@ -1389,6 +1390,14 @@ return {
         }
         
         const allElements = detectionResult.result.value.elements || [];
+
+        // Generate hash IDs for all elements (collision-free)
+        const existingHashes = new Set<string>();
+        for (const element of allElements) {
+          const { id } = generateElementId(element.type, element.selector, existingHashes);
+          element.id = id;
+          existingHashes.add(id);
+        }
         
         // Collision-aware pagination
         const paginatedElements = selectCollisionFreePage(allElements, page);
