@@ -61,25 +61,6 @@ class OpenBrowserAction(Action):
 
     # JavaScript execution (fallback)
     script: Optional[str] = Field(default=None, description="JavaScript code (fallback)")
-# --- Supported Action Types and Their Parameters ---
-"""
-Supported action types and their parameters:
-
-1. javascript_execute - Execute JavaScript code in current tab
-   Parameters: {
-     "type": "javascript_execute",
-     "script": str  # JavaScript code to execute
-   }
-
-2. tab - Tab management operations
-   Parameters: {
-     "type": "tab",
-     "action": str,  # "init", "open", "close", "switch", "list", "refresh"
-     "url": str (optional),  # URL for open/init actions
-     "tab_id": int (optional)  # Tab ID for close, switch, and refresh actions
-   }
-"""
-# --- Observation ---
 
 class OpenBrowserObservation(Observation):
     """Observation returned by OpenBrowserTool after each action"""
@@ -112,10 +93,6 @@ class OpenBrowserObservation(Observation):
     dialog: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Dialog information if a dialog is open (type, message, needsDecision)"
-    )
-    a11y_elements: Optional[List[Dict[str, Any]]] = Field(
-        default=None,
-        description="List of accessible interactive elements with selectors"
     )
     # Visual interaction results
     highlighted_elements: Optional[List[Dict[str, Any]]] = Field(
@@ -675,8 +652,6 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 
                 # Extract a11y_elements if present
                 if 'data' in result_dict and isinstance(result_dict['data'], dict):
-                    a11y_elements = result_dict['data'].get('a11y_elements')
-                    
                     # Extract screenshot from visual interaction commands
                     # highlight_elements returns data.screenshot (highlighted image)
                     # click/hover/scroll/keyboard_input return data.screenshot
@@ -700,7 +675,6 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 console_output=console_output,
                 dialog_opened=dialog_opened,
                 dialog=dialog,
-                a11y_elements=a11y_elements,
                 highlighted_elements=highlighted_elements,
                 total_elements=total_elements
             )
@@ -719,7 +693,6 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 console_output=None,
                 dialog_opened=None,
                 dialog=None,
-                a11y_elements=None
             )
         except Exception as e:
             logger.debug(f"DEBUG: _execute_action_sync caught exception: {e}")
@@ -735,8 +708,7 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 javascript_result=None,
                 console_output=None,
                 dialog_opened=None,
-                dialog=None,
-                a11y_elements=None
+                dialog=None
             )
     
     def __call__(self, action: OpenBrowserAction, conversation) -> OpenBrowserObservation:
