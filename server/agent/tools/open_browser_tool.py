@@ -243,11 +243,7 @@ class OpenBrowserObservation(Observation):
             text_parts.append("")
             text_parts.append(f"**Total Elements**: {self.total_elements if self.total_elements is not None else len(self.highlighted_elements)}")
             text_parts.append("")
-            for el in self.highlighted_elements:
-                el_id = el.get('id', 'unknown')
-                el_type = el.get('type', 'unknown')
-                el_label = el.get('label', '')
-                text_parts.append(f"  - [{el_id}] {el_type}: \"{el_label}\"")
+            text_parts.append(f"**Element Ids:** {', '.join([el.get('id', 'unknown') for el in self.highlighted_elements])}")
             text_parts.append("")
         
         if self.element_id:
@@ -848,7 +844,7 @@ Parameters:
 Click an element by its visual ID.
 
 ```json
-{ "type": "click_element", "element_id": "c8e4d2" }
+{ "type": "click_element", "element_id": "c8e4d2", "tab_id": 123 }
 ```
 
 Use this for buttons, links, and any clickable element you identified from highlight_elements.
@@ -858,7 +854,7 @@ Use this for buttons, links, and any clickable element you identified from highl
 Hover over an element by its visual ID.
 
 ```json
-{ "type": "hover_element", "element_id": "a3f2b1" }
+{ "type": "hover_element", "element_id": "a3f2b1", "tab_id": 123 }
 ```
 
 Use this to reveal tooltips, dropdown menus, or hover states.
@@ -868,9 +864,9 @@ Use this to reveal tooltips, dropdown menus, or hover states.
 Scroll within an element by its visual ID, or scroll the entire page if no element_id is provided.
 
 ```json
-{ "type": "scroll_element", "element_id": "d2f4a8", "direction": "down" }
-{ "type": "scroll_element", "element_id": "d2f4a8", "direction": "up" }
-{ "type": "scroll_element", "direction": "down" }  // Scroll entire page
+{ "type": "scroll_element", "element_id": "d2f4a8", "direction": "down", "tab_id": 123 }
+{ "type": "scroll_element", "element_id": "d2f4a8", "direction": "up", "tab_id": 123 }
+{ "type": "scroll_element", "direction": "down", "tab_id": 123 }  // Scroll entire page
 ```
 
 Parameters:
@@ -885,7 +881,7 @@ Use this to:
 Type text into an input element by its visual ID.
 
 ```json
-{ "type": "keyboard_input", "element_id": "b7c9e5", "text": "hello@example.com" }
+{ "type": "keyboard_input", "element_id": "b7c9e5", "text": "hello@example.com", "tab_id": 123 }
 ```
 
 Use this for text inputs, textareas, and search boxes.
