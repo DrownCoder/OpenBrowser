@@ -38,31 +38,6 @@ class CommandProcessor:
         self._current_tab_ids[key] = tab_id
         logger.debug(f"Set current tab ID {tab_id} for conversation {key}")
     
-    async def _get_a11y_elements_for_conversation(
-        self,
-        conversation_id: str,
-        max_elements: int = 100
-    ) -> Optional[List[Dict[str, Any]]]:
-        """Get accessibility tree elements for a conversation."""
-        command = GetAccessibilityTreeCommand(
-            conversation_id=conversation_id,
-            max_elements=max_elements
-        )
-        
-        try:
-            response = await self._send_prepared_command(command)
-            
-            if not response.success or not response.data:
-                logger.warning(f"Failed to get accessibility tree: {response.error}")
-                return None
-            elements = response.data.get('elements', [])
-            logger.info(f"_get_a11y_elements_for_conversation got {len(elements)} elements")
-            return response.data.get('elements', [])
-            
-        except Exception as e:
-            logger.error(f"Error getting accessibility tree: {e}")
-            return None
-    
     def _prepare_command_dict(self, command: Command) -> dict:
         """
         Prepare command dictionary for sending to extension.
