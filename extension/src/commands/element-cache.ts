@@ -6,7 +6,8 @@
 import type { InteractiveElement } from '../types';
 
 interface CacheEntry {
-  elements: InteractiveElement[];
+  element: InteractiveElement; // Single element
+  tabId: number; // Tab ID for validation
   timestamp: number;
 }
 
@@ -17,10 +18,17 @@ class ElementCacheImpl {
   private cache = new Map<string, CacheEntry>();
 
   /**
-   * Store elements for a conversation
-   * Limits to MAX_ELEMENTS_PER_SESSION
+   * Generate composite cache key
    */
-  storeElements(conversationId: string, elements: InteractiveElement[]): void {
+  private buildKey(conversationId: string, tabId: number, elementId: string): string {
+    return `${conversationId}:${tabId}:${elementId}`;
+  }
+
+  /**
+   * Store elements for a conversation and tab
+   * Each element gets its own cache entry with composite key
+   */
+  storeElements(conversationId: string, tabId: number, elements: InteractiveElement[]): void {
     if (!conversationId || !elements.length) {
       return;
     }
@@ -30,59 +38,122 @@ class ElementCacheImpl {
 
     // Limit elements to max count
     const limitedElements = elements.slice(0, MAX_ELEMENTS_PER_SESSION);
+    const timestamp = Date.now();
 
-    this.cache.set(conversationId, {
-      elements: limitedElements,
-      timestamp: Date.now(),
-    });
+    // Store each element with its own composite key
+    for (const element of limitedElements) {
+      const key = this.buildKey(conversationId, tabId, element.id);
+      this.cache.set(key, {
+        element,
+        tabId,
+        timestamp,
+      });
+    }
 
     console.log(
-      `📁 [ElementCache] Stored ${limitedElements.length} elements for conversation ${conversationId}`
+      `📁 [ElementCache] Stored ${limitedElements.length} elements for conversation ${conversationId}, tab ${tabId}`
     );
   }
 
   /**
-   * Get all elements for a conversation if not expired
+   * Get all elements for a conversation (across all tabs)
+   * Note: This aggregates elements from all tabs for the conversation
    */
   getElements(conversationId: string): InteractiveElement[] | undefined {
     if (!conversationId) {
       return undefined;
     }
 
-    const entry = this.cache.get(conversationId);
+    const now = Date.now();
+    const elements: InteractiveElement[] = [];
+    const expiredKeys: string[] = [];
+
+    // Iterate through all cache entries
+    for (const [key, entry] of this.cache.entries()) {
+      // Check if this entry belongs to the conversation
+      if (key.startsWith(`${conversationId}:`)) {
+        // Check if expired
+        if (now - entry.timestamp > CACHE_TTL_MS) {
+          expiredKeys.push(key);
+          continue;
+        }
+        elements.push(entry.element);
+      }
+    }
+
+    // Cleanup expired entries
+    for (const key of expiredKeys) {
+      this.cache.delete(key);
+      console.log(`⏰ [ElementCache] Cache expired for key ${key}`);
+    }
+
+    return elements.length > 0 ? elements : undefined;
+  }
+
+  /**
+   * Find a specific element by ID within a conversation and tab
+   * Validates tab_id match - returns undefined if mismatch
+   */
+  getElementById(
+    conversationId: string,
+    tabId: number,
+    elementId: string
+  ): InteractiveElement | undefined {
+    if (!conversationId || !elementId) {
+      return undefined;
+    }
+
+    const key = this.buildKey(conversationId, tabId, elementId);
+    const entry = this.cache.get(key);
+
     if (!entry) {
       return undefined;
     }
 
     // Check if expired
     if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
-      this.cache.delete(conversationId);
-      console.log(`⏰ [ElementCache] Cache expired for conversation ${conversationId}`);
+      this.cache.delete(key);
+      console.log(`⏰ [ElementCache] Cache expired for key ${key}`);
       return undefined;
     }
 
-    return entry.elements;
-  }
-
-  /**
-   * Find a specific element by ID within a conversation's cache
-   */
-  getElementById(conversationId: string, elementId: string): InteractiveElement | undefined {
-    const elements = this.getElements(conversationId);
-    if (!elements) {
+    // Validate tab_id match
+    if (entry.tabId !== tabId) {
+      console.log(
+        `⚠️ [ElementCache] Tab ID mismatch: expected ${tabId}, found ${entry.tabId} for key ${key}`
+      );
       return undefined;
     }
 
-    return elements.find((el) => el.id === elementId);
+    return entry.element;
   }
 
   /**
    * Invalidate (clear) cache for a specific conversation
+   * If tabId provided, invalidate only that tab's elements
+   * If no tabId, invalidate all elements for the conversation
    */
-  invalidate(conversationId: string): void {
-    if (this.cache.has(conversationId)) {
-      this.cache.delete(conversationId);
-      console.log(`🗑️ [ElementCache] Invalidated cache for conversation ${conversationId}`);
+  invalidate(conversationId: string, tabId?: number): void {
+    const prefix = tabId !== undefined
+      ? `${conversationId}:${tabId}:`
+      : `${conversationId}:`;
+
+    const keysToDelete: string[] = [];
+    for (const key of this.cache.keys()) {
+      if (key.startsWith(prefix)) {
+        keysToDelete.push(key);
+      }
+    }
+
+    for (const key of keysToDelete) {
+      this.cache.delete(key);
+    }
+
+    if (keysToDelete.length > 0) {
+      const scope = tabId !== undefined ? `tab ${tabId}` : 'all tabs';
+      console.log(
+        `🗑️ [ElementCache] Invalidated ${keysToDelete.length} elements for conversation ${conversationId} (${scope})`
+      );
     }
   }
 
@@ -91,22 +162,22 @@ class ElementCacheImpl {
    */
   private cleanup(conversationId?: string): void {
     const now = Date.now();
+    const expiredKeys: string[] = [];
 
-    if (conversationId) {
-      // Check specific conversation
-      const entry = this.cache.get(conversationId);
-      if (entry && now - entry.timestamp > CACHE_TTL_MS) {
-        this.cache.delete(conversationId);
-        console.log(`🧹 [ElementCache] Cleaned up expired cache for ${conversationId}`);
+    for (const [key, entry] of this.cache.entries()) {
+      // Filter by conversation if provided
+      if (conversationId && !key.startsWith(`${conversationId}:`)) {
+        continue;
       }
-    } else {
-      // Check all conversations
-      for (const [id, entry] of this.cache.entries()) {
-        if (now - entry.timestamp > CACHE_TTL_MS) {
-          this.cache.delete(id);
-          console.log(`🧹 [ElementCache] Cleaned up expired cache for ${id}`);
-        }
+
+      if (now - entry.timestamp > CACHE_TTL_MS) {
+        expiredKeys.push(key);
       }
+    }
+
+    for (const key of expiredKeys) {
+      this.cache.delete(key);
+      console.log(`🧹 [ElementCache] Cleaned up expired cache for ${key}`);
     }
   }
 

@@ -266,6 +266,7 @@ class ClickElementCommand(BaseCommand):
     element_id: str = Field(
         description="Element ID from highlight response"
     )
+    tab_id: int = Field(..., description="Target tab ID")
 
 
 class HoverElementCommand(BaseCommand):
@@ -274,6 +275,7 @@ class HoverElementCommand(BaseCommand):
     element_id: str = Field(
         description="Element ID from highlight response"
     )
+    tab_id: int = Field(..., description="Target tab ID")
 
 
 class ScrollElementCommand(BaseCommand):
@@ -287,6 +289,7 @@ class ScrollElementCommand(BaseCommand):
         default="down",
         description="Scroll direction: 'up', 'down', 'left', 'right'"
     )
+    tab_id: int = Field(..., description="Target tab ID")
 
 class KeyboardInputCommand(BaseCommand):
     """Type text into a highlighted element by its ID"""
@@ -297,6 +300,7 @@ class KeyboardInputCommand(BaseCommand):
     text: str = Field(
         description="Text to input into the element"
     )
+    tab_id: int = Field(..., description="Target tab ID")
 
 class CommandResponse(BaseModel):
     """Response from command execution"""

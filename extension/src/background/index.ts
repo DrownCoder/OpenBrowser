@@ -1397,8 +1397,7 @@ return {
         const totalPages = calculateTotalPages(allElements);
         console.log(`📄 [HighlightElements] Page ${page}/${totalPages}, showing ${paginatedElements.length} of ${allElements.length} elements`);
         
-        // Cache elements for later operations
-        elementCache.storeElements(conversationId, allElements);
+        elementCache.storeElements(conversationId, activeTabId, allElements);
         
         // Capture screenshot
         const screenshotResult = await captureScreenshot(activeTabId, conversationId, true, 90, false, 0);
@@ -1448,51 +1447,67 @@ return {
 
       case 'click_element': {
         if (!command.conversation_id) throw new Error('conversation_id required');
-        const activeTabId = tabManager.getCurrentActiveTabId(command.conversation_id);
-        if (!activeTabId) throw new Error('No active tab');
+        const clickTabId = command.tab_id;
+        if (clickTabId === undefined || clickTabId === null) throw new Error('tab_id is required');
         
-        const result = await performElementClick(command.conversation_id, command.element_id, activeTabId);
-        const screenshotResult = await captureScreenshot(activeTabId, command.conversation_id, true, 90, false, 0);
+        const clickResult = await performElementClick(command.conversation_id, command.element_id, clickTabId);
+        const clickScreenshotResult = await captureScreenshot(clickTabId, command.conversation_id, true, 90, false, 0);
         
         return {
-          success: result.success,
-          data: { ...result, screenshot: screenshotResult?.imageData },
+          success: clickResult.success,
+          data: { ...clickResult, screenshot: clickScreenshotResult?.imageData },
+          error: clickResult.error,
           timestamp: Date.now(),
         };
       }
 
       case 'hover_element': {
         if (!command.conversation_id) throw new Error('conversation_id required');
-        const activeTabId = tabManager.getCurrentActiveTabId(command.conversation_id);
-        if (!activeTabId) throw new Error('No active tab');
+        const hoverTabId = command.tab_id;
+        if (hoverTabId === undefined || hoverTabId === null) throw new Error('tab_id is required');
         
-        const result = await performElementHover(command.conversation_id, command.element_id, activeTabId);
-        const screenshotResult = await captureScreenshot(activeTabId, command.conversation_id, true, 90, false, 0);
+        const hoverResult = await performElementHover(command.conversation_id, command.element_id, hoverTabId);
+        const hoverScreenshotResult = await captureScreenshot(hoverTabId, command.conversation_id, true, 90, false, 0);
         
-        return { success: result.success, data: { ...result, screenshot: screenshotResult?.imageData }, timestamp: Date.now() };
+        return {
+          success: hoverResult.success,
+          data: { ...hoverResult, screenshot: hoverScreenshotResult?.imageData },
+          error: hoverResult.error,
+          timestamp: Date.now(),
+        };
       }
 
       case 'scroll_element': {
         if (!command.conversation_id) throw new Error('conversation_id required');
-        const activeTabId = tabManager.getCurrentActiveTabId(command.conversation_id);
-        if (!activeTabId) throw new Error('No active tab');
+        const scrollTabId = command.tab_id;
+        if (scrollTabId === undefined || scrollTabId === null) throw new Error('tab_id is required');
         
         // element_id is optional - if not provided, scrolls the entire page
-        const result = await performElementScroll(command.conversation_id, command.element_id, command.direction || 'down', activeTabId);
-        const screenshotResult = await captureScreenshot(activeTabId, command.conversation_id, true, 90, false, 0);
+        const scrollResult = await performElementScroll(command.conversation_id, command.element_id, command.direction || 'down', scrollTabId);
+        const scrollScreenshotResult = await captureScreenshot(scrollTabId, command.conversation_id, true, 90, false, 0);
         
-        return { success: result.success, data: { ...result, screenshot: screenshotResult?.imageData }, timestamp: Date.now() };
+        return {
+          success: scrollResult.success,
+          data: { ...scrollResult, screenshot: scrollScreenshotResult?.imageData },
+          error: scrollResult.error,
+          timestamp: Date.now(),
+        };
       }
 
       case 'keyboard_input': {
         if (!command.conversation_id) throw new Error('conversation_id required');
-        const activeTabId = tabManager.getCurrentActiveTabId(command.conversation_id);
-        if (!activeTabId) throw new Error('No active tab');
+        const inputTabId = command.tab_id;
+        if (inputTabId === undefined || inputTabId === null) throw new Error('tab_id is required');
         
-        const result = await performKeyboardInput(command.conversation_id, command.element_id, command.text, activeTabId);
-        const screenshotResult = await captureScreenshot(activeTabId, command.conversation_id, true, 90, false, 0);
+        const inputResult = await performKeyboardInput(command.conversation_id, command.element_id, command.text, inputTabId);
+        const inputScreenshotResult = await captureScreenshot(inputTabId, command.conversation_id, true, 90, false, 0);
         
-        return { success: result.success, data: { ...result, screenshot: screenshotResult?.imageData }, timestamp: Date.now() };
+        return {
+          success: inputResult.success,
+          data: { ...inputResult, screenshot: inputScreenshotResult?.imageData },
+          error: inputResult.error,
+          timestamp: Date.now(),
+        };
       }
 
 default:

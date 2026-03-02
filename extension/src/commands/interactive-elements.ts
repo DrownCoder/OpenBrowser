@@ -1,4 +1,5 @@
 import type { InteractiveElement, ElementType } from '../types';
+import { generateUniqueHash } from './hash-utils';
 
 export interface DetectOptions {
   elementTypes?: ElementType[];
@@ -14,13 +15,7 @@ export function detectInteractiveElements(options?: DetectOptions): InteractiveE
   const elementTypes = options?.elementTypes ?? ['clickable', 'scrollable', 'inputable', 'hoverable'];
   const includeHidden = options?.includeHidden ?? false;
 
-  const counts: Record<ElementType, number> = {
-    clickable: 0,
-    scrollable: 0,
-    inputable: 0,
-    hoverable: 0,
-  };
-
+  const existingHashes = new Set<string>();
   const elements: InteractiveElement[] = [];
   const allElements = Array.from(document.querySelectorAll('*'));
 
@@ -30,28 +25,24 @@ export function detectInteractiveElements(options?: DetectOptions): InteractiveE
 
     // Check each element type
     if (elementTypes.includes('clickable') && isClickable(el)) {
-      const element = createElementInfo(el, 'clickable', counts.clickable);
+      const element = createElementInfo(el, 'clickable', existingHashes);
       if (element) {
         elements.push(element);
-        counts.clickable++;
       }
     } else if (elementTypes.includes('scrollable') && isScrollable(el)) {
-      const element = createElementInfo(el, 'scrollable', counts.scrollable);
+      const element = createElementInfo(el, 'scrollable', existingHashes);
       if (element) {
         elements.push(element);
-        counts.scrollable++;
       }
     } else if (elementTypes.includes('inputable') && isInputable(el)) {
-      const element = createElementInfo(el, 'inputable', counts.inputable);
+      const element = createElementInfo(el, 'inputable', existingHashes);
       if (element) {
         elements.push(element);
-        counts.inputable++;
       }
     } else if (elementTypes.includes('hoverable') && isHoverable(el)) {
-      const element = createElementInfo(el, 'hoverable', counts.hoverable);
+      const element = createElementInfo(el, 'hoverable', existingHashes);
       if (element) {
         elements.push(element);
-        counts.hoverable++;
       }
     }
   }
@@ -113,27 +104,6 @@ function calculateOverlapArea(
   const yOverlap = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
   return xOverlap * yOverlap;
 }
-
-/**
- * Check if bbox 'outer' completely contains bbox 'inner'
- */
-function bboxContains(
-  outer: { x: number; y: number; width: number; height: number },
-  inner: { x: number; y: number; width: number; height: number }
-): boolean {
-  const outerRight = outer.x + outer.width;
-  const outerBottom = outer.y + outer.height;
-  const innerRight = inner.x + inner.width;
-  const innerBottom = inner.y + inner.height;
-  
-  return (
-    outer.x <= inner.x &&
-    outer.y <= inner.y &&
-    outerRight >= innerRight &&
-    outerBottom >= innerBottom
-  );
-}
-
 
 
 /**
@@ -475,7 +445,7 @@ function getCssPath(el: Element): string {
 /**
  * Create element info object
  */
-function createElementInfo(el: Element, type: ElementType, index: number): InteractiveElement | null {
+function createElementInfo(el: Element, type: ElementType, existingHashes: Set<string>): InteractiveElement | null {
   const bbox = getBBox(el);
   
   // Skip elements with zero dimensions
@@ -486,12 +456,16 @@ function createElementInfo(el: Element, type: ElementType, index: number): Inter
 
   // Get text content (limit to 200 chars)
   const text = (el.textContent || '').trim().slice(0, 200) || undefined;
-
+  
+  // Generate selector and hash-based ID
+  const selector = generateSelector(el);
+  const { hash } = generateUniqueHash(selector, existingHashes);
+  
   return {
-    id: `${type}-${index + 1}`,
+    id: hash,  // Pure 6-char hash, no prefix
     type,
     tagName: el.tagName.toLowerCase(),
-    selector: generateSelector(el),
+    selector,
     text,
     bbox,
     isVisible: visible,
@@ -511,7 +485,7 @@ export interface ElementScore {
  * Sort interactive elements by composite score
  * Ranking: viewport visibility (40%) + size (30%) + z-index (20%) + position (10%)
  * @param elements Array of interactive elements to sort
- * @returns Sorted array with reassigned IDs
+ * @returns Sorted array with stable hash IDs preserved
  */
 export function sortInteractiveElements(elements: InteractiveElement[]): InteractiveElement[] {
   // Calculate score for each element
@@ -524,16 +498,11 @@ export function sortInteractiveElements(elements: InteractiveElement[]): Interac
   // Sort by score descending, then by original index for determinism
   scored.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
-    return a.originalIndex - b.originalIndex;
+    return a.originalIndex - a.originalIndex;
   });
 
-  // Reassign IDs based on new order
-  const counts: Record<ElementType, number> = { clickable: 0, scrollable: 0, inputable: 0, hoverable: 0 };
-  return scored.map(({ element }) => {
-    const newIndex = counts[element.type] + 1;
-    counts[element.type]++;
-    return { ...element, id: `${element.type}-${newIndex}` };
-  });
+  // Return sorted elements with their original hash IDs preserved
+  return scored.map(({ element }) => element);
 }
 
 /**

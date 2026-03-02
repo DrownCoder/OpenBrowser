@@ -62,7 +62,7 @@ export async function performElementClick(
   // ============================================================
   // STEP 1: Look up element from cache
   // ============================================================
-  const element = elementCache.getElementById(conversationId, elementId);
+  const element = elementCache.getElementById(conversationId, tabId, elementId);
   if (!element) {
     console.log(`❌ [ElementClick] Element ${elementId} not found in cache`);
     return {
@@ -262,13 +262,6 @@ export async function performElementClick(
   };
 }
 
-/**
- * Result type for element hover operation
- */
-export interface HoverResult extends ElementActionResult {
-  hovered: boolean;
-  staleElement?: boolean;
-}
 
 /**
  * Perform a hover on an element identified by its cached element_id
@@ -299,7 +292,7 @@ export async function performElementHover(
   // ============================================================
   // STEP 1: Look up element from cache
   // ============================================================
-  const element = elementCache.getElementById(conversationId, elementId);
+  const element = elementCache.getElementById(conversationId, tabId, elementId);
   if (!element) {
     console.log(`❌ [ElementHover] Element ${elementId} not found in cache`);
     return {
@@ -496,7 +489,7 @@ export async function performElementScroll(
 
   if (elementId) {
     // Scroll a specific element
-    const element = elementCache.getElementById(conversationId, elementId);
+    const element = elementCache.getElementById(conversationId, tabId, elementId);
     if (!element) {
       console.log(`❌ [ElementScroll] Element ${elementId} not found in cache`);
       return {
@@ -698,7 +691,7 @@ export async function performKeyboardInput(
   // ============================================================
   // STEP 1: Look up element from cache
   // ============================================================
-  const element = elementCache.getElementById(conversationId, elementId);
+  const element = elementCache.getElementById(conversationId, tabId, elementId);
   if (!element) {
     console.log(`❌ [KeyboardInput] Element ${elementId} not found in cache`);
     return {

@@ -213,7 +213,7 @@ export interface WebSocketMessage {
 export type ElementType = 'clickable' | 'scrollable' | 'inputable' | 'hoverable';
 
 export interface InteractiveElement {
-  id: string;                    // Element ID like "click-1", "scroll-1"
+  id: string;                    // Element ID: 6-char hash from CSS path (e.g., "a3f2b1")
   type: ElementType;             // Type of interactive element
   tagName: string;               // HTML tag name
   selector: string;              // CSS selector to find element
@@ -236,7 +236,7 @@ export interface HighlightOptions {
 
 export interface ElementActionResult {
   success: boolean;
-  elementId: string;
+  elementId?: string | undefined;  // Made optional to support page-level operations (where no element_id is provided)
   screenshotDataUrl?: string;
   dialogOpened?: boolean;
   dialog?: {

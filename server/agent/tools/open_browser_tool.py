@@ -25,7 +25,7 @@ from server.core.processor import command_processor
 from server.models.commands import (
     TabCommand, GetTabsCommand, JavascriptExecuteCommand,
     HandleDialogCommand, DialogAction,
-    TabAction,
+    TabAction, ScreenshotCommand,
     HighlightElementsCommand, ClickElementCommand, HoverElementCommand,
     ScrollElementCommand, KeyboardInputCommand
 )
@@ -424,6 +424,7 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                     message = "Listed tabs"
                 else:
                     message = f"Tab action: {action_str}"
+
                     
             elif action_type == "javascript_execute":
                 # Validate required parameters
@@ -612,7 +613,34 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 
                 if tabs_result.get('success') and tabs_result.get('data') and 'tabs' in tabs_result['data']:
                     tabs_data = tabs_result['data']['tabs']
+
+                # Capture screenshot after tab operations (except list)
+                if action_str != "list":
+                    try:
+                        screenshot_cmd = ScreenshotCommand(
+                            conversation_id=self.conversation_id
+                        )
+                        screenshot_result = self._execute_command_sync(screenshot_cmd)
+                        if screenshot_result and screenshot_result.get('success'):
+                            screenshot_data_url = screenshot_result.get('data', {}).get('screenshot')
+                            logger.debug(f"DEBUG: Captured screenshot after tab '{action_str}', length={len(screenshot_data_url) if screenshot_data_url else 0}")
+                    except Exception as e:
+                        logger.warning(f"Failed to capture screenshot after tab action: {e}")
             
+            # Capture screenshot after javascript_execute (if no dialog opened)
+            if action_type == "javascript_execute" and result_dict:
+                if not result_dict.get('dialog_opened', False):
+                    try:
+                        screenshot_cmd = ScreenshotCommand(
+                            conversation_id=self.conversation_id
+                        )
+                        screenshot_result = self._execute_command_sync(screenshot_cmd)
+                        if screenshot_result and screenshot_result.get('success'):
+                            screenshot_data_url = screenshot_result.get('data', {}).get('screenshot')
+                            logger.debug(f"DEBUG: Captured screenshot after javascript_execute, length={len(screenshot_data_url) if screenshot_data_url else 0}")
+                    except Exception as e:
+                        logger.warning(f"Failed to capture screenshot after javascript_execute: {e}")
+
             # Extract success and dialog info from result_dict
             success = True  # Default to True
             error = None
@@ -784,7 +812,7 @@ JavaScript is a fallback, not your primary tool.
 
 ```
 1. highlight_elements - Capture screenshot with numbered visual markers
-2. Identify target by element_id from the image (e.g., click-3, type-1)
+2. Identify target by element_id from the image (e.g., a3f2b1, c8e4d2)
 3. Use click_element, hover_element, scroll_element, keyboard_input
 4. Take screenshot to verify the result
 5. If dialog appears, use handle_dialog
@@ -793,9 +821,9 @@ JavaScript is a fallback, not your primary tool.
 
 ### Example Flow
 
-1. `highlight_elements()` → You see screenshot with buttons labeled [click-1], [click-2], [type-1]
-2. You want to click "Submit" which is labeled [click-3]
-3. `click_element(element_id="click-3")`
+1. `highlight_elements()` → You see screenshot with buttons labeled [a3f2b1], [b7c9e5], [d2f4a8]
+2. You want to click "Submit" which is labeled [c8e4d2]
+3. `click_element(element_id="c8e4d2")`
 4. Take screenshot to confirm the click worked
 5. If a confirmation dialog appears, use `handle_dialog(dialog_action="accept")`
 
@@ -803,15 +831,13 @@ JavaScript is a fallback, not your primary tool.
 
 ## Element ID Format
 
-Element IDs follow the pattern `{type}-{number}`:
+Element IDs are unique 6-character hexadecimal hashes (e.g., `a3f2b1`, `c8e4d2`).
 
-| Type | ID Pattern | Examples |
-|------|------------|----------|
-| Clickable | click-N | click-1, click-2, click-3 |
-| Text Input | type-N | type-1, type-2 |
-| Scrollable | scroll-N | scroll-1, scroll-2 |
+Each element is assigned a stable hash based on its DOM position and attributes.
+This hash remains consistent across `highlight_elements` calls for the same page state.
 
-The number is assigned based on reading order (top-to-bottom, left-to-right).
+**Note**: All element operations require `tab_id` to specify which tab to operate on.
+The active tab ID is shown in the Browser State section of the observation.
 
 ---
 
@@ -846,7 +872,7 @@ Parameters:
 Click an element by its visual ID.
 
 ```json
-{ "type": "click_element", "element_id": "click-3" }
+{ "type": "click_element", "element_id": "c8e4d2" }
 ```
 
 Use this for buttons, links, and any clickable element you identified from highlight_elements.
@@ -856,7 +882,7 @@ Use this for buttons, links, and any clickable element you identified from highl
 Hover over an element by its visual ID.
 
 ```json
-{ "type": "hover_element", "element_id": "click-2" }
+{ "type": "hover_element", "element_id": "a3f2b1" }
 ```
 
 Use this to reveal tooltips, dropdown menus, or hover states.
@@ -866,8 +892,8 @@ Use this to reveal tooltips, dropdown menus, or hover states.
 Scroll within an element by its visual ID, or scroll the entire page if no element_id is provided.
 
 ```json
-{ "type": "scroll_element", "element_id": "scroll-1", "direction": "down" }
-{ "type": "scroll_element", "element_id": "scroll-1", "direction": "up" }
+{ "type": "scroll_element", "element_id": "d2f4a8", "direction": "down" }
+{ "type": "scroll_element", "element_id": "d2f4a8", "direction": "up" }
 { "type": "scroll_element", "direction": "down" }  // Scroll entire page
 ```
 
@@ -883,7 +909,7 @@ Use this to:
 Type text into an input element by its visual ID.
 
 ```json
-{ "type": "keyboard_input", "element_id": "type-1", "text": "hello@example.com" }
+{ "type": "keyboard_input", "element_id": "b7c9e5", "text": "hello@example.com" }
 ```
 
 Use this for text inputs, textareas, and search boxes.
