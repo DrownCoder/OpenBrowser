@@ -11,9 +11,7 @@ interface CacheEntry {
   timestamp: number;
 }
 
-const CACHE_TTL_MS = 120000; // 2 minutes (increased from 30s)
-const MAX_ELEMENTS_PER_SESSION = 100;
-
+const CACHE_TTL_MS = 120000; // 2 minutes
 class ElementCacheImpl {
   private cache = new Map<string, CacheEntry>();
 
@@ -26,7 +24,9 @@ class ElementCacheImpl {
 
   /**
    * Store elements for a conversation and tab
-   * Each element gets its own cache entry with composite key
+   * - New elements are added (not replacing existing)
+   * - Existing elements have their timestamp refreshed (TTL extension)
+   * - No limit on element count - relies on TTL for cleanup
    */
   storeElements(conversationId: string, tabId: number, elements: InteractiveElement[]): void {
     if (!conversationId || !elements.length) {
@@ -36,22 +36,31 @@ class ElementCacheImpl {
     // Cleanup expired entries first
     this.cleanup(conversationId);
 
-    // Limit elements to max count
-    const limitedElements = elements.slice(0, MAX_ELEMENTS_PER_SESSION);
     const timestamp = Date.now();
+    let added = 0;
+    let refreshed = 0;
 
-    // Store each element with its own composite key
-    for (const element of limitedElements) {
+    for (const element of elements) {
       const key = this.buildKey(conversationId, tabId, element.id);
-      this.cache.set(key, {
-        element,
-        tabId,
-        timestamp,
-      });
+      const existing = this.cache.get(key);
+
+      if (!existing) {
+        // New element: add to cache
+        this.cache.set(key, {
+          element,
+          tabId,
+          timestamp,
+        });
+        added++;
+      } else {
+        // Element already exists: just refresh timestamp (extend TTL)
+        existing.timestamp = timestamp;
+        refreshed++;
+      }
     }
 
     console.log(
-      `📁 [ElementCache] Stored ${limitedElements.length} elements for conversation ${conversationId}, tab ${tabId}`
+      `📁 [ElementCache] Added ${added}, refreshed ${refreshed} elements for conversation ${conversationId}, tab ${tabId} (total: ${this.cache.size})`
     );
   }
 
