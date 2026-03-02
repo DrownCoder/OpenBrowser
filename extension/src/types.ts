@@ -141,6 +141,12 @@ export interface KeyboardInputCommand extends BaseCommand {
   text: string;
 }
 
+export interface GetElementHtmlCommand extends BaseCommand {
+  type: 'get_element_html';
+  element_id: string;
+  tab_id?: number;  // Optional: uses active tab if not provided
+}
+
 export interface GroundedElementsResponse {
   success: boolean;
   data?: {
@@ -175,7 +181,8 @@ export type Command =
   | ClickElementCommand
   | HoverElementCommand
   | ScrollElementCommand
-  | KeyboardInputCommand;
+  | KeyboardInputCommand
+  | GetElementHtmlCommand;
 
 export interface CommandResponse {
   success: boolean;
@@ -217,6 +224,7 @@ export interface InteractiveElement {
   type: ElementType;             // Type of interactive element
   tagName: string;               // HTML tag name
   selector: string;              // CSS selector to find element
+  html?: string;                 // Optional: full HTML of the element (captured at highlight time)
   text?: string;                 // Visible text content
   bbox: {
     x: number;

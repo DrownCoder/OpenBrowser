@@ -1294,7 +1294,7 @@ return {
                     type: type,
                     tagName: el.tagName.toLowerCase(),
                     selector: generateSelector(el),
-                    text: el.textContent ? el.textContent.trim().slice(0, 50) : undefined,
+                    html: el.outerHTML ? el.outerHTML.trim() : undefined,
                     bbox: bbox,
                     isVisible: true,
                     isInViewport: true
@@ -1515,6 +1515,51 @@ return {
           success: inputResult.success,
           data: { ...inputResult, screenshot: inputScreenshotResult?.imageData },
           error: inputResult.error,
+          timestamp: Date.now(),
+        };
+      }
+
+      case 'get_element_html': {
+        if (!command.conversation_id) throw new Error('conversation_id required for get_element_html');
+        const conversationId = command.conversation_id;
+        const elementId = command.element_id;
+        
+        if (!elementId) {
+          throw new Error('element_id is required for get_element_html');
+        }
+        
+        // Get current active tab for this conversation
+        const activeTabId = tabManager.getCurrentActiveTabId(conversationId);
+        if (!activeTabId) {
+          throw new Error(`No active tab found for conversation ${conversationId}. Use tab init first.`);
+        }
+        
+        // Look up the element in the cache
+        const element = elementCache.getElementById(conversationId, activeTabId, elementId);
+        
+        if (!element) {
+          console.warn(`⚠️ [GetElementHtml] Element ${elementId} not found in cache for conversation ${conversationId}, tab ${activeTabId}`);
+          return {
+            success: false,
+            error: `Element ${elementId} not found in cache. The element may have been invalidated or the page may have changed. Try highlight_elements again.`,
+            data: { element_id: elementId, html: null },
+            timestamp: Date.now(),
+          };
+        }
+        
+        // Return the cached HTML
+        const html = element.html || '<not available>';
+        console.log(`✅ [GetElementHtml] Retrieved HTML for element ${elementId} from cache (${html.length} chars)`);
+        
+        return {
+          success: true,
+          message: `Retrieved HTML for element ${elementId}`,
+          data: {
+            element_id: elementId,
+            html: html,
+            tagName: element.tagName,
+            type: element.type,
+          },
           timestamp: Date.now(),
         };
       }

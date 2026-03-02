@@ -27,7 +27,8 @@ from server.models.commands import (
     HandleDialogCommand, DialogAction,
     TabAction, ScreenshotCommand,
     HighlightElementsCommand, ClickElementCommand, HoverElementCommand,
-    ScrollElementCommand, KeyboardInputCommand
+    ScrollElementCommand, KeyboardInputCommand,
+    GetElementHtmlCommand
 )
 
 logger = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ class OpenBrowserAction(Action):
     """Browser automation action with visual-first interaction support"""
     
     type: str = Field(
-        description="Type of browser operation: 'tab', 'highlight_elements', 'click_element', 'hover_element', 'scroll_element', 'keyboard_input', 'handle_dialog', 'javascript_execute'"
+        description="Type of browser operation: 'tab', 'highlight_elements', 'click_element', 'hover_element', 'scroll_element', 'keyboard_input', 'handle_dialog', 'javascript_execute', 'confirm_click_element', 'confirm_hover_element', 'confirm_scroll_element', 'confirm_keyboard_input'"
     )
     
     # Tab operation parameters
@@ -48,7 +49,7 @@ class OpenBrowserAction(Action):
     # Visual interaction parameters
     element_type: Optional[str] = Field(default="clickable", description="Single element type: clickable/scrollable/inputable/hoverable")
     element_id: Optional[str] = Field(default=None, description="Element ID from highlight response")
-    page: Optional[int] = Field(default=1, ge=1, description="Page number for collision-aware pagination (1-indexed)")
+    page: Optional[int] = Field(default=1, ge=1, description="Page number for pagination (1-indexed)")
     # Scroll parameters
     direction: Optional[str] = Field(default="down", description="Scroll direction: up/down/left/right")
     
@@ -106,6 +107,11 @@ class OpenBrowserObservation(Observation):
     element_id: Optional[str] = Field(
         default=None,
         description="ID of the element that was acted upon"
+    )
+    # 2PC Confirmation fields
+    pending_confirmation: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Pending confirmation information for 2PC flow"
     )
     @property
     def to_llm_content(self) -> Sequence[TextContent | ImageContent]:
@@ -243,7 +249,46 @@ class OpenBrowserObservation(Observation):
             text_parts.append("")
             text_parts.append(f"**Total Elements**: {self.total_elements if self.total_elements is not None else len(self.highlighted_elements)}")
             text_parts.append("")
-            text_parts.append(f"**Element Ids:** {', '.join([el.get('id', 'unknown') for el in self.highlighted_elements])}")
+            # Format: id: <html> for each element
+            element_descriptions = []
+            for el in self.highlighted_elements:
+                el_id = el.get('id', 'unknown')
+                html = (el.get('html') or '').strip()
+                if len(html) > 200:
+                    html = html[:190] + '...(Truncated)'
+                if html:
+                    element_descriptions.append(f"{el_id}: {html}")
+                else:
+                    tag = el.get('tagName', '').upper()
+                    element_descriptions.append(f"{el_id} ({tag})")
+            text_parts.append('\n'.join(element_descriptions))
+            text_parts.append("")
+        
+        # Pending Confirmation Section (2PC)
+        if self.pending_confirmation:
+            text_parts.append("## ⚠️ Action Pending Confirmation")
+            text_parts.append("")
+            text_parts.append("**IMPORTANT**: This action requires confirmation before execution.")
+            text_parts.append("")
+            text_parts.append(f"**Element ID**: {self.pending_confirmation.get('element_id', 'unknown')}")
+            text_parts.append(f"**Action Type**: {self.pending_confirmation.get('action_type', 'unknown')}")
+            text_parts.append("")
+            text_parts.append("**Full HTML**:")
+            text_parts.append("```html")
+            full_html = self.pending_confirmation.get('full_html', '<not available>')
+            # Truncate if too long
+            if len(full_html) > 5000:
+                full_html = full_html[:5000] + "\n... (truncated)"
+            text_parts.append(full_html)
+            text_parts.append("```")
+            text_parts.append("")
+            text_parts.append("**To confirm this action, use:**")
+            action_type = self.pending_confirmation.get('action_type', '')
+            element_id = self.pending_confirmation.get('element_id', '')
+            confirm_cmd = f'{{"type": "confirm_{action_type}_element", "element_id": "{element_id}"}}'
+            text_parts.append(f"```json\n{confirm_cmd}\n```")
+            text_parts.append("")
+            text_parts.append("**Or choose a different action to cancel this pending confirmation.**")
             text_parts.append("")
         
         if self.element_id:
@@ -324,7 +369,8 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
     
     def __init__(self):
         self.conversation_id = None
-
+        # 2PC state: pending confirmations per conversation
+        self.pending_confirmations: Dict[str, Dict[str, Any]] = {}
     
     async def _execute_command(self, command) -> Any:
         """Execute command with conversation context"""
@@ -337,6 +383,51 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
         result = await command_processor.execute(command)
         logger.debug(f"DEBUG: _execute_command result: success={result.success if result else 'None'}")
         return result
+    
+    def _get_element_full_html(self, element_id: str) -> str:
+        """Get the full HTML of an element from extension's elementCache.
+        
+        This uses the cached HTML from highlight_elements instead of querying the DOM.
+        The cached HTML is the original HTML captured at highlight time.
+        """
+        # Use GetElementHtmlCommand to get HTML from extension's elementCache
+        command = GetElementHtmlCommand(
+            element_id=element_id,
+            conversation_id=self.conversation_id
+        )
+        result_dict = self._execute_command_sync(command)
+        
+        if result_dict and result_dict.get('success'):
+            data = result_dict.get('data', {})
+            html = data.get('html') if isinstance(data, dict) else None
+            if html and isinstance(html, str):
+                # Truncate to 10000 characters
+                return html[:10000] + ('...' if len(html) > 10000 else '')
+        else:
+            logger.warning(f"Unexpected GetElementHtmlCommand response: {result_dict}")
+        
+        # Element not found in cache - return error message
+        logger.warning(f"Element {element_id} not found in cache for conversation {self.conversation_id}")
+        return "<element not found in cache>"
+
+    
+    def _clear_pending_confirmation(self):
+        """Clear pending confirmation for current conversation"""
+        if self.conversation_id in self.pending_confirmations:
+            del self.pending_confirmations[self.conversation_id]
+    
+    def _set_pending_confirmation(self, element_id: str, action_type: str, full_html: str, extra_data: Dict[str, Any] = None):
+        """Set pending confirmation for current conversation"""
+        self.pending_confirmations[self.conversation_id] = {
+            'element_id': element_id,
+            'action_type': action_type,
+            'full_html': full_html,
+            'extra_data': extra_data or {}
+        }
+    
+    def _get_pending_confirmation(self) -> Optional[Dict[str, Any]]:
+        """Get pending confirmation for current conversation"""
+        return self.pending_confirmations.get(self.conversation_id)
     
     def _execute_action_sync(self, action: OpenBrowserAction) -> OpenBrowserObservation:
         """Execute a browser action synchronously via HTTP"""
@@ -495,86 +586,144 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 total_pages = result_dict.get('data', {}).get('totalPages', 1)
                 current_page = result_dict.get('data', {}).get('page', 1)
                 message = f"Found {len(elements)} {element_type} elements on page {current_page}/{total_pages} (total: {total_elements})"
-            elif action_type == "click_element":
-                if not action.element_id:
-                    raise ValueError("click_element requires element_id parameter")
+            # ========== 2PC Confirm Operations ==========
+            elif action_type == "confirm_click_element":
+                pending = self._get_pending_confirmation()
+                if not pending or pending['action_type'] != 'click':
+                    raise ValueError("No pending click confirmation found. Please call click_element first.")
+                if pending['element_id'] != action.element_id:
+                    raise ValueError(f"Element ID mismatch. Expected {pending['element_id']}, got {action.element_id}")
+                # Execute actual click
                 command = ClickElementCommand(
                     element_id=action.element_id,
                     conversation_id=self.conversation_id,
                     tab_id=action.tab_id
                 )
                 result_dict = self._execute_command_sync(command)
+                if not result_dict or not result_dict.get('success'):
+                    ext_error = result_dict.get('error', 'Unknown error') if result_dict else 'No response'
+                    raise RuntimeError(f"Failed to click element: {ext_error}")
+                message = f"Confirmed and clicked element: {action.element_id}"
+                self._clear_pending_confirmation()
                 
-                # Check if command succeeded
-                if result_dict is None:
-                    raise RuntimeError("Chrome extension did not respond to click_element command")
-                if not result_dict.get('success', False):
-                    ext_error = result_dict.get('error', 'Unknown error from Chrome extension')
-                    raise RuntimeError(f"Chrome extension failed to click element: {ext_error}")
-                
-                message = f"Clicked element: {action.element_id}"
-            elif action_type == "hover_element":
-                if not action.element_id:
-                    raise ValueError("hover_element requires element_id parameter")
+            elif action_type == "confirm_hover_element":
+                pending = self._get_pending_confirmation()
+                if not pending or pending['action_type'] != 'hover':
+                    raise ValueError("No pending hover confirmation found. Please call hover_element first.")
+                if pending['element_id'] != action.element_id:
+                    raise ValueError(f"Element ID mismatch. Expected {pending['element_id']}, got {action.element_id}")
                 command = HoverElementCommand(
                     element_id=action.element_id,
                     conversation_id=self.conversation_id,
                     tab_id=action.tab_id
                 )
                 result_dict = self._execute_command_sync(command)
+                if not result_dict or not result_dict.get('success'):
+                    ext_error = result_dict.get('error', 'Unknown error') if result_dict else 'No response'
+                    raise RuntimeError(f"Failed to hover element: {ext_error}")
+                message = f"Confirmed and hovered element: {action.element_id}"
+                self._clear_pending_confirmation()
                 
-                # Check if command succeeded
-                if result_dict is None:
-                    raise RuntimeError("Chrome extension did not respond to hover_element command")
-                if not result_dict.get('success', False):
-                    ext_error = result_dict.get('error', 'Unknown error from Chrome extension')
-                    raise RuntimeError(f"Chrome extension failed to hover element: {ext_error}")
-                
-                message = f"Hovered element: {action.element_id}"
-            elif action_type == "scroll_element":
-                # element_id is optional - if not provided, scrolls the entire page
+            elif action_type == "confirm_scroll_element":
+                pending = self._get_pending_confirmation()
+                if not pending or pending['action_type'] != 'scroll':
+                    raise ValueError("No pending scroll confirmation found. Please call scroll_element first.")
+                if pending['element_id'] != action.element_id:
+                    raise ValueError(f"Element ID mismatch. Expected {pending['element_id']}, got {action.element_id}")
                 command = ScrollElementCommand(
-                    element_id=action.element_id,  # Can be None for page-level scrolling
-                    direction=action.direction or "down",
+                    element_id=action.element_id,
+                    direction=pending['extra_data'].get('direction', 'down'),
                     conversation_id=self.conversation_id,
                     tab_id=action.tab_id
                 )
                 result_dict = self._execute_command_sync(command)
+                if not result_dict or not result_dict.get('success'):
+                    ext_error = result_dict.get('error', 'Unknown error') if result_dict else 'No response'
+                    raise RuntimeError(f"Failed to scroll element: {ext_error}")
+                message = f"Confirmed and scrolled element: {action.element_id}"
+                self._clear_pending_confirmation()
                 
-                # Check if command succeeded
-                if result_dict is None:
-                    raise RuntimeError("Chrome extension did not respond to scroll_element command")
-                if not result_dict.get('success', False):
-                    ext_error = result_dict.get('error', 'Unknown error from Chrome extension')
-                    raise RuntimeError(f"Chrome extension failed to scroll: {ext_error}")
+            elif action_type == "confirm_keyboard_input":
+                pending = self._get_pending_confirmation()
+                if not pending or pending['action_type'] != 'keyboard_input':
+                    raise ValueError("No pending keyboard_input confirmation found. Please call keyboard_input first.")
+                if pending['element_id'] != action.element_id:
+                    raise ValueError(f"Element ID mismatch. Expected {pending['element_id']}, got {action.element_id}")
+                command = KeyboardInputCommand(
+                    element_id=action.element_id,
+                    text=pending['extra_data'].get('text', ''),
+                    conversation_id=self.conversation_id,
+                    tab_id=action.tab_id
+                )
+                result_dict = self._execute_command_sync(command)
+                if not result_dict or not result_dict.get('success'):
+                    ext_error = result_dict.get('error', 'Unknown error') if result_dict else 'No response'
+                    raise RuntimeError(f"Failed to input text: {ext_error}")
+                message = f"Confirmed and input text to element: {action.element_id}"
+                self._clear_pending_confirmation()
+            
+            # ========== 2PC Phase 1: Actions Requiring Confirmation ==========
+            elif action_type == "click_element":
+                if not action.element_id:
+                    raise ValueError("click_element requires element_id parameter")
+                # Get full HTML for confirmation
+                full_html = self._get_element_full_html(action.element_id)
+                # Store pending confirmation
+                self._set_pending_confirmation(
+                    element_id=action.element_id,
+                    action_type='click',
+                    full_html=full_html,
+                    extra_data={'tab_id': action.tab_id}
+                )
+                # Return pending confirmation (no actual execution yet)
+                result_dict = {'success': True, 'data': {}}
+                message = f"Click action pending confirmation for element: {action.element_id}"
                 
-                if action.element_id:
-                    message = f"Scrolled element: {action.element_id} {action.direction or 'down'}"
-                else:
-                    message = f"Scrolled page {action.direction or 'down'}"
+            elif action_type == "hover_element":
+                if not action.element_id:
+                    raise ValueError("hover_element requires element_id parameter")
+                full_html = self._get_element_full_html(action.element_id)
+                self._set_pending_confirmation(
+                    element_id=action.element_id,
+                    action_type='hover',
+                    full_html=full_html,
+                    extra_data={'tab_id': action.tab_id}
+                )
+                result_dict = {'success': True, 'data': {}}
+                message = f"Hover action pending confirmation for element: {action.element_id}"
+                
+            elif action_type == "scroll_element":
+                full_html = self._get_element_full_html(action.element_id) if action.element_id else "<page scroll>"
+                self._set_pending_confirmation(
+                    element_id=action.element_id or '',
+                    action_type='scroll',
+                    full_html=full_html,
+                    extra_data={'direction': action.direction or 'down', 'tab_id': action.tab_id}
+                )
+                result_dict = {'success': True, 'data': {}}
+                message = f"Scroll action pending confirmation for element: {action.element_id or 'page'}"
+                
             elif action_type == "keyboard_input":
                 if not action.element_id:
                     raise ValueError("keyboard_input requires element_id parameter")
                 if not action.text:
                     raise ValueError("keyboard_input requires text parameter")
-                command = KeyboardInputCommand(
+                full_html = self._get_element_full_html(action.element_id)
+                self._set_pending_confirmation(
                     element_id=action.element_id,
-                    text=action.text,
-                    conversation_id=self.conversation_id,
-                    tab_id=action.tab_id
+                    action_type='keyboard_input',
+                    full_html=full_html,
+                    extra_data={'text': action.text, 'tab_id': action.tab_id}
                 )
-                result_dict = self._execute_command_sync(command)
-                
-                # Check if command succeeded
-                if result_dict is None:
-                    raise RuntimeError("Chrome extension did not respond to keyboard_input command")
-                if not result_dict.get('success', False):
-                    ext_error = result_dict.get('error', 'Unknown error from Chrome extension')
-                    raise RuntimeError(f"Chrome extension failed to input text: {ext_error}")
-                
-                message = f"Input text to element: {action.element_id}"
+                result_dict = {'success': True, 'data': {}}
+                message = f"Keyboard input action pending confirmation for element: {action.element_id}"
             else:
                 raise ValueError(f"Unknown action type: {action_type}")
+            
+            # ========== Clear pending confirmation for non-confirm operations ==========
+            # If action is not a confirm action and not a 2PC action, clear pending state
+            if not action_type.startswith('confirm_') and action_type not in ['click_element', 'hover_element', 'scroll_element', 'keyboard_input']:
+                self._clear_pending_confirmation()
             
             # Determine what data to collect based on action type
             tabs_data = []
@@ -623,7 +772,6 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
             error = None
             dialog_opened = None
             dialog = None
-            a11y_elements = None
             highlighted_elements = None
             total_elements = None
             
@@ -646,7 +794,6 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                         else:
                             message = f"Dialog auto-accepted: {dialog.get('type')} (\"{dialog.get('message')}\")"
                 
-                # Extract a11y_elements if present
                 if 'data' in result_dict and isinstance(result_dict['data'], dict):
                     # Extract screenshot from visual interaction commands
                     # highlight_elements returns data.screenshot (highlighted image)
@@ -660,6 +807,9 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                         highlighted_elements = result_dict['data']['elements']
                     if 'totalElements' in result_dict['data']:
                         total_elements = result_dict['data']['totalElements']
+            # Get pending confirmation if exists
+            pending_confirmation = self._get_pending_confirmation()
+            
             return OpenBrowserObservation(
                 success=success,
                 message=message,
@@ -672,7 +822,8 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 dialog_opened=dialog_opened,
                 dialog=dialog,
                 highlighted_elements=highlighted_elements,
-                total_elements=total_elements
+                total_elements=total_elements,
+                pending_confirmation=pending_confirmation
             )
             
         except ValueError as e:
@@ -780,24 +931,94 @@ JavaScript is a fallback, not your primary tool.
 
 ---
 
+## Visual + Semantic Dual Recognition Strategy
+
+**CRITICAL**: You must use BOTH visual cues AND HTML semantic information to precisely identify your target element.
+
+### Two-Step Verification Process
+
+```
+1. VISUAL: Look at the screenshot - find blue boxes with element IDs
+2. SEMANTIC: Read the HTML code - confirm this is the RIGHT element
+3. DECISION: If HTML semantics don't match your intent, continue to next page
+```
+
+### How to Read Element Information
+
+Each highlighted element shows:
+```
+Element ID: <html code>
+```
+
+**Example:**
+```
+abc123: <button class="btn-primary" type="submit">Submit</button>
+def456: <a href="/cancel" class="link">Cancel</a>
+```
+
+### What to Check in HTML
+
+Read the HTML code to understand what this element does:
+
+**Key Information:**
+- **Tag name**: What type of element is this?
+- **Attributes**: class, type, href, aria-label, data-* etc.
+- **Text content**: What text does it display?
+- **Context**: Where is it located in the DOM?
+
+**Logic:** The HTML should match your intent. If you want a "Submit" button, look for elements with submit-related semantics (class="submit", type="submit", text="Submit", etc.).
+
+### Decision Rules
+
+**Click the element IF:**
+- Visual position matches your intent (e.g., "top right corner")
+- HTML semantics match your goal (e.g., class="submit", type="submit")
+- Text content matches what you're looking for
+
+**Continue to next page IF:**
+- No elements on current page match your semantic criteria
+- HTML attributes don't align with your intent
+- You're unsure which element is correct
+- Multiple similar elements exist and you need more context
+
+**ALWAYS paginate when uncertain - never guess.**
+
+---
+
 ## Visual-First Workflow
 
 ```
-1. highlight_elements - Capture screenshot with numbered visual markers
-2. Identify target by element_id from the image (e.g., a3f2b1, c8e4d2)
-3. Use click_element, hover_element, scroll_element, keyboard_input
-4. Take screenshot to verify the result
-5. If dialog appears, use handle_dialog
-6. javascript_execute only as fallback for complex operations
+1. highlight_elements - Capture screenshot with visual markers + HTML info
+2. Analyze BOTH visual positions AND HTML semantics
+3. Identify target by element_id that matches BOTH criteria
+4. If no perfect match found, continue to next page (page=2, 3, ...)
+5. Use click_element, hover_element, scroll_element, keyboard_input
+6. Take screenshot to verify the result
+7. If dialog appears, use handle_dialog
+8. javascript_execute only as fallback for complex operations
 ```
 
 ### Example Flow
 
-1. `highlight_elements()` → You see screenshot with buttons labeled [a3f2b1], [b7c9e5], [d2f4a8]
-2. You want to click "Submit" which is labeled [c8e4d2]
-3. `click_element(element_id="c8e4d2")`
-4. Take screenshot to confirm the click worked
-5. If a confirmation dialog appears, use `handle_dialog(dialog_action="accept")`
+**Scenario**: You need to click the "Submit" button
+
+1. `highlight_elements()` → You see:
+   - abc123: <button class="cancel">Cancel</button>
+   - def456: <button class="submit-btn" type="submit">Submit</button>
+   - ghi789: <a href="/help">Need help?</a>
+
+2. **Visual Check**: Locate blue boxes on screenshot
+
+3. **Semantic Check**:
+   - abc123: Has class="cancel" → WRONG element
+   - def456: Has class="submit-btn", type="submit", text="Submit" → CORRECT!
+   - ghi789: It's a link, not a button → WRONG element
+
+4. **Decision**: `click_element(element_id="def456")`
+
+5. Verify with screenshot
+
+---
 
 ---
 
@@ -817,10 +1038,9 @@ The active tab ID is shown in the Browser State section of the observation.
 
 ### highlight_elements
 
-Capture a screenshot with visual markers showing interactive elements of ONE type.
-Uses collision-aware pagination to ensure no overlapping highlights.
+Capture a screenshot with numbered visual markers on interactive elements of ONE type.
 
-**Important**: Each call highlights only ONE element type for stable, predictable pagination.
+**Important**: Each call highlights only ONE element type at a time.
 
 ```json
 { "type": "highlight_elements" }                           // Default: clickable elements, page 1
@@ -832,13 +1052,12 @@ Uses collision-aware pagination to ensure no overlapping highlights.
 
 Parameters:
 - `element_type`: Single type to highlight - "clickable" (default), "scrollable", "inputable", or "hoverable"
-- `page`: Page number for collision-aware pagination (1-indexed, default 1)
+- `page`: Page number for pagination (1-indexed, default 1)
 
-**Pagination Strategy**:
-- Page 1 returns a maximal set of non-colliding elements
-- Call page=2, page=3, etc. to see remaining elements
-- Each page is guaranteed to have no overlapping markers
-- Use the same element_type across pages for consistent results
+**When to Use Pagination**:
+- If the element you want to interact with is NOT visible on the current page, increment `page` to see more elements
+- Continue to the next page until you find the most appropriate element for your task
+- Stay on the same `element_type` across pages to browse through all elements of that category
 ### click_element
 
 Click an element by its visual ID.
@@ -938,8 +1157,11 @@ Guidelines:
 ## Workflow Summary
 
 1. **Navigate**: `tab init` or `tab open`
-2. **See**: `highlight_elements` to get visual markers
-3. **Identify**: Find target element_id from the screenshot
+2. **Highlight**: `highlight_elements` to get visual markers + HTML info
+3. **Verify Dual Match**: 
+   - Visually locate blue box on screenshot
+   - Semantically verify HTML attributes (class, text, type)
+   - If no perfect match, increment `page` and continue searching
 4. **Act**: Use `click_element`, `keyboard_input`, `hover_element`, `scroll_element`
 5. **Verify**: Take screenshot to confirm
 6. **Handle**: If dialog opens, use `handle_dialog`
@@ -949,8 +1171,10 @@ Guidelines:
 
 ## Important Notes
 
+- **Dual verification required**: Match BOTH visual position AND HTML semantics before acting
+- **Always paginate if uncertain**: If the current page doesn't have the right element, use `page=2, 3, ...` to see more
+- **HTML semantic hints**: Check `class`, `type`, `href`, `aria-label`, and text content
 - **Always verify with screenshot** after significant operations
-- **Use page parameter** for collision-aware pagination when highlight_elements returns many elements
 - **Hover before click** if you need to reveal hidden elements (menus, tooltips)
 - **JavaScript is fallback** - try visual commands first
 
@@ -962,7 +1186,6 @@ Guidelines:
 |---|----------|
 | Element not found | Refresh with highlight_elements, check element_id |
 | Click has no effect | Try hover_element first to reveal |
-| Too many elements | Increase page number to see next batch (collision-aware pagination) |
 | Complex interaction | Use javascript_execute as fallback |
 | Page still loading | Wait and retry highlight_elements |
 

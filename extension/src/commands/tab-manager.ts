@@ -191,13 +191,28 @@ export class TabManager {
     }
     
     // First, ensure we have a tab group (find existing or create new)
+    
+    // ⬇️ DEBUG: Print current window's existing tab groups before initialization
+    if (chrome.tabGroups) {
+      try {
+        const currentWindow = await chrome.windows.getCurrent();
+        const allGroups = await chrome.tabGroups.query({ windowId: currentWindow.id });
+        console.log(`🔍 [DEBUG-${conversationId.substring(0, 8)}] Current window has ${allGroups.length} existing groups:`, 
+          allGroups.map(g => ({ id: g.id, title: g.title, color: g.color })));
+      } catch (e) {
+        console.log(`🔍 [DEBUG-${conversationId.substring(0, 8)}] Failed to query existing groups:`, e);
+      }
+    }
     if (!session.groupId && chrome.tabGroups) {
       console.log(`📁 [TabManager] Finding or creating tab group for session ${conversationId}`);
       const groupId = await this.findOrCreateTabGroup(conversationId);
+      console.log(`🔍 [DEBUG-${conversationId.substring(0, 8)}] findOrCreateTabGroup returned: ${groupId}`);
       if (!groupId) {
         // Get current window
         const currentWindow = await chrome.windows.getCurrent();
+        console.log(`🔍 [DEBUG-${conversationId.substring(0, 8)}] No group found, calling createTabGroup for window ${currentWindow.id}`);
         await this.createTabGroup(currentWindow.id!, conversationId);
+        console.log(`🔍 [DEBUG-${conversationId.substring(0, 8)}] After createTabGroup, session.groupId: ${session.groupId}`);
       }
       console.log(`✅ [TabManager] Tab group ready for ${conversationId}: ${session.groupId}`);
     }
@@ -205,12 +220,34 @@ export class TabManager {
     // Create the first tab
     const tab = await chrome.tabs.create({ url: targetUrl, active: false });
     
+    // ⬇️ DEBUG: Print initial groupId of the created tab
+    console.log(`🔍 [DEBUG-${conversationId.substring(0, 8)}] Created tab ${tab.id}, initial groupId: ${tab.groupId}, windowId: ${tab.windowId}`);
+    
+    // ⬇️ FIX: If Chrome auto-grouped the tab, remove it from that group first
+    if (tab.groupId !== undefined && tab.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) {
+      console.log(`⚠️ [DEBUG-${conversationId.substring(0, 8)}] Tab was auto-grouped into group ${tab.groupId}, removing it first`);
+      try {
+        await chrome.tabs.ungroup([tab.id!]);
+        console.log(`✅ [DEBUG-${conversationId.substring(0, 8)}] Successfully removed tab from auto-assigned group`);
+      } catch (e) {
+        console.warn(`⚠️ [DEBUG-${conversationId.substring(0, 8)}] Failed to ungroup tab:`, e);
+      }
+    }
+    
     if (!tab.id) {
       throw new Error('Failed to create tab for session initialization');
     }
     
     // Add to management
     await this.addTabToManagement(tab.id, conversationId);
+    
+    // ⬇️ DEBUG: Verify tab was moved to correct group
+    try {
+      const finalTab = await chrome.tabs.get(tab.id);
+      console.log(`🔍 [DEBUG-${conversationId.substring(0, 8)}] After addTabToManagement, tab ${tab.id} groupId: ${finalTab.groupId}, expected: ${session.groupId}`);
+    } catch (e) {
+      console.log(`🔍 [DEBUG-${conversationId.substring(0, 8)}] Failed to verify final tab groupId:`, e);
+    }
     
     // Update session status
     this.updateSessionStatus(conversationId, 'active');

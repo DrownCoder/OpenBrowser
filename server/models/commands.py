@@ -302,6 +302,19 @@ class KeyboardInputCommand(BaseCommand):
     )
     tab_id: int = Field(..., description="Target tab ID")
 
+
+class GetElementHtmlCommand(BaseCommand):
+    """Get the full HTML of a cached element by its ID from extension's elementCache"""
+    type: Literal["get_element_html"] = "get_element_html"
+    element_id: str = Field(
+        description="Element ID from highlight response"
+    )
+    tab_id: Optional[int] = Field(
+        default=None,
+        description="Target tab ID (optional, uses active tab if not provided)"
+    )
+
+
 class CommandResponse(BaseModel):
     """Response from command execution"""
     success: bool
@@ -348,6 +361,7 @@ Command = Union[
     HoverElementCommand,
     ScrollElementCommand,
     KeyboardInputCommand,
+    GetElementHtmlCommand,
 ]
 
 
@@ -377,6 +391,7 @@ def parse_command(data: dict) -> Command:
         "hover_element": HoverElementCommand,
         "scroll_element": ScrollElementCommand,
         "keyboard_input": KeyboardInputCommand,
+        "get_element_html": GetElementHtmlCommand,
     }
     
     if cmd_type not in command_map:

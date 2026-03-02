@@ -11,7 +11,7 @@ interface CacheEntry {
   timestamp: number;
 }
 
-const CACHE_TTL_MS = 120000; // 2 minutes
+const CACHE_TTL_MS = 1200000; // 20 minutes
 class ElementCacheImpl {
   private cache = new Map<string, CacheEntry>();
 

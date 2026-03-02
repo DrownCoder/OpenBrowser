@@ -26,6 +26,7 @@ from server.models.commands import (
     HoverElementCommand,
     ScrollElementCommand,
     KeyboardInputCommand,
+    GetElementHtmlCommand,
 )
 from server.websocket.manager import ws_manager
 from server.core.config import config
@@ -237,6 +238,8 @@ class CommandProcessor:
                 return await self._execute_scroll_element(command)
             elif isinstance(command, KeyboardInputCommand):
                 return await self._execute_keyboard_input(command)
+            elif isinstance(command, GetElementHtmlCommand):
+                return await self._execute_get_element_html(command)
             else:
                 raise ValueError(f"Unknown command type: {command.type}")
 
@@ -398,6 +401,12 @@ class CommandProcessor:
         self, command: KeyboardInputCommand
     ) -> CommandResponse:
         """Type text into a highlighted element by its ID"""
+        return await self._send_prepared_command(command)
+
+    async def _execute_get_element_html(
+        self, command: GetElementHtmlCommand
+    ) -> CommandResponse:
+        """Get HTML of a cached element from extension's elementCache"""
         return await self._send_prepared_command(command)
 
     def set_current_tab(self, tab_id: int, conversation_id: str = None):
