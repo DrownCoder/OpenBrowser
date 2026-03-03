@@ -244,21 +244,6 @@ class HighlightElementsCommand(BaseCommand):
         ge=1,
         description="Page number for collision-aware pagination (1-indexed)"
     )
-    """Highlight interactive elements on the page for visual selection
-    
-    Uses collision-aware pagination to ensure no overlapping highlights.
-    Each page returns a maximal set of non-colliding elements.
-    """
-    type: Literal["highlight_elements"] = "highlight_elements"
-    element_types: Optional[List[str]] = Field(
-        default=["clickable"],
-        description="Types of elements to highlight (e.g., 'clickable', 'input', 'link')"
-    )
-    page: Optional[int] = Field(
-        default=1,
-        ge=1,
-        description="Page number for collision-aware pagination (1-indexed)"
-    )
 
 class ClickElementCommand(BaseCommand):
     """Click a highlighted element by its ID"""
