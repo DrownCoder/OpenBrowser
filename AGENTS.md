@@ -146,20 +146,14 @@ highlight_elements(element_type="hoverable")   → Hoverable elements
 ```
 
 ### Element ID Format
-Elements are identified by type-prefix + number:
-- `click-N` - Clickable elements (buttons, links)
-- `scroll-N` - Scrollable elements
-- `input-N` - Input fields
-- `hover-N` - Hoverable elements
-
-### Commands
-| Command | Purpose | Example |
-|---------|---------|--------|
-| `highlight_elements` | Highlight one element type by page | `{element_type: "clickable", page: 1}` |
-| `click_element` | Click by element ID | `{element_id: "click-3"}` |
-| `hover_element` | Hover by element ID | `{element_id: "hover-1"}` |
-| `scroll_element` | Scroll by element ID | `{element_id: "scroll-2", direction: "down"}` |
-| `keyboard_input` | Type into element | `{element_id: "input-1", text: "hello"}` |
+Elements are identified by a 6-character hash string:
+- Format: `[a-z0-9]{6}` (e.g., "a3f2b1", "9z8x7c")
+- Algorithm: FNV-1a hash of CSS selector, encoded in base36
+- Deterministic: Same element always gets same ID across page reloads
+- Example IDs: "a3f2b1", "k9m4p2", "7x3n1q"
+| `hover_element` | Hover by element ID | `{element_id: "9z8x7c"}` |
+| `scroll_element` | Scroll by element ID | `{element_id: "m5k2p8", direction: "down"}` |
+| `keyboard_input` | Type into element | `{element_id: "j4n7q1", text: "hello"}` |
 ## UNIQUE PATTERNS
 
 ### JavaScript-First Automation (Fallback)

@@ -67,6 +67,20 @@ server/
 | `screenshot` | `ScreenshotCommand` | Extension CDP |
 | `tab` | `TabCommand` | Extension tab API |
 | `get_tabs` | `GetTabsCommand` | Extension tab API |
+| `highlight_single_element` | `HighlightSingleElementCommand` | Extension 2PC flow |
+| `get_element_html` | `GetElementHtmlCommand` | Extension element cache |
+| `keyboard_input` | `KeyboardInputCommand` | Extension element actions |
+| `scroll_element` | `ScrollElementCommand` | Extension element actions |
+| `hover_element` | `HoverElementCommand` | Extension element actions |
+| `click_element` | `ClickElementCommand` | Extension element actions |
+| `highlight_elements` | `HighlightElementsCommand` | Extension element detection |
+| `highlight_single_element` | `HighlightSingleElementCommand` | Extension 2PC flow |
+| `get_element_html` | `GetElementHtmlCommand` | Extension element cache |
+| `keyboard_input` | `KeyboardInputCommand` | Extension element actions |
+| `scroll_element` | `ScrollElementCommand` | Extension element actions |
+| `hover_element` | `HoverElementCommand` | Extension element actions |
+| `click_element` | `ClickElementCommand` | Extension element actions |
+| `highlight_elements` | `HighlightElementsCommand` | Extension element detection |
 | `handle_dialog` | `HandleDialogCommand` | Extension CDP |
 | `get_accessibility_tree` | `GetAccessibilityTreeCommand` | Extension CDP |
 
@@ -103,6 +117,36 @@ After handling one dialog, another may open (e.g., confirm → alert).
 The extension:
 - Auto-accepts alerts
 - Returns info for new confirm/prompt
+
+
+## VISUAL INTERACTION COMMANDS
+
+OpenBrowser uses a visual-first approach where elements are highlighted with numbered overlays before interaction.
+
+### Key Commands
+| Command | Purpose | Parameters |
+|---------|---------|-----------|
+| `highlight_elements` | Detect and highlight interactive elements | `element_type?: string`, `page?: number` |
+| `click_element` | Click a highlighted element by ID | `element_id: string`, `tab_id: number` |
+| `hover_element` | Hover over a highlighted element | `element_id: string`, `tab_id: number` |
+| `scroll_element` | Scroll an element or the page | `element_id?: string`, `direction: string`, `tab_id: number` |
+| `keyboard_input` | Type text into an element | `element_id: string`, `text: string`, `tab_id: number` |
+| `get_element_html` | Get HTML of a cached element | `element_id: string`, `tab_id?: number` |
+| `highlight_single_element` | Highlight single element for 2PC | `element_id: string`, `tab_id?: number` |
+
+### Element Types
+- `clickable` - Buttons, links, clickable elements
+- `scrollable` - Scrollable containers
+- `inputable` - Input fields, textareas
+- `hoverable` - Hoverable elements
+
+### tab_id Auto-Resolution
+All visual interaction commands require `tab_id` in Python models, However, the TypeScript extension
+can auto-resolve `tab_id` from the conversation context if not provided explicitly. This allows for cleaner
+API usage in most cases where the active tab is implied.
+
+For cross-reference, see root AGENTS.md "VISUAL INTERACTION WORKFLOW" section for complete workflow details.
+
 
 ## ACCESSIBILITY CONTEXT
 

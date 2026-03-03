@@ -121,24 +121,48 @@ export interface HighlightElementsCommand extends BaseCommand {
 
 export interface ClickElementCommand extends BaseCommand {
   type: 'click_element';
+  /** Element ID from highlight response (6-char hash) */
   element_id: string;
+  /**
+   * Target tab ID (optional - auto-resolved from conversation if not provided)
+   * Note: Required in Python models, but optional here as extension auto-resolves it
+   */
+  tab_id?: number;
 }
 
 export interface HoverElementCommand extends BaseCommand {
   type: 'hover_element';
+  /** Element ID from highlight response (6-char hash) */
   element_id: string;
+  /**
+   * Target tab ID (optional - auto-resolved from conversation if not provided)
+   * Note: Required in Python models, but optional here as extension auto-resolves it
+   */
+  tab_id?: number;
 }
 
 export interface ScrollElementCommand extends BaseCommand {
   type: 'scroll_element';
-  element_id?: string;  // Optional: if not provided, scrolls the entire page
+  /** Element ID from highlight response (6-char hash). If not provided, scrolls the entire page */
+  element_id?: string;
   direction?: ScrollDirection;
+  /**
+   * Target tab ID (optional - auto-resolved from conversation if not provided)
+   * Note: Required in Python models, but optional here as extension auto-resolves it
+   */
+  tab_id?: number;
 }
 
 export interface KeyboardInputCommand extends BaseCommand {
   type: 'keyboard_input';
+  /** Element ID from highlight response (6-char hash) */
   element_id: string;
   text: string;
+  /**
+   * Target tab ID (optional - auto-resolved from conversation if not provided)
+   * Note: Required in Python models, but optional here as extension auto-resolves it
+   */
+  tab_id?: number;
 }
 
 export interface GetElementHtmlCommand extends BaseCommand {

@@ -1626,10 +1626,49 @@ return {
         // Capture screenshot
         const screenshotResult = await captureScreenshot(activeTabId, conversationId, true, 80);
         
+        // ============================================================
+        // Check if element is visible in viewport
+        // ============================================================
+        const viewportWidth = screenshotResult.metadata?.viewportWidth || 1280;
+        const viewportHeight = screenshotResult.metadata?.viewportHeight || 720;
+        
+        // Element is considered visible if at least part of it is in the viewport
+        const isVisibleInViewport =
+          freshBbox.x < viewportWidth &&  // Left edge is left of right boundary
+          freshBbox.x + freshBbox.width > 0 &&  // Right edge is right of left boundary
+          freshBbox.y < viewportHeight &&  // Top edge is above bottom boundary
+          freshBbox.y + freshBbox.height > 0;   // Bottom edge is below top boundary
+        
+        if (!isVisibleInViewport) {
+          // Determine scroll direction hint
+          let scrollHint = '';
+          if (freshBbox.y >= viewportHeight) {
+            scrollHint = 'The element is below the viewport. Try scrolling down or using scroll_element to bring it into view.';
+          } else if (freshBbox.y + freshBbox.height <= 0) {
+            scrollHint = 'The element is above the viewport. Try scrolling up or using scroll_element to bring it into view.';
+          } else if (freshBbox.x >= viewportWidth) {
+            scrollHint = 'The element is to the right of the viewport. Try scrolling right or using scroll_element to bring it into view.';
+          } else if (freshBbox.x + freshBbox.width <= 0) {
+            scrollHint = 'The element is to the left of the viewport. Try scrolling left or using scroll_element to bring it into view.';
+          }
+          
+          return {
+            success: false,
+            error: `Element ${element.id} is not visible in the current viewport. ${scrollHint}`.trim(),
+            data: {
+              elementId: element.id,
+              bbox: freshBbox,
+              viewportWidth,
+              viewportHeight,
+            },
+            timestamp: Date.now(),
+          };
+        }
+        
         // Create element with fresh bbox for drawing
-        const elementWithFreshBbox: InteractiveElement = {
+        const elementWithFreshBbox = {
           ...element,
-          bbox: freshBbox,
+          bbox: freshBbox
         };
         
         // Draw single element highlight
