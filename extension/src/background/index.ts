@@ -1605,13 +1605,19 @@ return {
         
         let freshBbox = element.bbox; // Default to cached bbox
         try {
-          const bboxResult = await javascript.executeJavaScript(activeTabId, conversationId, bboxScript, false, false, 5000);
+          const bboxResult = await javascript.executeJavaScript(activeTabId, conversationId, bboxScript, true, false, 5000);
           if (bboxResult.success && bboxResult.result?.value) {
             const fetchedBbox = bboxResult.result.value as { x: number; y: number; width: number; height: number };
             freshBbox = fetchedBbox;
             console.log(`📐 [SingleHighlight] Fresh bbox for ${element.id}:`, JSON.stringify(freshBbox));
           } else {
-            console.warn(`⚠️ [SingleHighlight] Failed to fetch fresh bbox, using cached: ${bboxResult.error}`);
+            console.warn(`⚠️ [SingleHighlight] Failed to fetch fresh bbox for ${element.id}:`, {
+              error: bboxResult.error,
+              selector: element.selector,
+              cachedBbox: element.bbox,
+              resultValue: bboxResult.result?.value,
+              rawResult: bboxResult.result,
+            });
           }
         } catch (bboxError) {
           console.warn(`⚠️ [SingleHighlight] Error fetching bbox, using cached:`, bboxError);

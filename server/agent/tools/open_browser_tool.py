@@ -91,6 +91,11 @@ class OpenBrowserObservation(Observation):
         default=None,
         description="Dialog information if a dialog is open (type, message, needsDecision)"
     )
+    # Tab creation tracking
+    new_tabs_created: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="List of new tabs created during operation (tabId, url, title, loading)"
+    )
     # Visual interaction results
     highlighted_elements: Optional[List[Dict[str, Any]]] = Field(
         default=None,
@@ -237,6 +242,23 @@ class OpenBrowserObservation(Observation):
                 text_parts.append("- For prompts: `{\"type\": \"handle_dialog\", \"dialog_action\": \"accept\", \"prompt_text\": \"your text\"}`")
             else:
                 text_parts.append("**Note**: This dialog was auto-accepted (no decision needed).")
+            text_parts.append("")
+        
+        # New Tabs Created Section (if applicable)
+        if self.new_tabs_created:
+            text_parts.append("## 🗂️ New Tabs Created")
+            text_parts.append("")
+            for tab in self.new_tabs_created:
+                tab_id = tab.get('tabId', 'unknown')
+                url = tab.get('url', 'No URL')
+                title = tab.get('title', '')
+                loading = tab.get('loading', False)
+                
+                text_parts.append(f"**Tab [{tab_id}]**: {url}")
+                if title:
+                    text_parts.append(f"   Title: {title}")
+                if loading:
+                    text_parts.append("   Loading: Yes")
             text_parts.append("")
         
         # Highlighted Elements Section (if applicable)
@@ -781,6 +803,7 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
             dialog = None
             highlighted_elements = None
             total_elements = None
+            new_tabs_created = None
             
             if result_dict:
                 success = result_dict.get('success', False)
@@ -814,7 +837,11 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                         highlighted_elements = result_dict['data']['elements']
                     if 'totalElements' in result_dict['data']:
                         total_elements = result_dict['data']['totalElements']
-            # Get pending confirmation if exists
+                    
+                    # Extract new_tabs_created for javascript_execute and confirm_click_element
+                    if 'new_tabs_created' in result_dict['data']:
+                        new_tabs_created = result_dict['data']['new_tabs_created']
+            
             pending_confirmation = self._get_pending_confirmation()
             
             return OpenBrowserObservation(
@@ -829,6 +856,7 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 dialog=dialog,
                 highlighted_elements=highlighted_elements,
                 total_elements=total_elements,
+                new_tabs_created=new_tabs_created,
                 pending_confirmation=pending_confirmation
             )
             

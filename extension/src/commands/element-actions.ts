@@ -201,7 +201,9 @@ export async function performElementClick(
         message: jsResult.dialog.message,
       },
       screenshotDataUrl,
+      new_tabs_created: jsResult.new_tabs_created,
     };
+
   }
 
   // Check for execution errors
@@ -259,7 +261,9 @@ export async function performElementClick(
     elementId,
     clicked: true,
     screenshotDataUrl,
+    new_tabs_created: jsResult.new_tabs_created,
   };
+
 }
 
 

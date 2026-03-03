@@ -208,6 +208,9 @@ export interface CommandResponse {
     url?: string;
     needsDecision: boolean;
   };
+  // Tab creation tracking
+  new_tabs_created?: Array<{tabId: number, url: string, title?: string, loading?: boolean}>;
+
 }
 
 export interface ScreenshotMetadata {
@@ -260,4 +263,7 @@ export interface ElementActionResult {
     message: string;
     defaultValue?: string;
   };
+  // Tab creation tracking
+  new_tabs_created?: Array<{tabId: number, url: string, title?: string, loading?: boolean}>;
+
 }
