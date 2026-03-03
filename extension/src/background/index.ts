@@ -1585,12 +1585,51 @@ return {
           };
         }
         
+        // ============================================================
+        // Re-fetch current bbox using cached selector (bbox may be stale if page scrolled)
+        // ============================================================
+        const escapedSelector = element.selector.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        const bboxScript = `
+          (function() {
+            const el = document.querySelector("${escapedSelector}");
+            if (!el) return null;
+            const rect = el.getBoundingClientRect();
+            return {
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height
+            };
+          })();
+        `;
+        
+        let freshBbox = element.bbox; // Default to cached bbox
+        try {
+          const bboxResult = await javascript.executeJavaScript(activeTabId, conversationId, bboxScript, false, false, 5000);
+          if (bboxResult.success && bboxResult.result?.value) {
+            const fetchedBbox = bboxResult.result.value as { x: number; y: number; width: number; height: number };
+            freshBbox = fetchedBbox;
+            console.log(`📐 [SingleHighlight] Fresh bbox for ${element.id}:`, JSON.stringify(freshBbox));
+          } else {
+            console.warn(`⚠️ [SingleHighlight] Failed to fetch fresh bbox, using cached: ${bboxResult.error}`);
+          }
+        } catch (bboxError) {
+          console.warn(`⚠️ [SingleHighlight] Error fetching bbox, using cached:`, bboxError);
+        }
+        
         // Capture screenshot
         const screenshotResult = await captureScreenshot(activeTabId, conversationId, true, 80);
+        
+        // Create element with fresh bbox for drawing
+        const elementWithFreshBbox: InteractiveElement = {
+          ...element,
+          bbox: freshBbox,
+        };
+        
         // Draw single element highlight
         const highlightedScreenshot = await highlightSingleElement(
           screenshotResult.imageData,
-          element,
+          elementWithFreshBbox,
           {
             scale: screenshotResult.metadata?.devicePixelRatio || 1,
             viewportWidth: screenshotResult.metadata?.viewportWidth || 0,
