@@ -584,3 +584,146 @@ async function compressImage(
   });
 }
 */
+
+/**
+ * Compress screenshot if it exceeds size threshold
+ * 
+ * Uses iterative resizing with OffscreenCanvas to reduce image size below threshold.
+ * Falls back gracefully if compression fails.
+ * 
+ * @param imageData - Image data as data URL (base64) or object with imageData property
+ * @param thresholdBytes - Maximum allowed size in bytes (default: 1MB for base64 data)
+ * @param minQuality - Minimum JPEG quality to try (default: 50)
+ * @returns Compressed image data in same format as input
+ */
+export async function compressIfNeeded(
+  imageData: string | { imageData?: string } | null | undefined,
+  thresholdBytes: number = 1024 * 1024, // 1MB default
+  minQuality: number = 50
+): Promise<string | { imageData?: string } | null | undefined> {
+  // Handle null/undefined
+  if (!imageData) {
+    return imageData;
+  }
+
+  // Extract the actual image data URL
+  let dataUrl: string;
+  let isObject = false;
+
+  if (typeof imageData === 'string') {
+    dataUrl = imageData;
+  } else if (imageData && typeof imageData === 'object' && 'imageData' in imageData) {
+    dataUrl = imageData.imageData || '';
+    isObject = true;
+  } else {
+    return imageData;
+  }
+
+  // Check if compression is needed
+  if (!dataUrl || dataUrl.length <= thresholdBytes) {
+    console.log(`📊 [CompressIfNeeded] Image size ${dataUrl?.length || 0} bytes <= threshold ${thresholdBytes} bytes, no compression needed`);
+    return imageData;
+  }
+
+  console.log(`🗜️ [CompressIfNeeded] Compressing image: ${dataUrl.length} bytes > ${thresholdBytes} bytes threshold`);
+
+  // Check if OffscreenCanvas is available
+  if (typeof OffscreenCanvas === 'undefined' || typeof createImageBitmap === 'undefined') {
+    console.warn('⚠️ [CompressIfNeeded] OffscreenCanvas not available, returning original image');
+    return imageData;
+  }
+
+  try {
+    // Convert data URL to Blob
+    const response = await fetch(dataUrl);
+    const blob = await response.blob();
+
+    // Create ImageBitmap
+    const imageBitmap = await createImageBitmap(blob);
+    const originalWidth = imageBitmap.width;
+    const originalHeight = imageBitmap.height;
+
+    console.log(`🖼️ [CompressIfNeeded] Original dimensions: ${originalWidth}x${originalHeight}`);
+
+    // Try progressively smaller sizes until under threshold
+    const scaleSteps = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3];
+    const qualitySteps = [80, 70, 60, minQuality];
+
+    for (const scale of scaleSteps) {
+      for (const quality of qualitySteps) {
+        const targetWidth = Math.floor(originalWidth * scale);
+        const targetHeight = Math.floor(originalHeight * scale);
+
+        if (targetWidth < 200 || targetHeight < 150) {
+          console.warn(`⚠️ [CompressIfNeeded] Reached minimum dimensions, stopping compression`);
+          break;
+        }
+
+        try {
+          const canvas = new OffscreenCanvas(targetWidth, targetHeight);
+          const ctx = canvas.getContext('2d');
+
+          if (!ctx) {
+            continue;
+          }
+
+          // Fill with white background
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, targetWidth, targetHeight);
+
+          // Draw scaled image
+          ctx.drawImage(imageBitmap, 0, 0, targetWidth, targetHeight);
+
+          // Convert to JPEG with quality
+          const compressedBlob = await canvas.convertToBlob({ 
+            type: 'image/jpeg', 
+            quality: quality / 100 
+          });
+
+          // Read as data URL
+          const compressedDataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = () => reject(new Error('Failed to read compressed blob'));
+            reader.readAsDataURL(compressedBlob);
+          });
+
+          console.log(`📊 [CompressIfNeeded] Tried scale=${scale.toFixed(1)}, quality=${quality}%: ${compressedDataUrl.length} bytes`);
+
+          if (compressedDataUrl.length <= thresholdBytes) {
+            console.log(`✅ [CompressIfNeeded] Compressed successfully: ${dataUrl.length} → ${compressedDataUrl.length} bytes (${((1 - compressedDataUrl.length / dataUrl.length) * 100).toFixed(1)}% reduction)`);
+            
+            // Return in same format as input
+            if (isObject) {
+              return { ...imageData as object, imageData: compressedDataUrl };
+            }
+            return compressedDataUrl;
+          }
+        } catch (scaleError) {
+          console.warn(`⚠️ [CompressIfNeeded] Scale attempt failed:`, scaleError);
+          continue;
+        }
+      }
+    }
+
+    console.warn(`⚠️ [CompressIfNeeded] Could not compress below threshold, returning best effort`);
+    return imageData;
+
+  } catch (error) {
+    console.error(`❌ [CompressIfNeeded] Compression failed:`, error);
+    return imageData;
+  }
+}
+
+/**
+ * Get the default compression threshold from config or environment
+ * Can be overridden by setting SCREENSHOT_COMPRESSION_THRESHOLD in global scope
+ */
+export function getCompressionThreshold(): number {
+  // Check for global config (can be set by server)
+  if (typeof globalThis !== 'undefined' && (globalThis as any).SCREENSHOT_COMPRESSION_THRESHOLD) {
+    return (globalThis as any).SCREENSHOT_COMPRESSION_THRESHOLD;
+  }
+  // Default: 1MB (reasonable for network transmission)
+  return 1024 * 1024;
+}

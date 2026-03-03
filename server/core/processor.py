@@ -27,6 +27,7 @@ from server.models.commands import (
     ScrollElementCommand,
     KeyboardInputCommand,
     GetElementHtmlCommand,
+    HighlightSingleElementCommand,
 )
 from server.websocket.manager import ws_manager
 from server.core.config import config
@@ -240,6 +241,9 @@ class CommandProcessor:
                 return await self._execute_keyboard_input(command)
             elif isinstance(command, GetElementHtmlCommand):
                 return await self._execute_get_element_html(command)
+            elif isinstance(command, HighlightSingleElementCommand):
+                return await self._execute_highlight_single_element(command)
+                return await self._execute_get_element_html(command)
             else:
                 raise ValueError(f"Unknown command type: {command.type}")
 
@@ -407,6 +411,12 @@ class CommandProcessor:
         self, command: GetElementHtmlCommand
     ) -> CommandResponse:
         """Get HTML of a cached element from extension's elementCache"""
+        return await self._send_prepared_command(command)
+
+    async def _execute_highlight_single_element(
+        self, command: HighlightSingleElementCommand
+    ) -> CommandResponse:
+        """Highlight a single element for visual confirmation"""
         return await self._send_prepared_command(command)
 
     def set_current_tab(self, tab_id: int, conversation_id: str = None):

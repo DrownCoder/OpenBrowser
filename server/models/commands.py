@@ -315,6 +315,17 @@ class GetElementHtmlCommand(BaseCommand):
     )
 
 
+class HighlightSingleElementCommand(BaseCommand):
+    """Highlight a single element with visual confirmation for 2PC flow"""
+    type: Literal["highlight_single_element"] = "highlight_single_element"
+    element_id: str = Field(
+        description="Element ID from highlight response"
+    )
+    tab_id: Optional[int] = Field(
+        default=None,
+        description="Target tab ID (optional, uses active tab if not provided)"
+    )
+
 class CommandResponse(BaseModel):
     """Response from command execution"""
     success: bool
@@ -361,7 +372,8 @@ Command = Union[
     HoverElementCommand,
     ScrollElementCommand,
     KeyboardInputCommand,
-    GetElementHtmlCommand,
+    GetElementHtmlCommand |
+    HighlightSingleElementCommand
 ]
 
 
@@ -392,6 +404,7 @@ def parse_command(data: dict) -> Command:
         "scroll_element": ScrollElementCommand,
         "keyboard_input": KeyboardInputCommand,
         "get_element_html": GetElementHtmlCommand,
+        "highlight_single_element": HighlightSingleElementCommand,
     }
     
     if cmd_type not in command_map:

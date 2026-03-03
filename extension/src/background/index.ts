@@ -6,7 +6,7 @@
  */
 
 import { wsClient } from '../websocket/client';
-import { captureScreenshot } from '../commands/screenshot';
+import { captureScreenshot, compressIfNeeded, getCompressionThreshold } from '../commands/screenshot';
 import { tabs } from '../commands/tabs';
 import { tabManager } from '../commands/tab-manager';
 import { javascript } from '../commands/javascript';
@@ -16,6 +16,7 @@ import { extractGroundedElements } from '../commands/grounded-elements';
 import { handleGetAccessibilityTree } from '../commands/accessibility';
 
 import { drawHighlights } from '../commands/visual-highlight';
+import { highlightSingleElement } from '../commands/single-highlight';
 import { elementCache } from '../commands/element-cache';
 import { generateElementId } from '../commands/hash-utils';
 import { performElementClick, performElementHover, performElementScroll, performKeyboardInput } from '../commands/element-actions';
@@ -971,7 +972,7 @@ return {
                     message: handleResult.newDialog.message,
                     autoAccepted: true,
                   },
-                  screenshot: screenshotResult,
+                  screenshot: await compressIfNeeded(screenshotResult, getCompressionThreshold()),
                 },
                 timestamp: Date.now(),
               };
@@ -1014,7 +1015,7 @@ return {
             message: `Dialog handled successfully: ${handleResult.previousDialog.type} ${action}ed`,
             data: {
               handledDialog: handleResult.previousDialog,
-              screenshot: screenshotResult,
+              screenshot: await compressIfNeeded(screenshotResult, getCompressionThreshold()),
             },
             timestamp: Date.now(),
           };
@@ -1448,7 +1449,7 @@ return {
             totalElements: allElements.length,
             totalPages: totalPages,
             page: page,
-            screenshot: highlightedScreenshot,
+            screenshot: await compressIfNeeded(highlightedScreenshot, getCompressionThreshold()),
           },
           timestamp: Date.now(),
         };
@@ -1559,6 +1560,50 @@ return {
             html: html,
             tagName: element.tagName,
             type: element.type,
+          },
+          timestamp: Date.now(),
+        };
+      }
+
+      case 'highlight_single_element': {
+        if (!command.conversation_id) {
+          throw new Error('conversation_id is required for highlight_single_element command');
+        }
+        const conversationId = command.conversation_id;
+        const activeTabId = tabManager.getCurrentActiveTabId(conversationId);
+        if (!activeTabId) {
+          throw new Error(`No active tab for conversation ${conversationId}`);
+        }
+        
+        // Get element from cache
+        const element = elementCache.getElementById(conversationId, activeTabId, command.element_id);
+        if (!element) {
+          return {
+            success: false,
+            error: `Element ${command.element_id} not found in cache. Call highlight_elements() first.`,
+            timestamp: Date.now(),
+          };
+        }
+        
+        // Capture screenshot
+        const screenshotResult = await captureScreenshot(activeTabId, conversationId, true, 80);
+        // Draw single element highlight
+        const highlightedScreenshot = await highlightSingleElement(
+          screenshotResult.imageData,
+          element,
+          {
+            scale: screenshotResult.metadata?.devicePixelRatio || 1,
+            viewportWidth: screenshotResult.metadata?.viewportWidth || 0,
+            viewportHeight: screenshotResult.metadata?.viewportHeight || 0,
+          }
+        );
+        
+        return {
+          success: true,
+          data: {
+            html: element.html || '',
+            screenshot: await compressIfNeeded(highlightedScreenshot, getCompressionThreshold()),
+            elementId: command.element_id,
           },
           timestamp: Date.now(),
         };

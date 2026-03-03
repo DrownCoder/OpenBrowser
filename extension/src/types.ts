@@ -147,6 +147,13 @@ export interface GetElementHtmlCommand extends BaseCommand {
   tab_id?: number;  // Optional: uses active tab if not provided
 }
 
+
+export interface HighlightSingleElementCommand extends BaseCommand {
+  type: 'highlight_single_element';
+  element_id: string;
+  tab_id?: number;  // Optional: uses active tab if not provided
+}
+
 export interface GroundedElementsResponse {
   success: boolean;
   data?: {
@@ -182,7 +189,8 @@ export type Command =
   | HoverElementCommand
   | ScrollElementCommand
   | KeyboardInputCommand
-  | GetElementHtmlCommand;
+  | GetElementHtmlCommand
+  | HighlightSingleElementCommand;
 
 export interface CommandResponse {
   success: boolean;
