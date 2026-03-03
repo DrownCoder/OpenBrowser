@@ -753,8 +753,8 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 raise ValueError(f"Unknown action type: {action_type}")
             
             # ========== Clear pending confirmation for non-confirm operations ==========
-            # If action is not a confirm action and not a 2PC action, clear pending state
-            if not action_type.startswith('confirm_') and action_type not in ['click_element', 'hover_element', 'scroll_element', 'keyboard_input']:
+            # If action is not a confirm action, clear pending state
+            if not action_type in ['click_element', 'hover_element', 'scroll_element', 'keyboard_input']:
                 self._clear_pending_confirmation()
             
             # Determine what data to collect based on action type
