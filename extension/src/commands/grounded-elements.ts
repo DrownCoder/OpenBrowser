@@ -30,11 +30,12 @@ export interface GroundedElementsResult {
  */
 export async function extractGroundedElements(
   tabId: number,
+  conversationId: string,
   maxElements: number = 100,
   includeHidden: boolean = false
 ): Promise<GroundedElementsResult> {
   // Ensure debugger is attached for the target tab
-  await debuggerSessionManager.ensureDebuggerAttached(tabId);
+  await debuggerSessionManager.attachDebugger(tabId, conversationId);
   const cdp = new CdpCommander(tabId);
 
   // JavaScript to run in the page context to extract elements

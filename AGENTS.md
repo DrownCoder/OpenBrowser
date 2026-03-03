@@ -114,10 +114,56 @@ the system checks for new dialogs within 150ms.
 - **NEVER use `.click()` for React/Vue** - Dispatch full event sequence instead
 - **NEVER suppress type errors** - `as any`, `@ts-ignore` forbidden
 - **NEVER ignore dialog_opened** - AI must handle dialogs before continuing
+## VISUAL INTERACTION WORKFLOW
+
+OpenBrowser uses a visual-first approach where the AI sees elements before interacting:
+
+### Workflow
+```
+1. highlight_elements(page=1) → Returns collision-free elements with IDs
+2. screenshot → AI sees numbered overlays on elements (no overlap)
+3. click_element(id="click-3") → Interact with specific element
+4. highlight_elements(page=2) → Get next batch of non-colliding elements
+```
+
+### Collision-Aware Pagination (Single-Type Design)
+Elements are paginated to ensure **no visual overlap** in each screenshot:
+- **One element type per call** for stable, predictable pagination
+- Each page returns a maximal set of non-colliding elements
+- Collision detection includes label area (26px above element)
+- AI calls `page=1, page=2, page=3...` to see all elements of that type
+- No offset/limit - pages are determined by collision geometry
+
+```
+# Highlight clickable elements (default)
+highlight_elements()                  → Page 1 of clickable elements
+highlight_elements(page=2)             → Page 2 of clickable elements
+
+# Highlight other types (one at a time)
+highlight_elements(element_type="inputable")   → Input fields
+highlight_elements(element_type="scrollable")  → Scrollable areas
+highlight_elements(element_type="hoverable")   → Hoverable elements
+```
+
+### Element ID Format
+Elements are identified by type-prefix + number:
+- `click-N` - Clickable elements (buttons, links)
+- `scroll-N` - Scrollable elements
+- `input-N` - Input fields
+- `hover-N` - Hoverable elements
+
+### Commands
+| Command | Purpose | Example |
+|---------|---------|--------|
+| `highlight_elements` | Highlight one element type by page | `{element_type: "clickable", page: 1}` |
+| `click_element` | Click by element ID | `{element_id: "click-3"}` |
+| `hover_element` | Hover by element ID | `{element_id: "hover-1"}` |
+| `scroll_element` | Scroll by element ID | `{element_id: "scroll-2", direction: "down"}` |
+| `keyboard_input` | Type into element | `{element_id: "input-1", text: "hello"}` |
 ## UNIQUE PATTERNS
 
-### JavaScript-First Automation
-All page interactions via `javascript_execute`:
+### JavaScript-First Automation (Fallback)
+For complex interactions not covered by visual commands:
 ```javascript
 // Click by visible text (universal pattern)
 (() => {

@@ -5,15 +5,35 @@ from typing import Dict, Optional, Any, List
 from datetime import datetime
 
 from server.models.commands import (
-    Command, CommandResponse, parse_command,
-    MouseMoveCommand, MouseClickCommand, MouseScrollCommand,
+    Command,
+    CommandResponse,
+    parse_command,
+    MouseMoveCommand,
+    MouseClickCommand,
+    MouseScrollCommand,
     ResetMouseCommand,
-    KeyboardTypeCommand, KeyboardPressCommand, ScreenshotCommand,
-    TabCommand, GetTabsCommand, JavascriptExecuteCommand,
-    HandleDialogCommand, GetGroundedElementsCommand, GetAccessibilityTreeCommand
+    KeyboardTypeCommand,
+    KeyboardPressCommand,
+    ScreenshotCommand,
+    TabCommand,
+    GetTabsCommand,
+    JavascriptExecuteCommand,
+    HandleDialogCommand,
+    GetGroundedElementsCommand,
+    GetAccessibilityTreeCommand,
+    HighlightElementsCommand,
+    ClickElementCommand,
+    HoverElementCommand,
+    ScrollElementCommand,
+    KeyboardInputCommand,
+    GetElementHtmlCommand,
+    HighlightSingleElementCommand,
 )
 from server.websocket.manager import ws_manager
 from server.core.config import config
+
+
+SCREENSHOT_DELAY_MS = 500  # Delay before taking screenshot (in milliseconds)
 
 
 logger = logging.getLogger(__name__)
@@ -21,57 +41,75 @@ logger = logging.getLogger(__name__)
 
 class CommandProcessor:
     """Processes and executes commands"""
-    
+
     def __init__(self):
         self._current_tab_ids: Dict[str, Optional[int]] = {}
-        self._max_a11y_elements: Dict[str, int] = {}  # conversation_id -> max_elements
-    
+
     def _get_current_tab_id(self, conversation_id: str = None) -> Optional[int]:
         """Get current tab ID for a specific conversation"""
-        key = conversation_id or 'default'
+        key = conversation_id or "default"
         return self._current_tab_ids.get(key)
-    
+
     def _set_current_tab_id(self, tab_id: int, conversation_id: str = None):
         """Set current tab ID for a specific conversation"""
-        key = conversation_id or 'default'
+        key = conversation_id or "default"
         self._current_tab_ids[key] = tab_id
         logger.debug(f"Set current tab ID {tab_id} for conversation {key}")
-    
-    def set_max_a11y_elements(self, max_elements: int, conversation_id: str = None):
-        """Set max a11y elements for a specific conversation"""
-        key = conversation_id or 'default'
-        self._max_a11y_elements[key] = max_elements
-    
-    def _get_max_a11y_elements(self, conversation_id: str = None) -> int:
-        """Get max a11y elements for a specific conversation"""
-        key = conversation_id or 'default'
-        return self._max_a11y_elements.get(key, 100)
-    
-    async def _get_a11y_elements_for_conversation(
-        self,
-        conversation_id: str,
-        max_elements: int = 100
-    ) -> Optional[List[Dict[str, Any]]]:
-        """Get accessibility tree elements for a conversation."""
-        command = GetAccessibilityTreeCommand(
-            conversation_id=conversation_id,
-            max_elements=max_elements
-        )
-        
+
+    async def _add_screenshot_to_response(
+        self, original_response: CommandResponse, conversation_id: Optional[str] = None
+    ) -> CommandResponse:
+        """
+        Add screenshot to a command response after a delay.
+
+        Args:
+            original_response: The original command response
+            conversation_id: Conversation ID for the screenshot command
+
+        Returns:
+            CommandResponse with screenshot data appended
+        """
+        if not original_response.success:
+            return original_response
+
         try:
-            response = await self._send_prepared_command(command)
-            
-            if not response.success or not response.data:
-                logger.warning(f"Failed to get accessibility tree: {response.error}")
-                return None
-            elements = response.data.get('elements', [])
-            logger.info(f"_get_a11y_elements_for_conversation got {len(elements)} elements")
-            return response.data.get('elements', [])
-            
+            # Wait for page to settle
+            await asyncio.sleep(SCREENSHOT_DELAY_MS / 1000.0)
+
+            # Take screenshot
+            screenshot_command = ScreenshotCommand(conversation_id=conversation_id)
+            screenshot_response = await self._execute_screenshot(screenshot_command)
+
+            if not screenshot_response.success:
+                logger.warning(
+                    f"Failed to capture screenshot: {screenshot_response.error}"
+                )
+                return original_response
+
+            # Merge screenshot data into original response
+            merged_data = original_response.data or {}
+            if screenshot_response.data:
+                # Add screenshot data under 'screenshot' key
+                merged_data["screenshot"] = screenshot_response.data.get(
+                    "image"
+                ) or screenshot_response.data.get("imageData")
+                # Also preserve any metadata from screenshot
+                if "metadata" in screenshot_response.data:
+                    merged_data["screenshot_metadata"] = screenshot_response.data[
+                        "metadata"
+                    ]
+
+            return CommandResponse(
+                success=True,
+                command_id=original_response.command_id,
+                message=original_response.message,
+                data=merged_data,
+            )
+
         except Exception as e:
-            logger.error(f"Error getting accessibility tree: {e}")
-            return None
-    
+            logger.error(f"Error adding screenshot to response: {e}")
+            return original_response
+
     def _prepare_command_dict(self, command: Command) -> dict:
         """
         Prepare command dictionary for sending to extension.
@@ -79,29 +117,46 @@ class CommandProcessor:
         For other commands, auto-fill tab_id if not specified.
         """
         command_dict = command.dict()
-        
-# Import command types for type checking
+
+        # Import command types for type checking
         from server.models.commands import (
-            TabCommand, GetTabsCommand, ScreenshotCommand,
-            MouseMoveCommand, MouseClickCommand, MouseScrollCommand,
-            ResetMouseCommand, KeyboardTypeCommand, KeyboardPressCommand,
-            JavascriptExecuteCommand, HandleDialogCommand
+            TabCommand,
+            GetTabsCommand,
+            ScreenshotCommand,
+            MouseMoveCommand,
+            MouseClickCommand,
+            MouseScrollCommand,
+            ResetMouseCommand,
+            KeyboardTypeCommand,
+            KeyboardPressCommand,
+            JavascriptExecuteCommand,
+            HandleDialogCommand,
         )
-        
+
         # Get conversation_id for multi-session support
         conversation_id = command.conversation_id
-        
+
         current_tab_id = self._get_current_tab_id(conversation_id)
-        
+
         # Special handling for screenshot, javascript_execute, and handle_dialog commands
         # These commands ALWAYS use current active tab, ignoring any provided tab_id
-        if isinstance(command, (ScreenshotCommand, JavascriptExecuteCommand, HandleDialogCommand)):
+        if isinstance(
+            command, (ScreenshotCommand, JavascriptExecuteCommand, HandleDialogCommand)
+        ):
             if current_tab_id is not None:
-                command_dict['tab_id'] = current_tab_id
-                logger.debug(f"Forced use of current tab {current_tab_id} for {command.type} command in conversation {conversation_id} (ignoring provided tab_id)")
+                command_dict["tab_id"] = current_tab_id
+                logger.debug(
+                    f"Forced use of current tab {current_tab_id} for {command.type} command in conversation {conversation_id} (ignoring provided tab_id)"
+                )
             else:
-                logger.warning(f"No current tab set for {command.type} command in conversation {conversation_id}")
-        elif hasattr(command, 'tab_id') and command.tab_id is None and current_tab_id is not None:
+                logger.warning(
+                    f"No current tab set for {command.type} command in conversation {conversation_id}"
+                )
+        elif (
+            hasattr(command, "tab_id")
+            and command.tab_id is None
+            and current_tab_id is not None
+        ):
             # Check command type to decide if we should fill tab_id
             if isinstance(command, TabCommand):
                 # For tab commands, only fill tab_id for certain actions
@@ -116,11 +171,13 @@ class CommandProcessor:
             else:
                 # For other commands (mouse, keyboard, reset_mouse)
                 # auto-fill tab_id to target current managed tab
-                command_dict['tab_id'] = current_tab_id
-                logger.debug(f"Auto-filled tab_id {current_tab_id} for {command.type} command in conversation {conversation_id}")
-            
+                command_dict["tab_id"] = current_tab_id
+                logger.debug(
+                    f"Auto-filled tab_id {current_tab_id} for {command.type} command in conversation {conversation_id}"
+                )
+
         return command_dict
-    
+
     async def _send_prepared_command(self, command: Command) -> CommandResponse:
         """
         Send a command to extension after preparing it with current tab ID.
@@ -128,21 +185,22 @@ class CommandProcessor:
         prepared_dict = self._prepare_command_dict(command)
         # Parse back to Command to ensure validation
         from server.models.commands import parse_command
+
         prepared_command = parse_command(prepared_dict)
         return await ws_manager.send_command(prepared_command)
-        
+
     async def execute(self, command: Command) -> CommandResponse:
         """
         Execute a command
-        
+
         Args:
             command: The command to execute
-            
+
         Returns:
             CommandResponse with execution result
         """
         logger.info(f"Executing command: {command.type}")
-        
+
         try:
             # Route to appropriate handler based on command type
             if isinstance(command, MouseMoveCommand):
@@ -171,136 +229,211 @@ class CommandProcessor:
                 return await self._execute_get_grounded_elements(command)
             elif isinstance(command, GetAccessibilityTreeCommand):
                 return await self._execute_get_accessibility_tree(command)
+            elif isinstance(command, HighlightElementsCommand):
+                return await self._execute_highlight_elements(command)
+            elif isinstance(command, ClickElementCommand):
+                return await self._execute_click_element(command)
+            elif isinstance(command, HoverElementCommand):
+                return await self._execute_hover_element(command)
+            elif isinstance(command, ScrollElementCommand):
+                return await self._execute_scroll_element(command)
+            elif isinstance(command, KeyboardInputCommand):
+                return await self._execute_keyboard_input(command)
+            elif isinstance(command, GetElementHtmlCommand):
+                return await self._execute_get_element_html(command)
+            elif isinstance(command, HighlightSingleElementCommand):
+                return await self._execute_highlight_single_element(command)
+                return await self._execute_get_element_html(command)
             else:
                 raise ValueError(f"Unknown command type: {command.type}")
-                
+
         except Exception as e:
             logger.error(f"Error executing command {command.type}: {e}")
             return CommandResponse(
                 success=False,
-                command_id=getattr(command, 'command_id', None),
-                error=str(e)
+                command_id=getattr(command, "command_id", None),
+                error=str(e),
             )
-            
+
     async def _execute_mouse_move(self, command: MouseMoveCommand) -> CommandResponse:
         """Execute mouse move command"""
         response = await self._send_prepared_command(command)
         return response
-        
+
     async def _execute_mouse_click(self, command: MouseClickCommand) -> CommandResponse:
         """Execute mouse click command"""
         response = await self._send_prepared_command(command)
         return response
-        
-    async def _execute_mouse_scroll(self, command: MouseScrollCommand) -> CommandResponse:
+
+    async def _execute_mouse_scroll(
+        self, command: MouseScrollCommand
+    ) -> CommandResponse:
         """Execute mouse scroll command"""
         response = await self._send_prepared_command(command)
         return response
-        
-    async def _execute_keyboard_type(self, command: KeyboardTypeCommand) -> CommandResponse:
+
+    async def _execute_keyboard_type(
+        self, command: KeyboardTypeCommand
+    ) -> CommandResponse:
         """Execute keyboard type command"""
         response = await self._send_prepared_command(command)
         return response
-        
-    async def _execute_keyboard_press(self, command: KeyboardPressCommand) -> CommandResponse:
+
+    async def _execute_keyboard_press(
+        self, command: KeyboardPressCommand
+    ) -> CommandResponse:
         """Execute keyboard press command"""
         response = await self._send_prepared_command(command)
         return response
-        
+
     async def _execute_screenshot(self, command: ScreenshotCommand) -> CommandResponse:
         """Execute screenshot command"""
         response = await self._send_prepared_command(command)
         return response
-        
+
     async def _execute_tab_command(self, command: TabCommand) -> CommandResponse:
         """Execute tab management command and return a11y delta for page changes"""
         response = await self._send_prepared_command(command)
-        
+
         # Update current tab based on action (conversation-aware)
         if response.success:
             conversation_id = command.conversation_id
-            needs_a11y_update = False
-            
+
             if command.action == "switch" and command.tab_id:
                 self._set_current_tab_id(command.tab_id, conversation_id)
-                needs_a11y_update = True
             elif command.action == "init":
-                if response.data and 'tabId' in response.data:
-                    self._set_current_tab_id(response.data['tabId'], conversation_id)
-                elif response.data and 'tab_id' in response.data:
-                    self._set_current_tab_id(response.data['tab_id'], conversation_id)
-                needs_a11y_update = True
+                if response.data and "tabId" in response.data:
+                    self._set_current_tab_id(response.data["tabId"], conversation_id)
+                elif response.data and "tab_id" in response.data:
+                    self._set_current_tab_id(response.data["tab_id"], conversation_id)
             elif command.action == "open":
-                if response.data and 'tabId' in response.data:
-                    self._set_current_tab_id(response.data['tabId'], conversation_id)
-                elif response.data and 'tab_id' in response.data:
-                    self._set_current_tab_id(response.data['tab_id'], conversation_id)
-                needs_a11y_update = True
-            
-            # Get accessibility elements for page navigation actions
-            if needs_a11y_update and conversation_id:
-                max_el = self._get_max_a11y_elements(conversation_id)
-                a11y_elements = await self._get_a11y_elements_for_conversation(conversation_id, max_el)
-                if a11y_elements:
-                    if response.data is None:
-                        response.data = {}
-                    response.data['a11y_elements'] = a11y_elements
+                if response.data and "tabId" in response.data:
+                    self._set_current_tab_id(response.data["tabId"], conversation_id)
+                elif response.data and "tab_id" in response.data:
+                    self._set_current_tab_id(response.data["tab_id"], conversation_id)
+
+        # Add screenshot for init/switch/open/refresh actions
+        if response.success and command.action in ("init", "switch", "open", "refresh"):
+            return await self._add_screenshot_to_response(
+                response, command.conversation_id
+            )
+
+        # Add message for close action
+        if response.success and command.action == "close":
+            merged_data = response.data or {}
+            tab_id = command.tab_id
+            if tab_id:
+                merged_data["message"] = f"Closed tab {tab_id}"
+            return CommandResponse(
+                success=True,
+                command_id=response.command_id,
+                message=f"Closed tab {tab_id}" if tab_id else "Tab closed",
+                data=merged_data,
+            )
+
         return response
-        
+
     async def _execute_get_tabs(self, command: GetTabsCommand) -> CommandResponse:
         """Execute get tabs command"""
         response = await self._send_prepared_command(command)
         return response
-        
+
     async def _execute_reset_mouse(self, command: ResetMouseCommand) -> CommandResponse:
         """Execute reset mouse command"""
         response = await self._send_prepared_command(command)
         return response
-        
-    async def _execute_javascript_execute(self, command: JavascriptExecuteCommand) -> CommandResponse:
-        """Execute JavaScript code in browser tab and return accessibility elements"""
+
+    async def _execute_javascript_execute(
+        self, command: JavascriptExecuteCommand
+    ) -> CommandResponse:
+        """Execute JavaScript code in browser tab and return result with screenshot"""
         response = await self._send_prepared_command(command)
-        
-        # Get accessibility elements after JavaScript execution
-        if command.conversation_id:
-            max_el = self._get_max_a11y_elements(command.conversation_id)
-            a11y_elements = await self._get_a11y_elements_for_conversation(command.conversation_id, max_el)
-            if a11y_elements:
-                if response.data is None:
-                    response.data = {}
-                response.data['a11y_elements'] = a11y_elements
+
+        if response.success:
+            return await self._add_screenshot_to_response(
+                response, command.conversation_id
+            )
+
         return response
-        
-    async def _execute_handle_dialog(self, command: HandleDialogCommand) -> CommandResponse:
+
+    async def _execute_handle_dialog(
+        self, command: HandleDialogCommand
+    ) -> CommandResponse:
         """Handle open dialog (accept or dismiss)"""
         response = await self._send_prepared_command(command)
         return response
-    
-    async def _execute_get_grounded_elements(self, command: GetGroundedElementsCommand) -> CommandResponse:
+
+    async def _execute_get_grounded_elements(
+        self, command: GetGroundedElementsCommand
+    ) -> CommandResponse:
         """Get grounded interactive elements"""
         response = await self._send_prepared_command(command)
         return response
-    
-    async def _execute_get_accessibility_tree(self, command: GetAccessibilityTreeCommand) -> CommandResponse:
+
+    async def _execute_get_accessibility_tree(
+        self, command: GetAccessibilityTreeCommand
+    ) -> CommandResponse:
         """Get accessibility tree from the page"""
         response = await self._send_prepared_command(command)
         return response
-        
+
+    async def _execute_highlight_elements(
+        self, command: HighlightElementsCommand
+    ) -> CommandResponse:
+        """Highlight interactive elements on the page"""
+        return await self._send_prepared_command(command)
+
+    async def _execute_click_element(
+        self, command: ClickElementCommand
+    ) -> CommandResponse:
+        """Click a highlighted element by its ID"""
+        return await self._send_prepared_command(command)
+
+    async def _execute_hover_element(
+        self, command: HoverElementCommand
+    ) -> CommandResponse:
+        """Hover over a highlighted element by its ID"""
+        return await self._send_prepared_command(command)
+
+    async def _execute_scroll_element(
+        self, command: ScrollElementCommand
+    ) -> CommandResponse:
+        """Scroll a highlighted element in a direction"""
+        return await self._send_prepared_command(command)
+
+    async def _execute_keyboard_input(
+        self, command: KeyboardInputCommand
+    ) -> CommandResponse:
+        """Type text into a highlighted element by its ID"""
+        return await self._send_prepared_command(command)
+
+    async def _execute_get_element_html(
+        self, command: GetElementHtmlCommand
+    ) -> CommandResponse:
+        """Get HTML of a cached element from extension's elementCache"""
+        return await self._send_prepared_command(command)
+
+    async def _execute_highlight_single_element(
+        self, command: HighlightSingleElementCommand
+    ) -> CommandResponse:
+        """Highlight a single element for visual confirmation"""
+        return await self._send_prepared_command(command)
+
     def set_current_tab(self, tab_id: int, conversation_id: str = None):
         """Set current active tab ID for a specific conversation"""
         self._set_current_tab_id(tab_id, conversation_id)
-        
+
     def get_current_tab(self, conversation_id: str = None) -> Optional[int]:
         """Get current active tab ID for a specific conversation"""
         return self._get_current_tab_id(conversation_id)
-    
+
     def cleanup_conversation(self, conversation_id: str):
         """Cleanup command processor state for a conversation"""
-        key = conversation_id or 'default'
+        key = conversation_id or "default"
         if key in self._current_tab_ids:
             del self._current_tab_ids[key]
             logger.info(f"Cleaned up command processor state for conversation {key}")
-        
+
     async def health_check(self) -> bool:
         """Check if command processor is healthy"""
         try:
@@ -308,7 +441,7 @@ class CommandProcessor:
             if ws_manager.is_connected():
                 # If independent WebSocket server has connections, test with a command
                 # Use 'health_check' as conversation_id for health check commands
-                command = GetTabsCommand(conversation_id='health_check')
+                command = GetTabsCommand(conversation_id="health_check")
                 response = await self.execute(command)
                 return response.success
             else:
@@ -319,7 +452,7 @@ class CommandProcessor:
                 # The /health endpoint will return 200 but with websocket_connected: false
                 # This allows the server to be accessible even if extension isn't connected yet
                 return True
-                
+
         except Exception as e:
             logger.error(f"Health check failed: {e}")
             return False

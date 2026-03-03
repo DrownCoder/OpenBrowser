@@ -6,7 +6,7 @@
  */
 
 import { wsClient } from '../websocket/client';
-import { captureScreenshot } from '../commands/screenshot';
+import { captureScreenshot, compressIfNeeded, getCompressionThreshold } from '../commands/screenshot';
 import { tabs } from '../commands/tabs';
 import { tabManager } from '../commands/tab-manager';
 import { javascript } from '../commands/javascript';
@@ -14,8 +14,151 @@ import { debuggerSessionManager } from '../commands/debugger-manager';
 import { dialogManager } from '../commands/dialog';
 import { extractGroundedElements } from '../commands/grounded-elements';
 import { handleGetAccessibilityTree } from '../commands/accessibility';
-import type { Command, CommandResponse } from '../types';
+
+import { drawHighlights } from '../commands/visual-highlight';
+import { highlightSingleElement } from '../commands/single-highlight';
+import { elementCache } from '../commands/element-cache';
+import { generateElementId } from '../commands/hash-utils';
+import { performElementClick, performElementHover, performElementScroll, performKeyboardInput } from '../commands/element-actions';
+import type { Command, CommandResponse, InteractiveElement } from '../types';
 console.log('🚀 OpenBrowser extension starting (Strict Mode)...');
+
+// ============================================================================
+// Collision-Aware Pagination for Element Highlighting
+// ============================================================================
+
+/**
+ * Label dimensions for collision detection (must match visual-highlight.ts)
+ */
+const LABEL_FONT_SIZE = 16;
+const LABEL_PADDING = 5;
+const LABEL_HEIGHT = LABEL_FONT_SIZE + LABEL_PADDING * 2; // 26px total
+const MAX_LABEL_WIDTH = 120; // Maximum label width for collision detection (e.g., "clickable-999")
+
+interface BBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+
+/**
+ * Check if two bounding boxes intersect
+ */
+function bboxesIntersect(a: BBox, b: BBox): boolean {
+  return !(
+    a.x + a.width < b.x ||
+    b.x + b.width < a.x ||
+    a.y + a.height < b.y ||
+    b.y + b.height < a.y
+  );
+}
+
+/**
+ * Expand bbox to include label area (label is drawn above the element)
+ */
+function expandBBoxWithLabel(bbox: BBox): BBox {
+  // Label is drawn above the element, starting from element's left edge
+  // Label width may exceed element width, causing horizontal overlap
+  const labelWidth = Math.max(bbox.width, MAX_LABEL_WIDTH);
+  return {
+    x: bbox.x,
+    y: bbox.y - LABEL_HEIGHT, // Extend upward for label
+    width: labelWidth,          // Use max of element width and label width
+    height: bbox.height + LABEL_HEIGHT,
+  };
+}
+
+/**
+ * Check if two elements collide (including their labels)
+ */
+function elementsCollide(a: InteractiveElement, b: InteractiveElement): boolean {
+  const expandedA = expandBBoxWithLabel(a.bbox);
+  const expandedB = expandBBoxWithLabel(b.bbox);
+  return bboxesIntersect(expandedA, expandedB);
+}
+
+/**
+ * Select a collision-free page of elements using greedy algorithm
+ * 
+ * @param elements - All elements sorted by priority
+ * @param page - 1-indexed page number
+ * @returns Elements for the requested page (collision-free)
+ */
+function selectCollisionFreePage(
+  elements: InteractiveElement[],
+  page: number
+): InteractiveElement[] {
+  if (elements.length === 0 || page < 1) {
+    return [];
+  }
+
+  let remaining = [...elements];
+  let result: InteractiveElement[] = [];
+
+  for (let p = 1; p <= page; p++) {
+    const selected: InteractiveElement[] = [];
+
+    for (const elem of remaining) {
+      // Check if this element collides with any already selected in this page
+      const collides = selected.some(s => elementsCollide(elem, s));
+      if (!collides) {
+        selected.push(elem);
+      }
+    }
+
+    if (p === page) {
+      result = selected;
+      break;
+    }
+
+    // Remove selected elements from remaining for next page
+    const selectedIds = new Set(selected.map(e => e.id));
+    remaining = remaining.filter(e => !selectedIds.has(e.id));
+  }
+
+  return result;
+}
+
+/**
+ * Calculate total number of collision-free pages
+ * This pre-computes the pagination to determine how many pages exist
+ * 
+ * @param elements - All elements sorted by priority
+ * @returns Total number of pages
+ */
+function calculateTotalPages(elements: InteractiveElement[]): number {
+  if (elements.length === 0) {
+    return 0;
+  }
+
+  let remaining = [...elements];
+  let totalPages = 0;
+
+  while (remaining.length > 0) {
+    const selected: InteractiveElement[] = [];
+
+    for (const elem of remaining) {
+      const collides = selected.some(s => elementsCollide(elem, s));
+      if (!collides) {
+        selected.push(elem);
+      }
+    }
+
+    // Safety check: if no elements were selected, break to prevent infinite loop
+    if (selected.length === 0) {
+      break;
+    }
+
+    totalPages++;
+    const selectedIds = new Set(selected.map(e => e.id));
+    remaining = remaining.filter(e => !selectedIds.has(e.id));
+  }
+
+  return totalPages;
+}
+
 
 // ============================================================================
 // Command Queue Management System
@@ -476,7 +619,7 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
 
         const maxElements = command.max_elements || 100;
         const includeHidden = command.include_hidden || false;
-        const result = await extractGroundedElements(activeTabId, maxElements, includeHidden);
+        const result = await extractGroundedElements(activeTabId, conversationId, maxElements, includeHidden);
 
         return {
           success: true,
@@ -829,7 +972,7 @@ return {
                     message: handleResult.newDialog.message,
                     autoAccepted: true,
                   },
-                  screenshot: screenshotResult,
+                  screenshot: await compressIfNeeded(screenshotResult, getCompressionThreshold()),
                 },
                 timestamp: Date.now(),
               };
@@ -872,7 +1015,7 @@ return {
             message: `Dialog handled successfully: ${handleResult.previousDialog.type} ${action}ed`,
             data: {
               handledDialog: handleResult.previousDialog,
-              screenshot: screenshotResult,
+              screenshot: await compressIfNeeded(screenshotResult, getCompressionThreshold()),
             },
             timestamp: Date.now(),
           };
@@ -885,6 +1028,630 @@ return {
             timestamp: Date.now(),
           };
         }
+      }
+
+      case 'highlight_elements': {
+        if (!command.conversation_id) {
+          throw new Error('conversation_id is required for highlight_elements command');
+        }
+        const conversationId = command.conversation_id;
+        const activeTabId = tabManager.getCurrentActiveTabId(conversationId);
+        if (!activeTabId) {
+          throw new Error(`No active tab for conversation ${conversationId}`);
+        }
+        
+        const elementType = command.element_type || 'clickable';
+        const page = command.page || 1;  // 1-indexed page for collision-aware pagination
+        
+        // Build script to detect elements IN PAGE CONTEXT
+        const detectionScript = `
+          (function() {
+            const elementType = "${elementType}";
+            
+            function isVisible(el) {
+              const style = window.getComputedStyle(el);
+              return style.display !== 'none' && 
+                     style.visibility !== 'hidden' && 
+                     style.opacity !== '0';
+            }
+            
+            function isInViewport(el) {
+              const rect = el.getBoundingClientRect();
+              return rect.width > 0 && rect.height > 0 &&
+                     rect.top < window.innerHeight && rect.bottom > 0;
+            }
+            
+            function getBBox(el) {
+              const rect = el.getBoundingClientRect();
+              return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+            }
+            
+            function generateSelector(el) {
+              // Priority 1: ID (most unique)
+              if (el.id) {
+                try {
+                  return '#' + CSS.escape(el.id);
+                } catch (e) {
+                  // Fallback if CSS.escape not available
+                  return '#' + el.id.replace(/([.#\[\],\s:+>~])/g, '\\$1');
+                }
+              }
+              
+              // Priority 2: name attribute
+              const name = el.getAttribute('name');
+              if (name) {
+                try {
+                  return '[name="' + CSS.escape(name) + '"]';
+                } catch (e) {
+                  return '[name="' + name.replace(/"/g, '\\"') + '"]';
+                }
+              }
+              
+              // Priority 3: data-testid
+              const dataTestId = el.getAttribute('data-testid');
+              if (dataTestId) {
+                try {
+                  return '[data-testid="' + CSS.escape(dataTestId) + '"]';
+                } catch (e) {
+                  return '[data-testid="' + dataTestId.replace(/"/g, '\\"') + '"]';
+                }
+              }
+              
+              // Priority 4: aria-label
+              const ariaLabel = el.getAttribute('aria-label');
+              if (ariaLabel) {
+                try {
+                  return '[aria-label="' + CSS.escape(ariaLabel) + '"]';
+                } catch (e) {
+                  return '[aria-label="' + ariaLabel.replace(/"/g, '\\"') + '"]';
+                }
+              }
+              
+              // Priority 5: Build full CSS path with nth-of-type for uniqueness
+              const path = [];
+              let current = el;
+              
+              while (current && current !== document.documentElement) {
+                let selector = current.tagName.toLowerCase();
+                
+                // Add nth-of-type if there are siblings with same tag
+                const parent = current.parentElement;
+                if (parent) {
+                  const siblings = Array.from(parent.children).filter(c => c.tagName === current.tagName);
+                  if (siblings.length > 1) {
+                    const index = siblings.indexOf(current) + 1;
+                    selector += ':nth-of-type(' + index + ')';
+                  }
+                }
+                
+                path.unshift(selector);
+                current = parent;
+                
+                // Stop if path is already unique
+                if (parent) {
+                  try {
+                    const testSelector = path.join(' > ');
+                    if (document.querySelectorAll(testSelector).length === 1) {
+                      break;
+                    }
+                  } catch (e) {
+                    // Invalid selector, continue building path
+                  }
+                }
+              }
+              
+              return path.join(' > ');
+            }
+            
+            function isClickable(el) {
+              const tag = el.tagName.toLowerCase();
+              
+              // Check tag names
+              if (tag === 'a' || tag === 'button') return true;
+              
+              // Check input types
+              if (tag === 'input') {
+                const type = el.type?.toLowerCase();
+                if (type === 'submit' || type === 'button' || type === 'image' || type === 'reset') {
+                  return true;
+                }
+                return false;
+              }
+              
+              // Check attributes
+              if (el.getAttribute('role') === 'button') return true;
+              if (el.hasAttribute('onclick')) return true;
+              if (el.hasAttribute('ng-click')) return true;
+              if (el.hasAttribute('@click')) return true;
+              
+              // Check for cursor: pointer style (broad indicator of interactivity)
+              // But exclude large container elements that might be styled this way
+              const style = window.getComputedStyle(el);
+              if (style.cursor === 'pointer') {
+                // Exclude body/html and very large container elements
+                if (tag === 'body' || tag === 'html') {
+                  return false;
+                }
+                
+                // Check if element is unreasonably large (more than 80% of viewport)
+                const rect = el.getBoundingClientRect();
+                const viewportArea = window.innerWidth * window.innerHeight;
+                const elementArea = rect.width * rect.height;
+                if (elementArea > viewportArea * 0.8) {
+                  return false;
+                }
+                
+                // IMPORTANT: Skip container elements that have clickable children
+                // This prevents parent containers from overlapping with their children
+                if (hasClickableChildren(el)) {
+                  return false;
+                }
+                
+                return true;
+              }
+              
+              return false;
+            }
+            
+            // Check if element contains any clickable children (depth 2)
+            // Only check for explicit interactive elements, not cursor: pointer (which may be inherited)
+            function hasClickableChildren(el) {
+              const children = el.children;
+              
+              for (let i = 0; i < children.length; i++) {
+                const child = children[i];
+                const childTag = child.tagName.toLowerCase();
+                
+                // Only check for explicit interactive elements
+                if (childTag === 'button' || childTag === 'a' || 
+                    childTag === 'input' || childTag === 'select' || childTag === 'textarea') {
+                  return true;
+                }
+                
+                // Check for explicit click attributes (not inherited cursor)
+                if (child.getAttribute('role') === 'button' || 
+                    child.hasAttribute('onclick') || 
+                    child.hasAttribute('ng-click') || 
+                    child.hasAttribute('@click')) {
+                  return true;
+                }
+                
+                // Check grandchildren (depth 2) - only explicit interactive elements
+                const grandchildren = child.children;
+                for (let j = 0; j < grandchildren.length; j++) {
+                  const grandchild = grandchildren[j];
+                  const gcTag = grandchild.tagName.toLowerCase();
+                  if (gcTag === 'button' || gcTag === 'a') {
+                    return true;
+                  }
+                  
+                  if (grandchild.getAttribute('role') === 'button' || 
+                      grandchild.hasAttribute('onclick') || 
+                      grandchild.hasAttribute('ng-click') || 
+                      grandchild.hasAttribute('@click')) {
+                    return true;
+                  }
+                }
+              }
+              
+              return false;
+            }
+            
+            function isScrollable(el) {
+              const style = window.getComputedStyle(el);
+              const overflow = style.overflow + style.overflowY + style.overflowX;
+              return (overflow.includes('auto') || overflow.includes('scroll')) && 
+                     el.scrollHeight > el.clientHeight;
+            }
+            
+            function isInputable(el) {
+              const tag = el.tagName.toLowerCase();
+              if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+              if (el.getAttribute('contenteditable') === 'true') return true;
+              return false;
+            }
+            
+            function isHoverable(el) {
+              const style = window.getComputedStyle(el);
+              if (style.cursor !== 'pointer') return false;
+              
+              // Exclude if element has a clickable ancestor (prevent duplicates)
+              let parent = el.parentElement;
+              while (parent && parent !== document.body) {
+                const parentTag = parent.tagName.toLowerCase();
+                // Check if parent is inherently clickable
+                if (['a', 'button', 'input', 'select', 'textarea'].includes(parentTag)) {
+                  return false;
+                }
+                // Check if parent has click handlers
+                if (parent.getAttribute('role') === 'button' || 
+                    parent.onclick || parent.getAttribute('onclick') ||
+                    parent.getAttribute('ng-click') || parent.getAttribute('@click')) {
+                  return false;
+                }
+                parent = parent.parentElement;
+              }
+              return true;
+            }
+            const counts = { clickable: 0, scrollable: 0, inputable: 0, hoverable: 0 };
+            const elements = [];
+            const allElements = Array.from(document.querySelectorAll('*'));
+            
+            for (const el of allElements) {
+              if (!isVisible(el)) continue;
+              if (!isInViewport(el)) continue;
+              
+              let type = null;
+              if (elementType === 'clickable' && isClickable(el)) type = 'clickable';
+              else if (elementType === 'scrollable' && isScrollable(el)) type = 'scrollable';
+              else if (elementType === 'inputable' && isInputable(el)) type = 'inputable';
+              else if (elementType === 'hoverable' && isHoverable(el)) type = 'hoverable';
+              
+              if (type) {
+                const bbox = getBBox(el);
+                if (bbox.width > 0 && bbox.height > 0) {
+                  elements.push({
+                    id: '',  // Placeholder - will be replaced by hash in background script
+                    type: type,
+                    tagName: el.tagName.toLowerCase(),
+                    selector: generateSelector(el),
+                    html: el.outerHTML ? el.outerHTML.trim() : undefined,
+                    bbox: bbox,
+                    isVisible: true,
+                    isInViewport: true
+                  });
+                  counts[type]++;
+                }
+              }
+            }
+            
+            // Smart sorting: prioritize action buttons over large containers
+            elements.sort((a, b) => {
+              function getPriority(el) {
+                const tag = el.tagName.toLowerCase();
+                const area = el.bbox.width * el.bbox.height;
+                const viewportArea = window.innerWidth * window.innerHeight;
+                const sizeRatio = area / viewportArea;
+                let score = 0;
+                
+                // 1. BUTTON elements get highest priority
+                if (tag === 'button') score += 2000;
+                
+                // 2. Links get medium priority
+                if (tag === 'a') score += 1000;
+                
+                // 3. Penalize large containers (>5% of viewport)
+                if (sizeRatio > 0.05) score -= 1000;
+                
+                // 4. Boost small interactive elements (<0.5% of viewport)
+                if (sizeRatio < 0.005 && sizeRatio > 0.00001) score += 500;
+                
+                // 5. Position: top elements first (lower Y = higher priority)
+                score += Math.max(0, 2000 - el.bbox.y);
+                
+                return score;
+              }
+              return getPriority(b) - getPriority(a);
+            });
+            
+            // Deduplicate: Remove larger elements that mostly contain smaller elements
+            const deduplicated = [];
+            const SKIP_OVERLAP_RATIO = 0.6; // If smaller element overlaps >60% with larger, skip larger
+            
+            for (let i = 0; i < elements.length; i++) {
+              const larger = elements[i];
+              const largerArea = larger.bbox.width * larger.bbox.height;
+              let shouldSkip = false;
+              
+              // Check if this larger element mostly contains any smaller element already added
+              for (let j = i + 1; j < elements.length; j++) {
+                const smaller = elements[j];
+                const smallerArea = smaller.bbox.width * smaller.bbox.height;
+                
+                // Skip if not much smaller (allow 20% size difference)
+                if (smallerArea > largerArea * 0.8) continue;
+                
+                // Calculate overlap
+                const xOverlap = Math.max(0, Math.min(larger.bbox.x + larger.bbox.width, smaller.bbox.x + smaller.bbox.width) - Math.max(larger.bbox.x, smaller.bbox.x));
+                const yOverlap = Math.max(0, Math.min(larger.bbox.y + larger.bbox.height, smaller.bbox.y + smaller.bbox.height) - Math.max(larger.bbox.y, smaller.bbox.y));
+                const overlapArea = xOverlap * yOverlap;
+                
+                // If smaller element is mostly (>60%) inside the larger element, skip the larger
+                if (overlapArea / smallerArea > SKIP_OVERLAP_RATIO) {
+                  shouldSkip = true;
+                  break;
+                }
+              }
+              
+              if (!shouldSkip) {
+                deduplicated.push(larger);
+              }
+            }
+            
+            return { elements: deduplicated, counts };
+          })();
+        `;
+        
+        // Execute detection script in page context
+        const detectionResult = await javascript.executeJavaScript(
+          activeTabId,
+          conversationId,
+          detectionScript,
+          true,  // returnByValue
+          false, // awaitPromise
+          5000   // timeout
+        );
+        
+        if (!detectionResult.success || !detectionResult.result?.value) {
+          return {
+            success: false,
+            error: detectionResult.error || 'Failed to detect elements',
+            timestamp: Date.now(),
+          };
+        }
+        
+        const allElements = detectionResult.result.value.elements || [];
+
+        // Generate hash IDs for all elements (collision-free)
+        const existingHashes = new Set<string>();
+        for (const element of allElements) {
+          const { id } = generateElementId(element.type, element.selector, existingHashes);
+          element.id = id;
+          existingHashes.add(id);
+        }
+        
+        // Collision-aware pagination
+        const paginatedElements = selectCollisionFreePage(allElements, page);
+        
+        // Calculate total pages for pagination info
+        const totalPages = calculateTotalPages(allElements);
+        console.log(`📄 [HighlightElements] Page ${page}/${totalPages}, showing ${paginatedElements.length} of ${allElements.length} elements`);
+        
+        elementCache.storeElements(conversationId, activeTabId, allElements);
+        
+        // Capture screenshot
+        const screenshotResult = await captureScreenshot(activeTabId, conversationId, true, 90, false, 0);
+        
+        // Validate screenshot result
+        if (!screenshotResult?.success || !screenshotResult?.imageData) {
+          return {
+            success: false,
+            error: `Failed to capture screenshot: ${screenshotResult?.success === false ? 'Screenshot command failed' : 'No image data returned'}`,
+            timestamp: Date.now(),
+          };
+        }
+        console.log(`📸 [HighlightElements] Screenshot captured, size: ${screenshotResult.imageData.length} bytes`);
+        
+        // Get device pixel ratio for coordinate scaling
+        const devicePixelRatio = screenshotResult.metadata?.devicePixelRatio || 1;
+        const viewportWidth = screenshotResult.metadata?.viewportWidth || 0;
+        const viewportHeight = screenshotResult.metadata?.viewportHeight || 0;
+        console.log(`📐 [HighlightElements] Device pixel ratio: ${devicePixelRatio}`);
+        console.log(`📐 [HighlightElements] Viewport: ${viewportWidth}x${viewportHeight} CSS pixels`);
+        console.log(`📐 [HighlightElements] Expected image size: ${viewportWidth * devicePixelRatio}x${viewportHeight * devicePixelRatio} device pixels`);
+        
+        // Log first few element bboxes for debugging
+        if (paginatedElements.length > 0) {
+          console.log(`📍 [HighlightElements] First element bbox:`, JSON.stringify(paginatedElements[0].bbox));
+        }
+        
+        // Draw highlights on screenshot (scale coordinates by DPR)
+        const highlightedScreenshot = await drawHighlights(screenshotResult.imageData, paginatedElements, { 
+          scale: devicePixelRatio,
+          viewportWidth,
+          viewportHeight
+        });
+        
+        return {
+          success: true,
+          data: {
+            elements: paginatedElements,
+            totalElements: allElements.length,
+            totalPages: totalPages,
+            page: page,
+            screenshot: await compressIfNeeded(highlightedScreenshot, getCompressionThreshold()),
+          },
+          timestamp: Date.now(),
+        };
+      }
+
+      case 'click_element': {
+        if (!command.conversation_id) throw new Error('conversation_id required');
+        const clickTabId = command.tab_id;
+        if (clickTabId === undefined || clickTabId === null) throw new Error('tab_id is required');
+        
+        const clickResult = await performElementClick(command.conversation_id, command.element_id, clickTabId);
+        const clickScreenshotResult = await captureScreenshot(clickTabId, command.conversation_id, true, 90, false, 0);
+        
+        return {
+          success: clickResult.success,
+          data: { ...clickResult, screenshot: clickScreenshotResult?.imageData },
+          error: clickResult.error,
+          timestamp: Date.now(),
+        };
+      }
+
+      case 'hover_element': {
+        if (!command.conversation_id) throw new Error('conversation_id required');
+        const hoverTabId = command.tab_id;
+        if (hoverTabId === undefined || hoverTabId === null) throw new Error('tab_id is required');
+        
+        const hoverResult = await performElementHover(command.conversation_id, command.element_id, hoverTabId);
+        const hoverScreenshotResult = await captureScreenshot(hoverTabId, command.conversation_id, true, 90, false, 0);
+        
+        return {
+          success: hoverResult.success,
+          data: { ...hoverResult, screenshot: hoverScreenshotResult?.imageData },
+          error: hoverResult.error,
+          timestamp: Date.now(),
+        };
+      }
+
+      case 'scroll_element': {
+        if (!command.conversation_id) throw new Error('conversation_id required');
+        const scrollTabId = command.tab_id;
+        if (scrollTabId === undefined || scrollTabId === null) throw new Error('tab_id is required');
+        
+        // element_id is optional - if not provided, scrolls the entire page
+        const scrollResult = await performElementScroll(command.conversation_id, command.element_id, command.direction || 'down', scrollTabId);
+        const scrollScreenshotResult = await captureScreenshot(scrollTabId, command.conversation_id, true, 90, false, 0);
+        
+        return {
+          success: scrollResult.success,
+          data: { ...scrollResult, screenshot: scrollScreenshotResult?.imageData },
+          error: scrollResult.error,
+          timestamp: Date.now(),
+        };
+      }
+
+      case 'keyboard_input': {
+        if (!command.conversation_id) throw new Error('conversation_id required');
+        const inputTabId = command.tab_id;
+        if (inputTabId === undefined || inputTabId === null) throw new Error('tab_id is required');
+        
+        const inputResult = await performKeyboardInput(command.conversation_id, command.element_id, command.text, inputTabId);
+        const inputScreenshotResult = await captureScreenshot(inputTabId, command.conversation_id, true, 90, false, 0);
+        
+        return {
+          success: inputResult.success,
+          data: { ...inputResult, screenshot: inputScreenshotResult?.imageData },
+          error: inputResult.error,
+          timestamp: Date.now(),
+        };
+      }
+
+      case 'get_element_html': {
+        if (!command.conversation_id) throw new Error('conversation_id required for get_element_html');
+        const conversationId = command.conversation_id;
+        const elementId = command.element_id;
+        
+        if (!elementId) {
+          throw new Error('element_id is required for get_element_html');
+        }
+        
+        // Get current active tab for this conversation
+        const activeTabId = tabManager.getCurrentActiveTabId(conversationId);
+        if (!activeTabId) {
+          throw new Error(`No active tab found for conversation ${conversationId}. Use tab init first.`);
+        }
+        
+        // Look up the element in the cache
+        const element = elementCache.getElementById(conversationId, activeTabId, elementId);
+        
+        if (!element) {
+          console.warn(`⚠️ [GetElementHtml] Element ${elementId} not found in cache for conversation ${conversationId}, tab ${activeTabId}`);
+          return {
+            success: false,
+            error: `Element ${elementId} not found in cache. The element may have been invalidated or the page may have changed. Try highlight_elements again.`,
+            data: { element_id: elementId, html: null },
+            timestamp: Date.now(),
+          };
+        }
+        
+        // Return the cached HTML
+        const html = element.html || '<not available>';
+        console.log(`✅ [GetElementHtml] Retrieved HTML for element ${elementId} from cache (${html.length} chars)`);
+        
+        return {
+          success: true,
+          message: `Retrieved HTML for element ${elementId}`,
+          data: {
+            element_id: elementId,
+            html: html,
+            tagName: element.tagName,
+            type: element.type,
+          },
+          timestamp: Date.now(),
+        };
+      }
+
+      case 'highlight_single_element': {
+        if (!command.conversation_id) {
+          throw new Error('conversation_id is required for highlight_single_element command');
+        }
+        const conversationId = command.conversation_id;
+        const activeTabId = tabManager.getCurrentActiveTabId(conversationId);
+        if (!activeTabId) {
+          throw new Error(`No active tab for conversation ${conversationId}`);
+        }
+        
+        // Get element from cache
+        const element = elementCache.getElementById(conversationId, activeTabId, command.element_id);
+        if (!element) {
+          return {
+            success: false,
+            error: `Element ${command.element_id} not found in cache. Call highlight_elements() first.`,
+            timestamp: Date.now(),
+          };
+        }
+        
+        // ============================================================
+        // Re-fetch current bbox using cached selector (bbox may be stale if page scrolled)
+        // ============================================================
+        const escapedSelector = element.selector.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        const bboxScript = `
+          (function() {
+            const el = document.querySelector("${escapedSelector}");
+            if (!el) return null;
+            const rect = el.getBoundingClientRect();
+            return {
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height
+            };
+          })();
+        `;
+        
+        let freshBbox = element.bbox; // Default to cached bbox
+        try {
+          const bboxResult = await javascript.executeJavaScript(activeTabId, conversationId, bboxScript, true, false, 5000);
+          if (bboxResult.success && bboxResult.result?.value) {
+            const fetchedBbox = bboxResult.result.value as { x: number; y: number; width: number; height: number };
+            freshBbox = fetchedBbox;
+            console.log(`📐 [SingleHighlight] Fresh bbox for ${element.id}:`, JSON.stringify(freshBbox));
+          } else {
+            console.warn(`⚠️ [SingleHighlight] Failed to fetch fresh bbox for ${element.id}:`, {
+              error: bboxResult.error,
+              selector: element.selector,
+              cachedBbox: element.bbox,
+              resultValue: bboxResult.result?.value,
+              rawResult: bboxResult.result,
+            });
+          }
+        } catch (bboxError) {
+          console.warn(`⚠️ [SingleHighlight] Error fetching bbox, using cached:`, bboxError);
+        }
+        
+        // Capture screenshot
+        const screenshotResult = await captureScreenshot(activeTabId, conversationId, true, 80);
+        
+        // Create element with fresh bbox for drawing
+        const elementWithFreshBbox: InteractiveElement = {
+          ...element,
+          bbox: freshBbox,
+        };
+        
+        // Draw single element highlight
+        const highlightedScreenshot = await highlightSingleElement(
+          screenshotResult.imageData,
+          elementWithFreshBbox,
+          {
+            scale: screenshotResult.metadata?.devicePixelRatio || 1,
+            viewportWidth: screenshotResult.metadata?.viewportWidth || 0,
+            viewportHeight: screenshotResult.metadata?.viewportHeight || 0,
+          }
+        );
+        
+        return {
+          success: true,
+          data: {
+            html: element.html || '',
+            screenshot: await compressIfNeeded(highlightedScreenshot, getCompressionThreshold()),
+            elementId: command.element_id,
+          },
+          timestamp: Date.now(),
+        };
       }
 
 default:

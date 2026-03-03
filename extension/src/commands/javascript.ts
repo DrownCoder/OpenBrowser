@@ -16,6 +16,7 @@
  */
 
 import { CdpCommander } from './cdp-commander';
+import { tabManager } from './tab-manager';
 import { debuggerSessionManager } from './debugger-manager';
 import { dialogManager, DialogInfo } from './dialog';
 
@@ -76,6 +77,9 @@ export interface JavaScriptResult {
     url?: string;
     needsDecision: boolean;
   };
+  // Tab creation tracking
+  new_tabs_created?: Array<{tabId: number, url: string, title?: string, loading?: boolean}>;
+
 }
 
 /**
@@ -119,6 +123,14 @@ export async function executeJavaScript(
       },
     };
   }
+
+  // ============================================================
+  // STEP 1.5: Capture current managed tabs for comparison later
+  // ============================================================
+  const tabsBeforeJs = tabManager.getManagedTabsOnly(conversationId);
+  const tabIdsBeforeJs = new Set(tabsBeforeJs.map(tab => tab.tabId));
+  console.log(`📊 [JavaScript] Tab snapshot before JS: ${tabIdsBeforeJs.size} tabs`);
+
 
   // ============================================================
   // STEP 2: Attach debugger and enable domains
@@ -246,6 +258,11 @@ export async function executeJavaScript(
           
           await dialogManager.autoAcceptDialog(tabId);
           
+          // Detect new tabs created
+          await new Promise(resolve => setTimeout(resolve, 500));
+          const tabsAfterAlert = tabManager.getManagedTabsOnly(conversationId);
+          const newTabsAlert = tabsAfterAlert.filter(tab => !tabIdsBeforeJs.has(tab.tabId));
+          
           return {
             success: true,
             message: 'Alert dialog auto-accepted',
@@ -257,10 +274,21 @@ export async function executeJavaScript(
               url: dialogInfo.url,
               needsDecision: false,
             },
+            new_tabs_created: newTabsAlert.length > 0 ? newTabsAlert.map(tab => ({
+              tabId: tab.tabId,
+              url: tab.url,
+              title: tab.title,
+              loading: !tab.url || tab.url === 'chrome://newtab/',
+            })) : undefined,
           };
         }
 
         // For confirm/prompt/beforeunload, return dialog info and wait for handle_dialog
+        // Detect new tabs created
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const tabsAfterDialog = tabManager.getManagedTabsOnly(conversationId);
+        const newTabsDialog = tabsAfterDialog.filter(tab => !tabIdsBeforeJs.has(tab.tabId));
+        
         return {
           success: true,
           message: `Dialog opened: ${dialogInfo.dialogType}. Use handle_dialog action to respond.`,
@@ -272,6 +300,12 @@ export async function executeJavaScript(
             url: dialogInfo.url,
             needsDecision: true,
           },
+          new_tabs_created: newTabsDialog.length > 0 ? newTabsDialog.map(tab => ({
+            tabId: tab.tabId,
+            url: tab.url,
+            title: tab.title,
+            loading: !tab.url || tab.url === 'chrome://newtab/',
+          })) : undefined,
         };
       }
 
@@ -328,6 +362,23 @@ export async function executeJavaScript(
             JSON.stringify(result.result.value).substring(0, 200));
         } else {
           console.warn('⚠️ [JavaScript] No result returned from Runtime.evaluate');
+        }
+
+        // ============================================================
+        // STEP 4: Detect new tabs created by JavaScript
+        // ============================================================
+        await new Promise(resolve => setTimeout(resolve, 500)); // Wait for onCreated listener
+        const tabsAfterJs = tabManager.getManagedTabsOnly(conversationId);
+        const newTabs = tabsAfterJs.filter(tab => !tabIdsBeforeJs.has(tab.tabId));
+        
+        if (newTabs.length > 0) {
+          console.log(`📊 [JavaScript] Detected ${newTabs.length} new tabs created`);
+          response.new_tabs_created = newTabs.map(tab => ({
+            tabId: tab.tabId,
+            url: tab.url,
+            title: tab.title,
+            loading: !tab.url || tab.url === 'chrome://newtab/',
+          }));
         }
 
         return response;

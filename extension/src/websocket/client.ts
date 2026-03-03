@@ -374,7 +374,7 @@ export class WebSocketClient {
   /**
    * Schedule a normal reconnection with exponential backoff
    */
-  private scheduleNormalReconnection(event: CloseEvent): void {
+  private scheduleNormalReconnection(_event: CloseEvent): void {
     this.reconnectAttempts++;
     
     // Exponential backoff: 3s, 6s, 12s, 24s, 48s... capped at 60s

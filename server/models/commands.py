@@ -226,6 +226,106 @@ class GetAccessibilityTreeCommand(BaseCommand):
         description="Maximum number of elements to return (1-500, default 50)"
     )
 
+
+class HighlightElementsCommand(BaseCommand):
+    """Highlight interactive elements on the page for visual selection
+    
+    Uses collision-aware pagination to ensure no overlapping highlights.
+    Each page returns a maximal set of non-colliding elements.
+    Only one element type per call for stable, predictable pagination.
+    """
+    type: Literal["highlight_elements"] = "highlight_elements"
+    element_type: Optional[str] = Field(
+        default="clickable",
+        description="Single element type to highlight: 'clickable', 'scrollable', 'inputable', or 'hoverable'"
+    )
+    page: Optional[int] = Field(
+        default=1,
+        ge=1,
+        description="Page number for collision-aware pagination (1-indexed)"
+    )
+    """Highlight interactive elements on the page for visual selection
+    
+    Uses collision-aware pagination to ensure no overlapping highlights.
+    Each page returns a maximal set of non-colliding elements.
+    """
+    type: Literal["highlight_elements"] = "highlight_elements"
+    element_types: Optional[List[str]] = Field(
+        default=["clickable"],
+        description="Types of elements to highlight (e.g., 'clickable', 'input', 'link')"
+    )
+    page: Optional[int] = Field(
+        default=1,
+        ge=1,
+        description="Page number for collision-aware pagination (1-indexed)"
+    )
+
+class ClickElementCommand(BaseCommand):
+    """Click a highlighted element by its ID"""
+    type: Literal["click_element"] = "click_element"
+    element_id: str = Field(
+        description="Element ID from highlight response"
+    )
+    tab_id: int = Field(..., description="Target tab ID")
+
+
+class HoverElementCommand(BaseCommand):
+    """Hover over a highlighted element by its ID"""
+    type: Literal["hover_element"] = "hover_element"
+    element_id: str = Field(
+        description="Element ID from highlight response"
+    )
+    tab_id: int = Field(..., description="Target tab ID")
+
+
+class ScrollElementCommand(BaseCommand):
+    """Scroll a highlighted element in a direction, or the entire page if element_id not provided"""
+    type: Literal["scroll_element"] = "scroll_element"
+    element_id: Optional[str] = Field(
+        default=None,
+        description="Element ID from highlight response. If not provided, scrolls the entire page"
+    )
+    direction: str = Field(
+        default="down",
+        description="Scroll direction: 'up', 'down', 'left', 'right'"
+    )
+    tab_id: int = Field(..., description="Target tab ID")
+
+class KeyboardInputCommand(BaseCommand):
+    """Type text into a highlighted element by its ID"""
+    type: Literal["keyboard_input"] = "keyboard_input"
+    element_id: str = Field(
+        description="Element ID from highlight response"
+    )
+    text: str = Field(
+        description="Text to input into the element"
+    )
+    tab_id: int = Field(..., description="Target tab ID")
+
+
+class GetElementHtmlCommand(BaseCommand):
+    """Get the full HTML of a cached element by its ID from extension's elementCache"""
+    type: Literal["get_element_html"] = "get_element_html"
+    element_id: str = Field(
+        description="Element ID from highlight response"
+    )
+    tab_id: Optional[int] = Field(
+        default=None,
+        description="Target tab ID (optional, uses active tab if not provided)"
+    )
+
+
+class HighlightSingleElementCommand(BaseCommand):
+    """Highlight a single element with visual confirmation for 2PC flow"""
+    type: Literal["highlight_single_element"] = "highlight_single_element"
+    element_id: str = Field(
+        description="Element ID from highlight response"
+    )
+    tab_id: Optional[int] = Field(
+        default=None,
+        description="Target tab ID (optional, uses active tab if not provided)"
+    )
+
 class CommandResponse(BaseModel):
     """Response from command execution"""
     success: bool
@@ -267,6 +367,13 @@ Command = Union[
     HandleDialogCommand,
     GetGroundedElementsCommand,
     GetAccessibilityTreeCommand,
+    HighlightElementsCommand,
+    ClickElementCommand,
+    HoverElementCommand,
+    ScrollElementCommand,
+    KeyboardInputCommand,
+    GetElementHtmlCommand |
+    HighlightSingleElementCommand
 ]
 
 
@@ -291,6 +398,13 @@ def parse_command(data: dict) -> Command:
         "handle_dialog": HandleDialogCommand,
         "get_grounded_elements": GetGroundedElementsCommand,
         "get_accessibility_tree": GetAccessibilityTreeCommand,
+        "highlight_elements": HighlightElementsCommand,
+        "click_element": ClickElementCommand,
+        "hover_element": HoverElementCommand,
+        "scroll_element": ScrollElementCommand,
+        "keyboard_input": KeyboardInputCommand,
+        "get_element_html": GetElementHtmlCommand,
+        "highlight_single_element": HighlightSingleElementCommand,
     }
     
     if cmd_type not in command_map:

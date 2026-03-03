@@ -23,64 +23,45 @@ logger = logging.getLogger(__name__)
 
 from server.core.processor import command_processor
 from server.models.commands import (
-    ScreenshotCommand,
     TabCommand, GetTabsCommand, JavascriptExecuteCommand,
     HandleDialogCommand, DialogAction,
-    TabAction
+    TabAction, ScreenshotCommand,
+    HighlightElementsCommand, ClickElementCommand, HoverElementCommand,
+    ScrollElementCommand, KeyboardInputCommand,
+    GetElementHtmlCommand, HighlightSingleElementCommand
 )
 
 logger = logging.getLogger(__name__)
 
 
 class OpenBrowserAction(Action):
-    """Browser automation action with unified parameter system"""
-    type: str = Field(description="Type of browser operation: 'javascript_execute', 'tab', 'handle_dialog', 'view'")
-    # JavaScript execution parameters
-    script: Optional[str] = Field(default=None, description="JavaScript code to execute for javascript_execute")
+    """Browser automation action with visual-first interaction support"""
+    
+    type: str = Field(
+        description="Type of browser operation: 'tab', 'highlight_elements', 'click_element', 'hover_element', 'scroll_element', 'keyboard_input', 'handle_dialog', 'javascript_execute', 'confirm_click_element', 'confirm_hover_element', 'confirm_scroll_element', 'confirm_keyboard_input'"
+    )
+    
     # Tab operation parameters
-    action: Optional[str] = Field(default=None, description="Action for tab operations: 'init', 'open', 'close', 'switch', 'list', 'refresh'")
-    url: Optional[str] = Field(default=None, description="URL for tab operations (required for init and open)")
-    tab_id: Optional[int] = Field(default=None, description="Tab ID for tab operations (required for close, switch, refresh)")
-    # Dialog handling parameters
-    dialog_action: Optional[str] = Field(
-        default=None, 
-        description="Action for dialog handling: 'accept' or 'dismiss'"
-    )
-    prompt_text: Optional[str] = Field(
-        default=None,
-        description="Text to enter for prompt dialogs (only for handle_dialog with prompt)"
-    )
-    max_a11y_elements: Optional[int] = Field(
-        default=100,
-        description="Maximum number of accessible elements to return (default: 100). Set higher if you need more elements."
-    )
+    action: Optional[str] = Field(default=None, description="Tab action: init/open/close/switch/list/refresh")
+    url: Optional[str] = Field(default=None, description="URL for tab operations")
+    tab_id: Optional[int] = Field(default=None, description="Tab ID for operations")
+    
+    # Visual interaction parameters
+    element_type: Optional[str] = Field(default="clickable", description="Single element type: clickable/scrollable/inputable/hoverable")
+    element_id: Optional[str] = Field(default=None, description="Element ID from highlight response")
+    page: Optional[int] = Field(default=1, ge=1, description="Page number for pagination (1-indexed)")
+    # Scroll parameters
+    direction: Optional[str] = Field(default="down", description="Scroll direction: up/down/left/right")
+    
+    # Keyboard input parameters
+    text: Optional[str] = Field(default=None, description="Text to input")
+    
+    # Dialog handling
+    dialog_action: Optional[str] = Field(default=None, description="Dialog action: accept/dismiss")
+    prompt_text: Optional[str] = Field(default=None, description="Text for prompt dialogs")
 
-# --- Supported Action Types and Their Parameters ---
-"""
-Supported action types and their parameters:
-
-1. javascript_execute - Execute JavaScript code in current tab
-   Parameters: {
-     "type": "javascript_execute",
-     "script": str  # JavaScript code to execute
-   }
-
-2. tab - Tab management operations
-   Parameters: {
-     "type": "tab",
-     "action": str,  # "init", "open", "close", "switch", "list", "refresh"
-     "url": str (optional),  # URL for open/init actions
-     "tab_id": int (optional)  # Tab ID for close, switch, and refresh actions
-   }
-
-3. view - Capture screenshot to see current page state
-   Parameters: {
-     "type": "view"  # No additional parameters needed
-   }
-"""
-
-
-# --- Observation ---
+    # JavaScript execution (fallback)
+    script: Optional[str] = Field(default=None, description="JavaScript code (fallback)")
 
 class OpenBrowserObservation(Observation):
     """Observation returned by OpenBrowserTool after each action"""
@@ -89,14 +70,10 @@ class OpenBrowserObservation(Observation):
     message: Optional[str] = Field(default=None, description="Result message")
     error: Optional[str] = Field(default=None, description="Error message if failed")
     tabs: List[Dict[str, Any]] = Field(default_factory=list, description="List of current tabs")
-    mouse_position: Optional[Dict[str, int]] = Field(
-        default=None,
-        description="Current mouse position in preset coordinate system (x, y)"
-    )
     screenshot_data_url: Optional[str] = Field(
         default=None,
         description="Screenshot as data URL (base64 encoded PNG, 1280x720 pixels)"
-)
+    )
     javascript_result: Optional[Any] = Field(
         default=None,
         description="Result of JavaScript execution (if action was javascript_execute)"
@@ -114,11 +91,29 @@ class OpenBrowserObservation(Observation):
         default=None,
         description="Dialog information if a dialog is open (type, message, needsDecision)"
     )
-    a11y_elements: Optional[List[Dict[str, Any]]] = Field(
+    # Tab creation tracking
+    new_tabs_created: Optional[List[Dict[str, Any]]] = Field(
         default=None,
-        description="List of accessible interactive elements with selectors"
+        description="List of new tabs created during operation (tabId, url, title, loading)"
     )
-
+    # Visual interaction results
+    highlighted_elements: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="List of elements highlighted on the screenshot"
+    )
+    total_elements: Optional[int] = Field(
+        default=None,
+        description="Total number of elements found"
+    )
+    element_id: Optional[str] = Field(
+        default=None,
+        description="ID of the element that was acted upon"
+    )
+    # 2PC Confirmation fields
+    pending_confirmation: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Pending confirmation information for 2PC flow"
+    )
     @property
     def to_llm_content(self) -> Sequence[TextContent | ImageContent]:
         """Convert observation to LLM content format"""
@@ -249,34 +244,77 @@ class OpenBrowserObservation(Observation):
                 text_parts.append("**Note**: This dialog was auto-accepted (no decision needed).")
             text_parts.append("")
         
-        if getattr(self, "a11y_elements", None) is not None:
-            text_parts.append("## Accessible Elements")
+        # New Tabs Created Section (if applicable)
+        if self.new_tabs_created:
+            text_parts.append("## 🗂️ New Tabs Created")
             text_parts.append("")
-            elements = self.a11y_elements
-            text_parts.append(f"**Found {len(elements)} interactive elements:**")
-            text_parts.append("")
-            for el in elements[:100]:
-                idx_info = f" (idx:{el.get('index')})" if el.get('index') is not None else ""
-                extra_info = []
-                if el.get('href'):
-                    extra_info.append(f"href={el.get('href')[:60]}")
-                if el.get('placeholder'):
-                    extra_info.append(f"placeholder=\"{el.get('placeholder')[:30]}\"")
-                if el.get('value') and el.get('role') in ('textbox', 'searchbox'):
-                    extra_info.append(f"value=\"{el.get('value')[:30]}\"")
-                if el.get('checked') is not None:
-                    extra_info.append(f"checked={el.get('checked')}")
-                if el.get('disabled'):
-                    extra_info.append("disabled")
-                extra_str = f" [{', '.join(extra_info)}]" if extra_info else ""
-                text_parts.append(f"  - [{el.get('role')}] \"{el.get('name')}\" → {el.get('selector')}{idx_info}{extra_str}")
-            if len(elements) > 100:
-                text_parts.append(f"  ... and {len(elements) - 100} more (set max_a11y_elements to see all)")
-            else:
-                text_parts.append(f" (if you find accessible elements unhelpful, set max_a11y_elements to 0 to ignore all)")
+            for tab in self.new_tabs_created:
+                tab_id = tab.get('tabId', 'unknown')
+                url = tab.get('url', 'No URL')
+                title = tab.get('title', '')
+                loading = tab.get('loading', False)
+                
+                text_parts.append(f"**Tab [{tab_id}]**: {url}")
+                if title:
+                    text_parts.append(f"   Title: {title}")
+                if loading:
+                    text_parts.append("   Loading: Yes")
             text_parts.append("")
         
-        # Browser State Section
+        # Highlighted Elements Section (if applicable)
+        if self.highlighted_elements:
+            text_parts.append("## Highlighted Elements")
+            text_parts.append("")
+            text_parts.append(f"**Total Elements**: {self.total_elements if self.total_elements is not None else len(self.highlighted_elements)}")
+            text_parts.append("")
+            # Format: id: <html> for each element
+            element_descriptions = []
+            for el in self.highlighted_elements:
+                el_id = el.get('id', 'unknown')
+                html = (el.get('html') or '').strip()
+                if len(html) > 200:
+                    html = html[:190] + '...(Truncated)'
+                if html:
+                    element_descriptions.append(f"{el_id}: {html}")
+                else:
+                    tag = el.get('tagName', '').upper()
+                    element_descriptions.append(f"{el_id} ({tag})")
+            text_parts.append('\n'.join(element_descriptions))
+            text_parts.append("")
+        
+        # Pending Confirmation Section (2PC)
+        if self.pending_confirmation:
+            text_parts.append("## ⚠️ Action Pending Confirmation")
+            text_parts.append("")
+            text_parts.append("**IMPORTANT**: This action requires confirmation before execution.")
+            text_parts.append("")
+            text_parts.append(f"**Element ID**: {self.pending_confirmation.get('element_id', 'unknown')}")
+            text_parts.append(f"**Action Type**: {self.pending_confirmation.get('action_type', 'unknown')}")
+            text_parts.append("")
+            text_parts.append("**Full HTML**:")
+            text_parts.append("```html")
+            full_html = self.pending_confirmation.get('full_html', '<not available>')
+            # Truncate if too long
+            if len(full_html) > 5000:
+                full_html = full_html[:5000] + "\n... (truncated)"
+            text_parts.append(full_html)
+            text_parts.append("```")
+            text_parts.append("")
+            text_parts.append("**To confirm this action, use:**")
+            action_type = self.pending_confirmation.get('action_type', '')
+            element_id = self.pending_confirmation.get('element_id', '')
+            confirm_cmd = f'{{"type": "confirm_{action_type}_element", "element_id": "{element_id}", "tab_id": CURRENT_TAB_ID}}'
+            text_parts.append(f"```json\n{confirm_cmd}\n```")
+            text_parts.append("")
+            text_parts.append("**Or choose a different action to cancel this pending confirmation.**")
+            text_parts.append("")
+        
+        if self.element_id:
+            text_parts.append("## Element Action Result")
+            text_parts.append("")
+            text_parts.append(f"**Element ID**: {self.element_id}")
+            text_parts.append("")
+        
         # Browser State Section
         if self.tabs:
             text_parts.append("## Browser State")
@@ -291,15 +329,6 @@ class OpenBrowserObservation(Observation):
                 tab_id = tab.get('tabId') or tab.get('id', 'unknown')
                 text_parts.append(f"{i}. {active_marker} **[{tab_id}]** {title}")
                 text_parts.append(f"   URL: {url}")
-            text_parts.append("")
-        
-        if self.mouse_position:
-            text_parts.append("## Cursor Position")
-            text_parts.append("")
-            x = self.mouse_position['x']
-            y = self.mouse_position['y']
-            text_parts.append(f"**Coordinates**: ({x}, {y})")
-            text_parts.append(f"**System**: Preset coordinate system (center: 0,0; right: +X; down: +Y)")
             text_parts.append("")
         
         text_content = "\n".join(text_parts)
@@ -349,7 +378,8 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
     
     def __init__(self):
         self.conversation_id = None
-
+        # 2PC state: pending confirmations per conversation
+        self.pending_confirmations: Dict[str, Dict[str, Any]] = {}
     
     async def _execute_command(self, command) -> Any:
         """Execute command with conversation context"""
@@ -363,6 +393,53 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
         logger.debug(f"DEBUG: _execute_command result: success={result.success if result else 'None'}")
         return result
     
+    def _get_element_full_html(self, element_id: str) -> tuple[str, Optional[str]]:
+        """Get the full HTML of an element from extension's elementCache AND a screenshot with highlight.
+        
+        This uses HighlightSingleElementCommand to get both HTML and screenshot.
+        Returns a tuple of (html, screenshot_data_url).
+        """
+        command = HighlightSingleElementCommand(
+            element_id=element_id,
+            conversation_id=self.conversation_id
+        )
+        result_dict = self._execute_command_sync(command)
+        
+        if result_dict and result_dict.get('success'):
+            data = result_dict.get('data', {})
+            html = data.get('html') if isinstance(data, dict) else None
+            screenshot = data.get('screenshot') if isinstance(data, dict) else None
+            
+            if html and isinstance(html, str):
+                html = html[:10000] + ('...' if len(html) > 10000 else '')
+            
+            return (html or "<element not found in cache>", screenshot)
+        else:
+            logger.warning(f"Unexpected HighlightSingleElementCommand response: {result_dict}")
+        
+        logger.warning(f"Element {element_id} not found in cache for conversation {self.conversation_id}")
+        return ("<element not found in cache>", None)
+
+    
+    def _clear_pending_confirmation(self):
+        """Clear pending confirmation for current conversation"""
+        if self.conversation_id in self.pending_confirmations:
+            del self.pending_confirmations[self.conversation_id]
+    
+    def _set_pending_confirmation(self, element_id: str, action_type: str, full_html: str, extra_data: Dict[str, Any] = None, screenshot_data_url: Optional[str] = None):
+        """Set pending confirmation for current conversation"""
+        self.pending_confirmations[self.conversation_id] = {
+            'element_id': element_id,
+            'action_type': action_type,
+            'full_html': full_html,
+            'screenshot_data_url': screenshot_data_url,
+            'extra_data': extra_data or {}
+        }
+    
+    def _get_pending_confirmation(self) -> Optional[Dict[str, Any]]:
+        """Get pending confirmation for current conversation"""
+        return self.pending_confirmations.get(self.conversation_id)
+    
     def _execute_action_sync(self, action: OpenBrowserAction) -> OpenBrowserObservation:
         """Execute a browser action synchronously via HTTP"""
         logger.debug(f"DEBUG: _execute_action_sync called with action_type={action.type}")
@@ -375,6 +452,7 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
             message = ""
             javascript_result = None  # Store JavaScript execution result
             console_output = None  # Store console output from JavaScript execution
+            screenshot_data_url = None
             
             if action_type == "tab":
                 # Validate required parameters
@@ -422,6 +500,7 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                     message = "Listed tabs"
                 else:
                     message = f"Tab action: {action_str}"
+
                     
             elif action_type == "javascript_execute":
                 # Validate required parameters
@@ -495,48 +574,192 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 result_dict = self._execute_command_sync(command)
                 
                 message = f"Dialog handled: {dialog_action_str}"
+
+            elif action_type == "highlight_elements":
+                # Single element type for stable collision-aware pagination
+                element_type = action.element_type or "clickable"
+                page = action.page or 1
+                command = HighlightElementsCommand(
+                    element_type=element_type,
+                    page=page,
+                    conversation_id=self.conversation_id
+                )
+                result_dict = self._execute_command_sync(command)
                 
-            elif action_type == "view":
-                # View action: capture screenshot to see current page state
-                # No server command needed - just capture screenshot
-                result_dict = None
-                message = "Captured page view"
+                # Check if command succeeded before accessing result data
+                if result_dict is None:
+                    raise RuntimeError("Chrome extension did not respond to highlight_elements command")
+                if not result_dict.get('success', False):
+                    ext_error = result_dict.get('error', 'Unknown error from Chrome extension')
+                    raise RuntimeError(f"Chrome extension failed to highlight elements: {ext_error}")
                 
+                elements = result_dict.get('data', {}).get('elements', [])
+                total_elements = result_dict.get('data', {}).get('totalElements', 0)
+                total_pages = result_dict.get('data', {}).get('totalPages', 1)
+                current_page = result_dict.get('data', {}).get('page', 1)
+                message = f"Found {len(elements)} {element_type} elements on page {current_page}/{total_pages} (total: {total_elements})"
+            # ========== 2PC Confirm Operations ==========
+            elif action_type == "confirm_click_element":
+                pending = self._get_pending_confirmation()
+                if not pending or pending['action_type'] != 'click':
+                    raise ValueError("No pending click confirmation found. Please call click_element first.")
+                if pending['element_id'] != action.element_id:
+                    raise ValueError(f"Element ID mismatch. Expected {pending['element_id']}, got {action.element_id}")
+                # Execute actual click
+                command = ClickElementCommand(
+                    element_id=action.element_id,
+                    conversation_id=self.conversation_id,
+                    tab_id=action.tab_id
+                )
+                result_dict = self._execute_command_sync(command)
+                if not result_dict or not result_dict.get('success'):
+                    ext_error = result_dict.get('error', 'Unknown error') if result_dict else 'No response'
+                    raise RuntimeError(f"Failed to click element: {ext_error}")
+                message = f"Confirmed and clicked element: {action.element_id}"
+                self._clear_pending_confirmation()
+                
+            elif action_type == "confirm_hover_element":
+                pending = self._get_pending_confirmation()
+                if not pending or pending['action_type'] != 'hover':
+                    raise ValueError("No pending hover confirmation found. Please call hover_element first.")
+                if pending['element_id'] != action.element_id:
+                    raise ValueError(f"Element ID mismatch. Expected {pending['element_id']}, got {action.element_id}")
+                command = HoverElementCommand(
+                    element_id=action.element_id,
+                    conversation_id=self.conversation_id,
+                    tab_id=action.tab_id
+                )
+                result_dict = self._execute_command_sync(command)
+                if not result_dict or not result_dict.get('success'):
+                    ext_error = result_dict.get('error', 'Unknown error') if result_dict else 'No response'
+                    raise RuntimeError(f"Failed to hover element: {ext_error}")
+                message = f"Confirmed and hovered element: {action.element_id}"
+                self._clear_pending_confirmation()
+                
+            elif action_type == "confirm_scroll_element":
+                pending = self._get_pending_confirmation()
+                if not pending or pending['action_type'] != 'scroll':
+                    raise ValueError("No pending scroll confirmation found. Please call scroll_element first.")
+                if pending['element_id'] != action.element_id:
+                    raise ValueError(f"Element ID mismatch. Expected {pending['element_id']}, got {action.element_id}")
+                command = ScrollElementCommand(
+                    element_id=action.element_id,
+                    direction=pending['extra_data'].get('direction', 'down'),
+                    conversation_id=self.conversation_id,
+                    tab_id=action.tab_id
+                )
+                result_dict = self._execute_command_sync(command)
+                if not result_dict or not result_dict.get('success'):
+                    ext_error = result_dict.get('error', 'Unknown error') if result_dict else 'No response'
+                    raise RuntimeError(f"Failed to scroll element: {ext_error}")
+                message = f"Confirmed and scrolled element: {action.element_id}"
+                self._clear_pending_confirmation()
+                
+            elif action_type == "confirm_keyboard_input":
+                pending = self._get_pending_confirmation()
+                if not pending or pending['action_type'] != 'keyboard_input':
+                    raise ValueError("No pending keyboard_input confirmation found. Please call keyboard_input first.")
+                if pending['element_id'] != action.element_id:
+                    raise ValueError(f"Element ID mismatch. Expected {pending['element_id']}, got {action.element_id}")
+                command = KeyboardInputCommand(
+                    element_id=action.element_id,
+                    text=pending['extra_data'].get('text', ''),
+                    conversation_id=self.conversation_id,
+                    tab_id=action.tab_id
+                )
+                result_dict = self._execute_command_sync(command)
+                if not result_dict or not result_dict.get('success'):
+                    ext_error = result_dict.get('error', 'Unknown error') if result_dict else 'No response'
+                    raise RuntimeError(f"Failed to input text: {ext_error}")
+                message = f"Confirmed and input text to element: {action.element_id}"
+                self._clear_pending_confirmation()
+            
+            # ========== 2PC Phase 1: Actions Requiring Confirmation ==========
+            elif action_type == "click_element":
+                if not action.element_id:
+                    raise ValueError("click_element requires element_id parameter")
+                # Get full HTML and screenshot for confirmation
+                full_html, screenshot = self._get_element_full_html(action.element_id)
+                # Store pending confirmation
+                self._set_pending_confirmation(
+                    element_id=action.element_id,
+                    action_type='click',
+                    full_html=full_html,
+                    extra_data={'tab_id': action.tab_id},
+                    screenshot_data_url=screenshot
+                )
+                screenshot_data_url = screenshot
+                # Return pending confirmation (no actual execution yet)
+                result_dict = {'success': True, 'data': {}}
+                message = f"Click action pending confirmation for element: {action.element_id}"
+                
+            elif action_type == "hover_element":
+                if not action.element_id:
+                    raise ValueError("hover_element requires element_id parameter")
+                full_html, screenshot = self._get_element_full_html(action.element_id)
+                self._set_pending_confirmation(
+                    element_id=action.element_id,
+                    action_type='hover',
+                    full_html=full_html,
+                    extra_data={'tab_id': action.tab_id},
+                    screenshot_data_url=screenshot
+                )
+                screenshot_data_url = screenshot
+                result_dict = {'success': True, 'data': {}}
+                message = f"Hover action pending confirmation for element: {action.element_id}"
+                
+            elif action_type == "scroll_element":
+                if action.element_id:
+                    full_html, screenshot = self._get_element_full_html(action.element_id)
+                    self._set_pending_confirmation(
+                        element_id=action.element_id or '',
+                        action_type='scroll',
+                        full_html=full_html,
+                        extra_data={'direction': action.direction or 'down', 'tab_id': action.tab_id},
+                        screenshot_data_url=screenshot
+                    )
+                    screenshot_data_url = screenshot
+                    result_dict = {'success': True, 'data': {}}
+                    message = f"Scroll action pending confirmation for element: {action.element_id or 'page'}"
+                else:
+                    # directly execute for page scroll
+                    command = ScrollElementCommand(
+                        direction=action.direction,
+                        conversation_id=self.conversation_id,
+                        tab_id=action.tab_id
+                    )
+                    result_dict = self._execute_command_sync(command)
+                    if not result_dict or not result_dict.get('success'):
+                        ext_error = result_dict.get('error', 'Unknown error') if result_dict else 'No response'
+                        raise RuntimeError(f"Failed to scroll element: {ext_error}")
+                    message = f"Scrolled page: {action.direction}"
+            elif action_type == "keyboard_input":
+                if not action.element_id:
+                    raise ValueError("keyboard_input requires element_id parameter")
+                if not action.text:
+                    raise ValueError("keyboard_input requires text parameter")
+                full_html, screenshot = self._get_element_full_html(action.element_id)
+                self._set_pending_confirmation(
+                    element_id=action.element_id,
+                    action_type='keyboard_input',
+                    full_html=full_html,
+                    extra_data={'text': action.text, 'tab_id': action.tab_id},
+                    screenshot_data_url=screenshot
+                )
+                screenshot_data_url = screenshot
+                result_dict = {'success': True, 'data': {}}
+                message = f"Keyboard input action pending confirmation for element: {action.element_id}"
             else:
                 raise ValueError(f"Unknown action type: {action_type}")
             
+            # ========== Clear pending confirmation for non-confirm operations ==========
+            # If action is not a confirm action and not a 2PC action, clear pending state
+            if not action_type.startswith('confirm_') and action_type not in ['click_element', 'hover_element', 'scroll_element', 'keyboard_input']:
+                self._clear_pending_confirmation()
+            
             # Determine what data to collect based on action type
-            tabs_data = []
-            mouse_position = None
-            screenshot_data_url = None
-            
-            # Only capture screenshot for 'view' action
-            if action_type == "view":
-                logger.debug(f"DEBUG: Getting screenshot for view action (sync)...")
-                # Wait for page to render
-                time.sleep(1)
-                screenshot_result = self._get_screenshot_sync()
-                logger.debug(f"DEBUG: screenshot_result: success={screenshot_result.get('success')}, data keys={list(screenshot_result.get('data', {}).keys()) if screenshot_result.get('data') else 'None'}")
-                
-                if screenshot_result.get('success') and screenshot_result.get('data'):
-                    # Try to extract image data
-                    image_data = None
-                    data = screenshot_result['data']
-                    if 'imageData' in data:
-                        image_data = data['imageData']
-                    elif 'image_data' in data:
-                        image_data = data['image_data']
-                    
-                    if image_data:
-                        # Ensure it's a data URL
-                        if isinstance(image_data, str) and image_data.startswith('data:image/'):
-                            screenshot_data_url = image_data
-                        elif isinstance(image_data, str):
-                            # Convert base64 to data URL
-                            screenshot_data_url = f"data:image/png;base64,{image_data}"
-                        else:
-                            logger.debug(f"DEBUG: Unexpected image_data type: {type(image_data)}")
-            
+            tabs_data = []            
+
             # Collect tabs data only for tab operations
             if action_type == "tab":
                 logger.debug(f"DEBUG: Getting tabs after tab action (sync)...")
@@ -545,13 +768,42 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 
                 if tabs_result.get('success') and tabs_result.get('data') and 'tabs' in tabs_result['data']:
                     tabs_data = tabs_result['data']['tabs']
+
+                # Capture screenshot after tab operations (except list)
+                if action_str != "list":
+                    try:
+                        screenshot_cmd = ScreenshotCommand(
+                            conversation_id=self.conversation_id
+                        )
+                        screenshot_result = self._execute_command_sync(screenshot_cmd)
+                        if screenshot_result and screenshot_result.get('success'):
+                            screenshot_data_url = screenshot_result.get('data', {}).get('screenshot')
+                            logger.debug(f"DEBUG: Captured screenshot after tab '{action_str}', length={len(screenshot_data_url) if screenshot_data_url else 0}")
+                    except Exception as e:
+                        logger.warning(f"Failed to capture screenshot after tab action: {e}")
             
+            # Capture screenshot after javascript_execute (if no dialog opened)
+            if action_type == "javascript_execute" and result_dict:
+                if not result_dict.get('dialog_opened', False):
+                    try:
+                        screenshot_cmd = ScreenshotCommand(
+                            conversation_id=self.conversation_id
+                        )
+                        screenshot_result = self._execute_command_sync(screenshot_cmd)
+                        if screenshot_result and screenshot_result.get('success'):
+                            screenshot_data_url = screenshot_result.get('data', {}).get('screenshot')
+                            logger.debug(f"DEBUG: Captured screenshot after javascript_execute, length={len(screenshot_data_url) if screenshot_data_url else 0}")
+                    except Exception as e:
+                        logger.warning(f"Failed to capture screenshot after javascript_execute: {e}")
+
             # Extract success and dialog info from result_dict
-            success = True  # Default to True for view action
+            success = True  # Default to True
             error = None
             dialog_opened = None
             dialog = None
-            a11y_elements = None
+            highlighted_elements = None
+            total_elements = None
+            new_tabs_created = None
             
             if result_dict:
                 success = result_dict.get('success', False)
@@ -572,22 +824,40 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                         else:
                             message = f"Dialog auto-accepted: {dialog.get('type')} (\"{dialog.get('message')}\")"
                 
-                # Extract a11y_elements if present
                 if 'data' in result_dict and isinstance(result_dict['data'], dict):
-                    a11y_elements = result_dict['data'].get('a11y_elements')
+                    # Extract screenshot from visual interaction commands
+                    # highlight_elements returns data.screenshot (highlighted image)
+                    # click/hover/scroll/keyboard_input return data.screenshot
+                    if 'screenshot' in result_dict['data']:
+                        screenshot_data_url = result_dict['data']['screenshot']
+                        logger.debug(f"DEBUG: Extracted screenshot from result_dict['data']['screenshot'], length={len(screenshot_data_url) if screenshot_data_url else 0}")
+                    
+                    # Extract highlighted elements for highlight_elements action
+                    if 'elements' in result_dict['data']:
+                        highlighted_elements = result_dict['data']['elements']
+                    if 'totalElements' in result_dict['data']:
+                        total_elements = result_dict['data']['totalElements']
+                    
+                    # Extract new_tabs_created for javascript_execute and confirm_click_element
+                    if 'new_tabs_created' in result_dict['data']:
+                        new_tabs_created = result_dict['data']['new_tabs_created']
+            
+            pending_confirmation = self._get_pending_confirmation()
             
             return OpenBrowserObservation(
                 success=success,
                 message=message,
                 error=error,
                 tabs=tabs_data,
-                mouse_position=mouse_position,
                 screenshot_data_url=screenshot_data_url,
                 javascript_result=javascript_result,
                 console_output=console_output,
                 dialog_opened=dialog_opened,
                 dialog=dialog,
-                a11y_elements=a11y_elements
+                highlighted_elements=highlighted_elements,
+                total_elements=total_elements,
+                new_tabs_created=new_tabs_created,
+                pending_confirmation=pending_confirmation
             )
             
         except ValueError as e:
@@ -598,13 +868,11 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 success=False,
                 error=error_msg,
                 tabs=[],
-                mouse_position=None,
                 screenshot_data_url=None,
                 javascript_result=None,
                 console_output=None,
                 dialog_opened=None,
                 dialog=None,
-                a11y_elements=None
             )
         except Exception as e:
             logger.debug(f"DEBUG: _execute_action_sync caught exception: {e}")
@@ -615,21 +883,16 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 success=False,
                 error=str(e),
                 tabs=[],
-                mouse_position=None,
                 screenshot_data_url=None,
                 javascript_result=None,
                 console_output=None,
                 dialog_opened=None,
-                dialog=None,
-                a11y_elements=None
+                dialog=None
             )
     
     def __call__(self, action: OpenBrowserAction, conversation) -> OpenBrowserObservation:
         """Execute a browser action and return observation"""
         self.conversation_id = str(conversation._state.id)
-
-        if action.max_a11y_elements is not None:
-            command_processor.set_max_a11y_elements(action.max_a11y_elements, self.conversation_id)
 
         logger.debug(f"DEBUG: OpenBrowserTool.__call__ called with action: {action.type}, conversation_id: {self.conversation_id}")
         logger.debug(f"DEBUG: Current thread: {threading.current_thread().name}")
@@ -686,178 +949,145 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
         logger.debug(f"DEBUG: _get_tabs_sync result: success={result.get('success')}, data keys={list(result.get('data', {}).keys()) if result.get('data') else 'None'}")
         return result
 
-    def _get_screenshot_sync(self) -> Any:
-        """Capture screenshot synchronously"""
-        logger.debug(f"DEBUG: _get_screenshot_sync called, sending ScreenshotCommand via HTTP")
-        command = ScreenshotCommand(
-            include_cursor=True,
-            include_visual_mouse=True,
-            quality=90,
-            conversation_id=self.conversation_id  # ✅ FIX: Pass conversation_id
-        )
-        result = self._execute_command_sync(command)
-        logger.debug(f"DEBUG: _get_screenshot_sync result: success={result.get('success')}, data keys={list(result.get('data', {}).keys()) if result.get('data') else 'None'}")
-        return result
 
 
 # --- Tool Definition ---
 
-_OPEN_BROWSER_DESCRIPTION = """
-Browser automation tool with accessibility-first interaction.
-
-## Core Concept: Accessibility Elements
-
-Every action returns a **list of accessible interactive elements** on the page. This is your PRIMARY way to find and interact with elements.
-
-### What You Get
-
-After `javascript_execute`, `tab init/open/switch`, you receive:
-
-```
-## Accessible Elements
-
-**Found 5 interactive elements:**
-
-  - [button] "Submit" → #submit-btn (idx: 0)
-  - [button] "Cancel" → button, [role="button"] (idx: 2)
-  - [textbox] "Email" → [name="email"] (idx: 0) [placeholder="Enter email"]
-  - [link] "Learn More" → a, [role="link"] (idx: 3) [href=/learn]
-  - [checkbox] "Remember me" → #remember (idx: 0) [checked=false]
-```
-
-### Element Format
-
-Each element provides:
-- **role**: Semantic type (`button`, `link`, `textbox`, `checkbox`, etc.)
-- **name**: Visible text or aria-label
-- **selector**: CSS selector for `querySelectorAll()` - use with index
-- **idx**: Array index for `querySelectorAll(selector)[idx]`
-- **href**: URL for links
-- **placeholder/value**: For text inputs
-- **checked**: For checkboxes/radios
-
-### How to Use Selectors
-
-**With ID/name/data-testid** (unique selector):
-```javascript
-document.querySelector('#submit-btn')  // idx is 0, can use querySelector
-```
-
-**With compound selector** (multiple element types):
-```javascript
-// selector is "button, [role=\"button\"]" , idx is 2
-document.querySelectorAll('button, [role="button"]')[2]
-```
-
-IMPORTANT: Always use the **exact selector shown** with `querySelectorAll`, then access by **idx**.
-
-### Getting More Elements
-
-If you see "... and N more" at the end, set `max_a11y_elements` to see all:
-```json
-{ "type": "javascript_execute", "script": "...", "max_a11y_elements": 500 }
-```
+_OPEN_BROWSER_DESCRIPTION = """Browser automation with visual-first interaction.
+## Core Philosophy
+You SEE the page through screenshots. You IDENTIFY targets through visual element IDs. You OPERATE using those IDs.
+JavaScript is a fallback, not your primary tool.
 ---
-
-## How to Interact
-
-### Step 1: Read the Accessible Elements
-
-The list tells you exactly what elements are available and how to select them.
-
-### Step 2: Use the Selector
-
-```json
-{
-  "type": "javascript_execute",
-  "script": "(() => { const el = document.querySelector('#submit-btn'); if (el) { el.click(); return 'clicked'; } return 'not found'; })()"
-}
-```
-
-### Step 3: Check Result
-
-- Success: Element was found and action completed
-- "not found": Selector failed, element may have been removed
-
+## Visual Color System
+The tool uses a **two-stage color-coded visual system** for safe element interaction:
+### Stage 1: BLUE - Element Discovery (`highlight_elements`)
+When you call `highlight_elements()`, elements are marked with **BLUE boxes**.
+**Purpose**: Identify which element you want to interact with.
+**You see**:
+- Screenshot with **multiple blue boxes** (one per element)
+- Each box has an **element ID label**
+- List of element IDs with their HTML
+**Your task**: 
+1. Look at the screenshot - find blue boxes
+2. Match visual position with your intent
+3. Read HTML semantics to confirm
+4. Note the element_id of your target
+### Stage 2: ORANGE - Action Confirmation (`click_element`, etc.)
+When you call any element action, you get an **ORANGE box** on ONE element.
+**Purpose**: Verify you're about to act on the CORRECT element before execution.
+**You see**:
+- Screenshot with **ONE orange box** (3px border, #FF6600)
+- Label: "Is This The Element You Selected? Please Confirm"
+- Full HTML of the target element
+**Your task**:
+1. **LOOK** - Is the orange box on the EXACT element you intended?
+2. **READ** - Does the HTML match your goal?
+3. **DECIDE** - Confirm or cancel
+**To CONFIRM**: Use `confirm_{action}_element` (e.g., `confirm_click_element`)
+**To CANCEL**: Simply call a different action or different element_id
 ---
-
-## Common Patterns
-
-### Click a Button
-
-```javascript
-// Accessibility shows: [button] "Submit" → #submit-btn
-(() => {
-    const el = document.querySelector('#submit-btn');
-    if (!el) return 'not found';
-    el.click();
-    return 'clicked';
-})()
-```
-
-### Fill a Text Field
-
-```javascript
-// Accessibility shows: [textbox] "Email" → [name="email"]
-(() => {
-    const el = document.querySelector('[name="email"]');
-    if (!el) return 'not found';
-    el.focus();
-    el.value = 'user@example.com';
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    return 'filled';
-})()
-```
-
-### Click by Index (No Unique ID)
-
-```javascript
-// Accessibility shows: [button] "Cancel" → button, [role="button"] (idx: 2)
-// Use the EXACT selector with querySelectorAll:
-(() => {
-    const selector = 'button, [role="button"]';
-    const idx = 2;
-    const els = document.querySelectorAll(selector);
-    if (els[idx]) { els[idx].click(); return 'clicked idx ' + idx; }
-    return 'not found';
-})()
-```
-
-### Toggle Checkbox
-
-```javascript
-// Accessibility shows: [checkbox] "Remember me" → #remember
-(() => {
-    const el = document.querySelector('#remember');
-    if (!el) return 'not found';
-    el.checked = true;
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    return 'checked';
-})()
-```
-
+## Visual + Semantic Verification (Both Stages)
+**CRITICAL**: At BOTH stages, you must verify using BOTH visual AND semantic information:
+| | Visual Check | Semantic Check |
+|---|---|---|
+| **BLUE (Discovery)** | Is the blue box where you expect? | Does the HTML match your goal? |
+| **ORANGE (Confirmation)** | Is the orange box on the right element? | Does the full HTML confirm your intent? |
+### What to Check in HTML
+- **Tag name**: button, a, input, etc.
+- **Attributes**: class, type, href, aria-label, data-*
+- **Text content**: What text does it display?
+- **Context**: Where is it in the DOM?
+### Decision Rules
+**✅ Proceed IF:**
+- Visual position matches your intent
+- HTML semantics match your goal (class, type, text)
+- You're confident about the target
+**❌ Cancel/Paginate IF:**
+- Visual or semantic mismatch
+- Multiple similar elements exist
+- You're uncertain
 ---
-
-## Beyond Accessibility Elements
-
-You can execute **any JavaScript** to interact with the page. Use `javascript_execute` freely to: search DOM, click by text, scroll, extract data, handle iframes, work with Shadow DOM, or any other browser operation. You have full flexibility.
-
-## Action Reference
-
-### 1. javascript_execute
-
+## Element ID Format
+Element IDs are unique 6-character hexadecimal hashes (e.g., `a3f2b1`, `c8e4d2`).
+Each element is assigned a stable hash based on its DOM position and attributes.
+This hash remains consistent across `highlight_elements` calls for the same page state.
+**Note**: All element operations require `tab_id` to specify which tab to operate on.
+The active tab ID is shown in the Browser State section of the observation.
+---
+## Command Reference
+### highlight_elements
+Capture a screenshot with numbered visual markers on interactive elements of ONE type.
+**Important**: Each call highlights only ONE element type at a time.
 ```json
-{ "type": "javascript_execute", "script": "your code here" }
+{ "type": "highlight_elements" }                           // Default: clickable elements, page 1
+{ "type": "highlight_elements", "element_type": "inputable" }  // Input fields
+{ "type": "highlight_elements", "element_type": "scrollable" } // Scrollable areas
+{ "type": "highlight_elements", "element_type": "hoverable" }  // Hoverable elements
+{ "type": "highlight_elements", "page": 2 }                 // Next page of clickable elements
 ```
-
-- 30-second timeout
-- Return JSON-serializable values only (no DOM nodes)
-- Use IIFE `(() => { ... })()` for return statements
-- `console.log()` output is captured
-
-### 2. tab
-
+Parameters:
+- `element_type`: Single type to highlight - "clickable" (default), "scrollable", "inputable", or "hoverable"
+- `page`: Page number for pagination (1-indexed, default 1)
+**When to Use Pagination**:
+- If the element you want to interact with is NOT visible on the current page, increment `page` to see more elements
+- Continue to the next page until you find the most appropriate element for your task
+- Stay on the same `element_type` across pages to browse through all elements of that category
+### click_element
+Initiate a click on an element by its visual ID.
+**⚠️ 2PC Flow**: This action returns a screenshot with the element highlighted in **ORANGE**.
+You MUST visually verify the orange-highlighted element and then confirm with `confirm_click_element`.
+```json
+{ "type": "click_element", "element_id": "c8e4d2", "tab_id": 123 }
+// → Screenshot with ORANGE box appears
+// → Review the orange highlight + HTML
+// → Confirm:
+{ "type": "confirm_click_element", "element_id": "c8e4d2", "tab_id": 123 }
+```
+Use this for buttons, links, and any clickable element you identified from highlight_elements.
+**Safety**: The orange highlight lets you visually verify the target before the click executes.
+### hover_element
+Initiate a hover over an element by its visual ID.
+**⚠️ 2PC Flow**: This action returns a screenshot with the element highlighted in **ORANGE**.
+You MUST visually verify and then confirm with `confirm_hover_element`.
+```json
+{ "type": "hover_element", "element_id": "a3f2b1", "tab_id": 123 }
+// → Screenshot with ORANGE box appears
+// → Review the orange highlight + HTML
+// → Confirm:
+{ "type": "confirm_hover_element", "element_id": "a3f2b1", "tab_id": 123 }
+```
+Use this to reveal tooltips, dropdown menus, or hover states.
+### scroll_element
+Scroll within an element by its visual ID, or scroll the entire page if no element_id is provided.
+**⚠️ 2PC Flow**: This action returns a screenshot with the scrollable area highlighted in **ORANGE**.
+You MUST visually verify and then confirm with `confirm_scroll_element`.
+```json
+{ "type": "scroll_element", "element_id": "d2f4a8", "direction": "down", "tab_id": 123 }
+// → Screenshot with ORANGE box appears
+// → Review the orange highlight + HTML
+// → Confirm:
+{ "type": "confirm_scroll_element", "element_id": "d2f4a8", "tab_id": 123 }
+```
+Parameters:
+- `element_id`: (optional) Element ID from highlight response. If not provided, scrolls the entire page.
+- `direction`: "up", "down", "left", or "right" (default: "down")
+Use this to:
+- Scroll within specific containers (when element_id is provided)
+- Scroll the entire page (when element_id is omitted)
+### keyboard_input
+Type text into an input element by its visual ID.
+**⚠️ 2PC Flow**: This action returns a screenshot with the input element highlighted in **ORANGE**.
+You MUST visually verify and then confirm with `confirm_keyboard_input`.
+```json
+{ "type": "keyboard_input", "element_id": "b7c9e5", "text": "hello@example.com", "tab_id": 123 }
+// → Screenshot with ORANGE box appears
+// → Review the orange highlight + HTML
+// → Confirm:
+{ "type": "confirm_keyboard_input", "element_id": "b7c9e5", "tab_id": 123 }
+```
+Use this for text inputs, textareas, and search boxes.
+### tab
+Manage browser tabs.
 ```json
 { "type": "tab", "action": "init", "url": "https://example.com" }
 { "type": "tab", "action": "open", "url": "https://example.com" }
@@ -865,55 +1095,70 @@ You can execute **any JavaScript** to interact with the page. Use `javascript_ex
 { "type": "tab", "action": "switch", "tab_id": 123 }
 { "type": "tab", "action": "list" }
 ```
-
-### 3. handle_dialog
-
-When JavaScript triggers alert/confirm/prompt:
-
+- `init`: Create new session with isolated tab group
+- `open`: Open URL in new tab
+- `close`: Close specific tab
+- `switch`: Switch to specific tab
+- `list`: List all tabs
+### handle_dialog
+Handle browser dialogs (alert, confirm, prompt).
 ```json
 { "type": "handle_dialog", "dialog_action": "accept" }
 { "type": "handle_dialog", "dialog_action": "dismiss" }
-{ "type": "handle_dialog", "dialog_action": "accept", "prompt_text": "my text" }
+{ "type": "handle_dialog", "dialog_action": "accept", "prompt_text": "my response" }
 ```
-
-- `alert`: Auto-accepted
-- `confirm`/`prompt`: You must respond with `handle_dialog`
-
-### 4. view
-
+Dialog types:
+- `alert`: Auto-accepted, no action needed
+- `confirm`: Use accept or dismiss
+- `prompt`: Use accept with prompt_text, or dismiss
+### javascript_execute (Fallback)
+Execute arbitrary JavaScript. Use only when visual commands cannot accomplish your goal.
 ```json
-{ "type": "view" }
+{ "type": "javascript_execute", "script": "(() => { return document.title; })()" }
 ```
-
-Capture screenshot for visual verification.
-
+Guidelines:
+- 30-second timeout
+- Return JSON-serializable values only (no DOM nodes)
+- Use IIFE `(() => { ... })()` for return statements
+- `console.log()` output is captured
 ---
-
 ## Workflow Summary
-
-1. **Navigate**: `tab init` or `tab open` → receive accessibility delta
-2. **Read**: Check accessibility elements for available interactions
-3. **Act**: `javascript_execute` using the selector from accessibility
-4. **Verify**: Check result; use `view` if needed
-5. **Handle**: If dialog opens, use `handle_dialog`
-
+1. **Navigate**: `tab init` or `tab open`
+2. **Highlight**: `highlight_elements` to get visual markers (blue boxes) + HTML info
+3. **Verify Dual Match**: 
+   - Visually locate **blue box** on screenshot
+   - Semantically verify HTML attributes (class, text, type)
+   - If no perfect match, increment `page` and continue searching
+4. **Initiate Action**: `click_element`, `keyboard_input`, `hover_element`, or `scroll_element`
+5. **Verify ORANGE Highlight**: **CRITICAL!** 
+   - Look at the screenshot with **ORANGE highlighted element**
+   - Confirm it's the EXACT element you intended
+   - Check the HTML semantics match your goal
+6. **Confirm or Cancel**: 
+   - ✅ If correct: Use `confirm_{action}_element` to execute
+   - ❌ If wrong: Choose different element_id or action to cancel
+7. **Handle Dialogs**: If dialog opens, use `handle_dialog`
+8. **Fallback**: Use `javascript_execute` only for complex operations
+---
+## Important Notes
+- **Two-stage visual verification**: BLUE for discovery, ORANGE for confirmation
+- **Always verify ORANGE highlight**: Check the orange box BEFORE confirming any action
+- **2PC is mandatory**: All element actions require confirmation
+- **Paginate when uncertain**: Use `page=2, 3, ...` if element not on current page
+- **Hover before click**: Reveal hidden elements first
+- **JavaScript is fallback**: Try visual commands first
+---
 ## Troubleshooting
-
 | Issue | Solution |
-|-------|----------|
-| Selector not found | Element may have been removed; check delta again |
-| Click doesn't work | Try full event sequence for React/Vue |
-| Page loading | Check `document.readyState` |
-| Inside iframe | Access via `iframe.contentDocument` |
-| Shadow DOM | Access via `element.shadowRoot` |
-
-**2-Strike Rule**: If same action fails twice, try:
-1. Full event sequence (pointerdown → mousedown → click)
-2. Search DOM structure manually
-3. Direct URL navigation"""
-
-
-
+|---|----------|
+| Element not found | Refresh with highlight_elements, check element_id |
+| BLUE box not visible | Element may be off-screen, scroll or paginate |
+| Click has no effect | Try hover_element first to reveal |
+| **ORANGE box on wrong element** | **DO NOT confirm!** Choose different element_id |
+| Complex interaction | Use javascript_execute as fallback |
+| Page still loading | Wait and retry highlight_elements |
+**2-Strike Rule**: If visual command fails twice, switch to javascript_execute fallback.
+"""
 
 
 class OpenBrowserTool(ToolDefinition[OpenBrowserAction, OpenBrowserObservation]):

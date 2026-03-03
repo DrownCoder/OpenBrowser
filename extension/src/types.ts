@@ -106,6 +106,54 @@ export interface GetGroundedElementsCommand extends BaseCommand {
   include_hidden?: boolean;
 }
 
+
+export interface GetAccessibilityTreeCommand extends BaseCommand {
+  type: 'get_accessibility_tree';
+  max_elements?: number;
+}
+
+// Visual interaction commands
+export interface HighlightElementsCommand extends BaseCommand {
+  type: 'highlight_elements';
+  element_type?: ElementType;  // Single element type for stable pagination
+  page?: number;  // 1-indexed page number for collision-aware pagination
+}
+
+export interface ClickElementCommand extends BaseCommand {
+  type: 'click_element';
+  element_id: string;
+}
+
+export interface HoverElementCommand extends BaseCommand {
+  type: 'hover_element';
+  element_id: string;
+}
+
+export interface ScrollElementCommand extends BaseCommand {
+  type: 'scroll_element';
+  element_id?: string;  // Optional: if not provided, scrolls the entire page
+  direction?: ScrollDirection;
+}
+
+export interface KeyboardInputCommand extends BaseCommand {
+  type: 'keyboard_input';
+  element_id: string;
+  text: string;
+}
+
+export interface GetElementHtmlCommand extends BaseCommand {
+  type: 'get_element_html';
+  element_id: string;
+  tab_id?: number;  // Optional: uses active tab if not provided
+}
+
+
+export interface HighlightSingleElementCommand extends BaseCommand {
+  type: 'highlight_single_element';
+  element_id: string;
+  tab_id?: number;  // Optional: uses active tab if not provided
+}
+
 export interface GroundedElementsResponse {
   success: boolean;
   data?: {
@@ -133,7 +181,16 @@ export type Command =
   | JavascriptExecuteCommand
   | CleanupSessionCommand
   | HandleDialogCommand
-  | GetGroundedElementsCommand;
+  | GetGroundedElementsCommand
+  | GetAccessibilityTreeCommand
+  // Visual interaction commands
+  | HighlightElementsCommand
+  | ClickElementCommand
+  | HoverElementCommand
+  | ScrollElementCommand
+  | KeyboardInputCommand
+  | GetElementHtmlCommand
+  | HighlightSingleElementCommand;
 
 export interface CommandResponse {
   success: boolean;
@@ -151,6 +208,9 @@ export interface CommandResponse {
     url?: string;
     needsDecision: boolean;
   };
+  // Tab creation tracking
+  new_tabs_created?: Array<{tabId: number, url: string, title?: string, loading?: boolean}>;
+
 }
 
 export interface ScreenshotMetadata {
@@ -165,4 +225,45 @@ export interface ScreenshotMetadata {
 export interface WebSocketMessage {
   type: string;
   [key: string]: any;
+}
+
+// Visual interaction types
+export type ElementType = 'clickable' | 'scrollable' | 'inputable' | 'hoverable';
+
+export interface InteractiveElement {
+  id: string;                    // Element ID: 6-char hash from CSS path (e.g., "a3f2b1")
+  type: ElementType;             // Type of interactive element
+  tagName: string;               // HTML tag name
+  selector: string;              // CSS selector to find element
+  html?: string;                 // Optional: full HTML of the element (captured at highlight time)
+  text?: string;                 // Visible text content
+  bbox: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  isVisible: boolean;            // Is element visible
+  isInViewport: boolean;         // Is element in viewport
+}
+
+export interface HighlightOptions {
+  elementType?: ElementType;   // Single type to highlight (for stable pagination)
+  page?: number;                 // 1-indexed page number for collision-aware pagination
+  scale?: number;                // Device pixel ratio for coordinate scaling
+}
+
+export interface ElementActionResult {
+  success: boolean;
+  elementId?: string | undefined;  // Made optional to support page-level operations (where no element_id is provided)
+  screenshotDataUrl?: string;
+  dialogOpened?: boolean;
+  dialog?: {
+    type: 'alert' | 'confirm' | 'prompt' | 'beforeunload';
+    message: string;
+    defaultValue?: string;
+  };
+  // Tab creation tracking
+  new_tabs_created?: Array<{tabId: number, url: string, title?: string, loading?: boolean}>;
+
 }

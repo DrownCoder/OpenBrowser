@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "vite build --watch --mode development",
     "build": "vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
   },
   "dependencies": {
     "@types/chrome": "^0.1.0",
