@@ -1666,6 +1666,11 @@ return {
         }
         
         // Create element with fresh bbox for drawing
+        const elementWithFreshBbox = {
+          ...element,
+          bbox: freshBbox
+        };
+        
         // Draw single element highlight
         const highlightedScreenshot = await highlightSingleElement(
           screenshotResult.imageData,
