@@ -1022,6 +1022,21 @@ This hash remains consistent across `highlight_elements` calls for the same page
 **Note**: All element operations require `tab_id` to specify which tab to operate on.
 The active tab ID is shown in the Browser State section of the observation.
 ---
+## Scrolling Strategy
+**Key Principle**: Always scroll when you think more content might exist below.
+
+When to Scroll:
+- Target element not visible on current highlight result
+- Looking for content that might be below the fold
+- Pagination indicates more elements exist
+
+Scrolling Workflow:
+1. `highlight_elements` → target not found
+2. `scroll_element(direction="down")` → scroll half page
+3. `highlight_elements` → discover newly visible elements
+4. Repeat until found OR genuinely at page bottom
+
+**Don't give up after one attempt** - Modern pages often have long scrollable content.
 ## Command Reference
 ### highlight_elements
 Capture a screenshot with numbered visual markers on interactive elements of ONE type.
@@ -1065,6 +1080,7 @@ You MUST visually verify and then confirm with `confirm_hover_element`.
 { "type": "confirm_hover_element", "element_id": "a3f2b1", "tab_id": 123 }
 ```
 Use this to reveal tooltips, dropdown menus, or hover states.
+**⚠️ IMPORTANT**: Hover is for revealing interactive element behavior (tooltips, dropdowns, hover states), NOT for disambiguating between similar elements. To disambiguate, use semantic clues (class, id, aria-label) from the highlight_elements response.
 ### scroll_element
 Scroll within an element by its visual ID, or scroll the entire page if no element_id is provided.
 **⚠️ 2PC Flow**: This action returns a screenshot with the scrollable area highlighted in **ORANGE**.
