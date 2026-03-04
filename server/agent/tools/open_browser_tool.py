@@ -276,18 +276,18 @@ class OpenBrowserObservation(Observation):
             text_parts.append(f"**Total Elements**: {self.total_elements if self.total_elements is not None else len(self.highlighted_elements)}")
             text_parts.append("")
             # Format: id: <html> for each element
-            # element_descriptions = []
-            # for el in self.highlighted_elements:
-            #     el_id = el.get('id', 'unknown')
-            #     html = (el.get('html') or '').strip()
-            #     if len(html) > 200:
-            #         html = html[:190] + '...(Truncated)'
-            #     if html:
-            #         element_descriptions.append(f"{el_id}: {html}")
-            #     else:
-            #         tag = el.get('tagName', '').upper()
-            #         element_descriptions.append(f"{el_id} ({tag})")
-            # text_parts.append('\n'.join(element_descriptions))
+            element_descriptions = []
+            for el in self.highlighted_elements:
+                el_id = el.get('id', 'unknown')
+                html = (el.get('html') or '').strip()
+                if len(html) > 200:
+                    html = html[:190] + '...(Truncated)'
+                if html:
+                    element_descriptions.append(f"{el_id}: {html}")
+                else:
+                    tag = el.get('tagName', '').upper()
+                    element_descriptions.append(f"{el_id} ({tag})")
+            text_parts.append('\n'.join(element_descriptions))
             text_parts.append("")
         
         # Pending Confirmation Section (2PC)
