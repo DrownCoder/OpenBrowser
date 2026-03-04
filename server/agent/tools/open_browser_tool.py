@@ -49,9 +49,17 @@ class OpenBrowserAction(Action):
     # Visual interaction parameters
     element_type: Optional[str] = Field(default="clickable", description="Single element type: clickable/scrollable/inputable/hoverable")
     element_id: Optional[str] = Field(default=None, description="Element ID from highlight response")
-    page: Optional[int] = Field(default=1, ge=1, description="Page number for pagination (1-indexed)")
+    page: Optional[int] = Field(default=1, ge=1, description="Page number for pagination (1-indexed). Ignored when keywords is provided.")
+    keywords: Optional[str] = Field(default=None, description="Keywords to filter elements by HTML content. When provided, only matching elements are returned (no pagination).")
     # Scroll parameters
+
     direction: Optional[str] = Field(default="down", description="Scroll direction: up/down/left/right")
+    scroll_amount: Optional[float] = Field(
+        default=0.5,
+        ge=0.1,
+        le=3.0,
+        description="Scroll amount relative to page/element height (0.5 = half page, 1.0 = full page, 2.0 = two pages)"
+    )
     
     # Keyboard input parameters
     text: Optional[str] = Field(default=None, description="Text to input")
@@ -268,18 +276,18 @@ class OpenBrowserObservation(Observation):
             text_parts.append(f"**Total Elements**: {self.total_elements if self.total_elements is not None else len(self.highlighted_elements)}")
             text_parts.append("")
             # Format: id: <html> for each element
-            element_descriptions = []
-            for el in self.highlighted_elements:
-                el_id = el.get('id', 'unknown')
-                html = (el.get('html') or '').strip()
-                if len(html) > 200:
-                    html = html[:190] + '...(Truncated)'
-                if html:
-                    element_descriptions.append(f"{el_id}: {html}")
-                else:
-                    tag = el.get('tagName', '').upper()
-                    element_descriptions.append(f"{el_id} ({tag})")
-            text_parts.append('\n'.join(element_descriptions))
+            # element_descriptions = []
+            # for el in self.highlighted_elements:
+            #     el_id = el.get('id', 'unknown')
+            #     html = (el.get('html') or '').strip()
+            #     if len(html) > 200:
+            #         html = html[:190] + '...(Truncated)'
+            #     if html:
+            #         element_descriptions.append(f"{el_id}: {html}")
+            #     else:
+            #         tag = el.get('tagName', '').upper()
+            #         element_descriptions.append(f"{el_id} ({tag})")
+            # text_parts.append('\n'.join(element_descriptions))
             text_parts.append("")
         
         # Pending Confirmation Section (2PC)
@@ -579,9 +587,11 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 # Single element type for stable collision-aware pagination
                 element_type = action.element_type or "clickable"
                 page = action.page or 1
+                keywords = action.keywords
                 command = HighlightElementsCommand(
                     element_type=element_type,
                     page=page,
+                    keywords=keywords,
                     conversation_id=self.conversation_id
                 )
                 result_dict = self._execute_command_sync(command)
@@ -597,7 +607,13 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 total_elements = result_dict.get('data', {}).get('totalElements', 0)
                 total_pages = result_dict.get('data', {}).get('totalPages', 1)
                 current_page = result_dict.get('data', {}).get('page', 1)
-                message = f"Found {len(elements)} {element_type} elements on page {current_page}/{total_pages} (total: {total_elements})"
+                
+                # Adjust message based on whether keywords filtering was used
+                if keywords:
+                    message = f"Found {len(elements)} {element_type} elements matching '{keywords}' (total: {total_elements})"
+                else:
+                    message = f"Found {len(elements)} {element_type} elements on page {current_page}/{total_pages} (total: {total_elements})"
+
             # ========== 2PC Confirm Operations ==========
             elif action_type == "confirm_click_element":
                 pending = self._get_pending_confirmation()
@@ -645,6 +661,7 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 command = ScrollElementCommand(
                     element_id=action.element_id,
                     direction=pending['extra_data'].get('direction', 'down'),
+                    scroll_amount=pending['extra_data'].get('scroll_amount', 0.5),
                     conversation_id=self.conversation_id,
                     tab_id=action.tab_id
                 )
@@ -715,7 +732,7 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                         element_id=action.element_id or '',
                         action_type='scroll',
                         full_html=full_html,
-                        extra_data={'direction': action.direction or 'down', 'tab_id': action.tab_id},
+                        extra_data={'direction': action.direction or 'down', 'scroll_amount': action.scroll_amount or 0.5, 'tab_id': action.tab_id},
                         screenshot_data_url=screenshot
                     )
                     screenshot_data_url = screenshot
@@ -725,6 +742,7 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                     # directly execute for page scroll
                     command = ScrollElementCommand(
                         direction=action.direction,
+                        scroll_amount=action.scroll_amount or 0.5,
                         conversation_id=self.conversation_id,
                         tab_id=action.tab_id
                     )
@@ -1014,6 +1032,21 @@ This hash remains consistent across `highlight_elements` calls for the same page
 **Note**: All element operations require `tab_id` to specify which tab to operate on.
 The active tab ID is shown in the Browser State section of the observation.
 ---
+## Scrolling Strategy
+**Key Principle**: Always scroll when you think more content might exist below.
+
+When to Scroll:
+- Target element not visible on current highlight result
+- Looking for content that might be below the fold
+- Pagination indicates more elements exist
+
+Scrolling Workflow:
+1. `highlight_elements` → target not found
+2. `scroll_element(direction="down")` → scroll half page
+3. `highlight_elements` → discover newly visible elements
+4. Repeat until found OR genuinely at page bottom
+
+**Don't give up after one attempt** - Modern pages often have long scrollable content.
 ## Command Reference
 ### highlight_elements
 Capture a screenshot with numbered visual markers on interactive elements of ONE type.
@@ -1024,15 +1057,23 @@ Capture a screenshot with numbered visual markers on interactive elements of ONE
 { "type": "highlight_elements", "element_type": "scrollable" } // Scrollable areas
 { "type": "highlight_elements", "element_type": "hoverable" }  // Hoverable elements
 { "type": "highlight_elements", "page": 2 }                 // Next page of clickable elements
+{ "type": "highlight_elements", "keywords": "Submit" }      // Filter by keyword (no pagination needed)
 ```
 Parameters:
 - `element_type`: Single type to highlight - "clickable" (default), "scrollable", "inputable", or "hoverable"
-- `page`: Page number for pagination (1-indexed, default 1)
+- `page`: Page number for pagination (1-indexed, default 1). Ignored when `keywords` is provided.
+- `keywords`: Filter elements by HTML content. When provided, only matching elements are returned without pagination.
+
 **When to Use Pagination**:
 - If the element you want to interact with is NOT visible on the current page, increment `page` to see more elements
 - Continue to the next page until you find the most appropriate element for your task
 - Stay on the same `element_type` across pages to browse through all elements of that category
-### click_element
+
+**When to Use Keywords**:
+- When you know what text/attribute you're looking for (e.g., "Submit", "Login", "search")
+- More efficient than pagination when target is visually identifiable
+- No need for pagination - all matching elements are returned at once
+
 Initiate a click on an element by its visual ID.
 **⚠️ 2PC Flow**: This action returns a screenshot with the element highlighted in **ORANGE**.
 You MUST visually verify the orange-highlighted element and then confirm with `confirm_click_element`.
@@ -1057,6 +1098,7 @@ You MUST visually verify and then confirm with `confirm_hover_element`.
 { "type": "confirm_hover_element", "element_id": "a3f2b1", "tab_id": 123 }
 ```
 Use this to reveal tooltips, dropdown menus, or hover states.
+**⚠️ IMPORTANT**: Hover is for revealing interactive element behavior (tooltips, dropdowns, hover states), NOT for disambiguating between similar elements. To disambiguate, use semantic clues (class, id, aria-label) from the highlight_elements response.
 ### scroll_element
 Scroll within an element by its visual ID, or scroll the entire page if no element_id is provided.
 **⚠️ 2PC Flow**: This action returns a screenshot with the scrollable area highlighted in **ORANGE**.
@@ -1067,10 +1109,21 @@ You MUST visually verify and then confirm with `confirm_scroll_element`.
 // → Review the orange highlight + HTML
 // → Confirm:
 { "type": "confirm_scroll_element", "element_id": "d2f4a8", "tab_id": 123 }
+
+// Scroll by custom amount:
+{ "type": "scroll_element", "direction": "down", "scroll_amount": 1.0, "tab_id": 123 }  // Full page
+{ "type": "scroll_element", "direction": "down", "scroll_amount": 0.2, "tab_id": 123 }  // 20% of page
+{ "type": "scroll_element", "direction": "down", "scroll_amount": 2.0, "tab_id": 123 }  // Two pages
 ```
 Parameters:
 - `element_id`: (optional) Element ID from highlight response. If not provided, scrolls the entire page.
 - `direction`: "up", "down", "left", or "right" (default: "down")
+- `scroll_amount`: Relative amount to scroll based on page/element height (default: 0.5)
+  - `0.5` = half page (default)
+  - `1.0` = full page
+  - `2.0` = two pages
+  - `0.2` = 20% of page
+  - Range: 0.1 to 3.0
 Use this to:
 - Scroll within specific containers (when element_id is provided)
 - Scroll the entire page (when element_id is omitted)

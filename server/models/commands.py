@@ -233,6 +233,9 @@ class HighlightElementsCommand(BaseCommand):
     Uses collision-aware pagination to ensure no overlapping highlights.
     Each page returns a maximal set of non-colliding elements.
     Only one element type per call for stable, predictable pagination.
+    
+    When keywords is provided, only elements whose HTML contains the keywords
+    are returned (no pagination needed - all matching elements are returned).
     """
     type: Literal["highlight_elements"] = "highlight_elements"
     element_type: Optional[str] = Field(
@@ -242,7 +245,11 @@ class HighlightElementsCommand(BaseCommand):
     page: Optional[int] = Field(
         default=1,
         ge=1,
-        description="Page number for collision-aware pagination (1-indexed)"
+        description="Page number for collision-aware pagination (1-indexed). Ignored when keywords is provided."
+    )
+    keywords: Optional[str] = Field(
+        default=None,
+        description="Keywords to filter elements by HTML content. When provided, only matching elements are returned (no pagination)."
     )
 
 class ClickElementCommand(BaseCommand):
@@ -273,6 +280,12 @@ class ScrollElementCommand(BaseCommand):
     direction: str = Field(
         default="down",
         description="Scroll direction: 'up', 'down', 'left', 'right'"
+    )
+    scroll_amount: float = Field(
+        default=0.5,
+        ge=0.1,
+        le=3.0,
+        description="Scroll amount relative to page/element height (0.5 = half page, 1.0 = full page, 2.0 = two pages)"
     )
     tab_id: int = Field(..., description="Target tab ID")
 

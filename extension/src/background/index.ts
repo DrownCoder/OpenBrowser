@@ -1042,6 +1042,7 @@ return {
         
         const elementType = command.element_type || 'clickable';
         const page = command.page || 1;  // 1-indexed page for collision-aware pagination
+        const keywords = command.keywords;
         
         // Build script to detect elements IN PAGE CONTEXT
         const detectionScript = `
@@ -1240,8 +1241,24 @@ return {
             function isScrollable(el) {
               const style = window.getComputedStyle(el);
               const overflow = style.overflow + style.overflowY + style.overflowX;
-              return (overflow.includes('auto') || overflow.includes('scroll')) && 
-                     el.scrollHeight > el.clientHeight;
+              
+              // 1. 传统滚动：overflow为auto/scroll
+              const hasScrollStyle = overflow.includes('auto') || overflow.includes('scroll');
+              
+              // 2. 隐藏overflow但实际可滚动（Swiper、transform滚动等）
+              const isHiddenButScrollable = style.overflow === 'hidden';
+              
+              // 3. 检测实际滚动能力（垂直和水平）
+              const hasVerticalScroll = el.scrollHeight > el.clientHeight;
+              const hasHorizontalScroll = el.scrollWidth > el.clientWidth;
+              const canScroll = hasVerticalScroll || hasHorizontalScroll;
+              
+              // 4. 排除body和html（避免误检整个页面）
+              const tag = el.tagName.toLowerCase();
+              if (tag === 'body' || tag === 'html') return false;
+              
+              // 5. 组合条件：有scroll样式或hidden但可滚动
+              return (hasScrollStyle || isHiddenButScrollable) && canScroll;
             }
             
             function isInputable(el) {
@@ -1392,22 +1409,42 @@ return {
         
         const allElements = detectionResult.result.value.elements || [];
 
-        // Generate hash IDs for all elements (collision-free)
+        // Filter by keywords if provided
+        let filteredElements = allElements;
+        if (keywords && keywords.trim()) {
+          const searchTerm = keywords.trim().toLowerCase();
+          filteredElements = allElements.filter((el: InteractiveElement) => 
+            el.html && el.html.toLowerCase().includes(searchTerm)
+          );
+          console.log(`🔍 [HighlightElements] Keyword filter \"${keywords}\" matched ${filteredElements.length} of ${allElements.length} elements`);
+        }
+
+        // Generate hash IDs for filtered elements (collision-free)
         const existingHashes = new Set<string>();
-        for (const element of allElements) {
+        for (const element of filteredElements) {
           const { id } = generateElementId(element.type, element.selector, existingHashes);
           element.id = id;
           existingHashes.add(id);
         }
+
+        let paginatedElements: InteractiveElement[];
+        let totalPages: number;
+        let currentPage = page;
         
-        // Collision-aware pagination
-        const paginatedElements = selectCollisionFreePage(allElements, page);
-        
-        // Calculate total pages for pagination info
-        const totalPages = calculateTotalPages(allElements);
-        console.log(`📄 [HighlightElements] Page ${page}/${totalPages}, showing ${paginatedElements.length} of ${allElements.length} elements`);
-        
-        elementCache.storeElements(conversationId, activeTabId, allElements);
+        if (keywords && keywords.trim()) {
+          // Keyword mode: return all matching elements, no pagination
+          paginatedElements = filteredElements;
+          totalPages = 1;
+          currentPage = 1;
+          console.log(`🔍 [HighlightElements] Keyword filter \"${keywords}\" matched ${paginatedElements.length} elements (no pagination)`);
+        } else {
+          // Normal collision-aware pagination
+          paginatedElements = selectCollisionFreePage(filteredElements, page);
+          totalPages = calculateTotalPages(filteredElements);
+          console.log(`📄 [HighlightElements] Page ${page}/${totalPages}, showing ${paginatedElements.length} of ${filteredElements.length} elements`);
+        }
+
+        elementCache.storeElements(conversationId, activeTabId, filteredElements);
         
         // Capture screenshot
         const screenshotResult = await captureScreenshot(activeTabId, conversationId, true, 90, false, 0);
@@ -1446,9 +1483,9 @@ return {
           success: true,
           data: {
             elements: paginatedElements,
-            totalElements: allElements.length,
+            totalElements: filteredElements.length,
             totalPages: totalPages,
-            page: page,
+            page: currentPage,
             screenshot: await compressIfNeeded(highlightedScreenshot, getCompressionThreshold()),
           },
           timestamp: Date.now(),
@@ -1493,7 +1530,13 @@ return {
         if (scrollTabId === undefined || scrollTabId === null) throw new Error('tab_id is required');
         
         // element_id is optional - if not provided, scrolls the entire page
-        const scrollResult = await performElementScroll(command.conversation_id, command.element_id, command.direction || 'down', scrollTabId);
+        const scrollResult = await performElementScroll(
+          command.conversation_id,
+          command.element_id,
+          command.direction || 'down',
+          scrollTabId,
+          command.scroll_amount || 0.5
+        );
         const scrollScreenshotResult = await captureScreenshot(scrollTabId, command.conversation_id, true, 90, false, 0);
         
         return {

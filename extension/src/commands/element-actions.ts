@@ -469,25 +469,28 @@ export async function performElementScroll(
   elementId: string | undefined,
   direction: ScrollDirection,
   tabId: number,
+  scrollAmount: number = 0.5,
   timeout: number = 30000
 ): Promise<ScrollResult> {
   console.log(
-    `📜 [ElementScroll] Scrolling ${elementId ? `element ${elementId}` : 'entire page'} ${direction} in conversation ${conversationId} on tab ${tabId}`
+    `📜 [ElementScroll] Scrolling ${elementId ? `element ${elementId}` : 'entire page'} ${direction} (amount: ${scrollAmount}x viewport) in conversation ${conversationId} on tab ${tabId}`
   );
 
   // ============================================================
   // STEP 1: Build JavaScript to scroll
   // ============================================================
 
-  // Calculate scroll amounts based on direction
-  const scrollAmounts: Record<ScrollDirection, { x: number; y: number }> = {
-    up: { x: 0, y: -300 },
-    down: { x: 0, y: 300 },
-    left: { x: -300, y: 0 },
-    right: { x: 300, y: 0 },
+  // Calculate scroll multipliers based on direction
+  // scrollAmount is relative to viewport height (0.5 = half page, 1.0 = full page)
+  // For horizontal scroll, we use viewport width
+  const scrollMultipliers: Record<ScrollDirection, { x: number; y: number }> = {
+    up: { x: 0, y: -scrollAmount },
+    down: { x: 0, y: scrollAmount },
+    left: { x: -scrollAmount, y: 0 },
+    right: { x: scrollAmount, y: 0 },
   };
 
-  const { x: scrollX, y: scrollY } = scrollAmounts[direction];
+  const { x: xMultiplier, y: yMultiplier } = scrollMultipliers[direction];
 
   let script: string;
 
@@ -511,6 +514,8 @@ export async function performElementScroll(
       (function() {
         const selector = "${escapedSelector}";
         const el = document.querySelector(selector);
+        const xMultiplier = ${xMultiplier};
+        const yMultiplier = ${yMultiplier};
 
         if (!el) {
           return { scrolled: false, error: "Element not found in DOM", stale: true };
@@ -528,11 +533,14 @@ export async function performElementScroll(
         if (isPageLevel) {
           scrollTarget = document.scrollingElement || document.documentElement;
         } else {
-          // Check if element itself is scrollable
+          // Check if element itself is scrollable (包括overflow:hidden但实际可滚动的元素)
           const style = window.getComputedStyle(el);
-          const isScrollable = (style.overflowX === 'auto' || style.overflowX === 'scroll' ||
-                                style.overflowY === 'auto' || style.overflowY === 'scroll' ||
-                                style.overflow === 'auto' || style.overflow === 'scroll');
+          const overflow = style.overflow + style.overflowY + style.overflowX;
+          const hasScrollStyle = overflow.includes('auto') || overflow.includes('scroll');
+          const isHiddenButScrollable = style.overflow === 'hidden' &&
+            (el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth);
+          const isScrollable = (hasScrollStyle || isHiddenButScrollable) &&
+            (el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth);
 
           // If not scrollable, try to find a scrollable parent or use page
           if (!isScrollable) {
@@ -541,10 +549,17 @@ export async function performElementScroll(
         }
 
         try {
+          // Calculate scroll amount based on element/viewport dimensions
+          const scrollHeight = scrollTarget.clientHeight || window.innerHeight;
+          const scrollWidth = scrollTarget.clientWidth || window.innerWidth;
+          
+          const scrollX = Math.round(scrollWidth * xMultiplier);
+          const scrollY = Math.round(scrollHeight * yMultiplier);
+          
           // Use scrollBy for smooth relative scrolling
           scrollTarget.scrollBy({
-            left: ${scrollX},
-            top: ${scrollY},
+            left: scrollX,
+            top: scrollY,
             behavior: 'instant'
           });
 
@@ -553,6 +568,12 @@ export async function performElementScroll(
             scrollPosition: {
               x: scrollTarget.scrollLeft,
               y: scrollTarget.scrollTop
+            },
+            scrollAmount: {
+              x: scrollX,
+              y: scrollY,
+              viewportHeight: scrollHeight,
+              viewportWidth: scrollWidth
             }
           };
         } catch (e) {
@@ -566,11 +587,20 @@ export async function performElementScroll(
       (function() {
         // Use document.scrollingElement for cross-browser compatibility
         const scrollTarget = document.scrollingElement || document.documentElement;
+        const xMultiplier = ${xMultiplier};
+        const yMultiplier = ${yMultiplier};
 
         try {
+          // Calculate scroll amount based on viewport dimensions
+          const scrollHeight = scrollTarget.clientHeight || window.innerHeight;
+          const scrollWidth = scrollTarget.clientWidth || window.innerWidth;
+          
+          const scrollX = Math.round(scrollWidth * xMultiplier);
+          const scrollY = Math.round(scrollHeight * yMultiplier);
+          
           scrollTarget.scrollBy({
-            left: ${scrollX},
-            top: ${scrollY},
+            left: scrollX,
+            top: scrollY,
             behavior: 'instant'
           });
 
@@ -579,6 +609,12 @@ export async function performElementScroll(
             scrollPosition: {
               x: scrollTarget.scrollLeft,
               y: scrollTarget.scrollTop
+            },
+            scrollAmount: {
+              x: scrollX,
+              y: scrollY,
+              viewportHeight: scrollHeight,
+              viewportWidth: scrollWidth
             }
           };
         } catch (e) {
