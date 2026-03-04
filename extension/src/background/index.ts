@@ -1240,8 +1240,24 @@ return {
             function isScrollable(el) {
               const style = window.getComputedStyle(el);
               const overflow = style.overflow + style.overflowY + style.overflowX;
-              return (overflow.includes('auto') || overflow.includes('scroll')) && 
-                     el.scrollHeight > el.clientHeight;
+              
+              // 1. 传统滚动：overflow为auto/scroll
+              const hasScrollStyle = overflow.includes('auto') || overflow.includes('scroll');
+              
+              // 2. 隐藏overflow但实际可滚动（Swiper、transform滚动等）
+              const isHiddenButScrollable = style.overflow === 'hidden';
+              
+              // 3. 检测实际滚动能力（垂直和水平）
+              const hasVerticalScroll = el.scrollHeight > el.clientHeight;
+              const hasHorizontalScroll = el.scrollWidth > el.clientWidth;
+              const canScroll = hasVerticalScroll || hasHorizontalScroll;
+              
+              // 4. 排除body和html（避免误检整个页面）
+              const tag = el.tagName.toLowerCase();
+              if (tag === 'body' || tag === 'html') return false;
+              
+              // 5. 组合条件：有scroll样式或hidden但可滚动
+              return (hasScrollStyle || isHiddenButScrollable) && canScroll;
             }
             
             function isInputable(el) {
@@ -1493,7 +1509,13 @@ return {
         if (scrollTabId === undefined || scrollTabId === null) throw new Error('tab_id is required');
         
         // element_id is optional - if not provided, scrolls the entire page
-        const scrollResult = await performElementScroll(command.conversation_id, command.element_id, command.direction || 'down', scrollTabId);
+        const scrollResult = await performElementScroll(
+          command.conversation_id,
+          command.element_id,
+          command.direction || 'down',
+          scrollTabId,
+          command.scroll_amount || 0.5
+        );
         const scrollScreenshotResult = await captureScreenshot(scrollTabId, command.conversation_id, true, 90, false, 0);
         
         return {

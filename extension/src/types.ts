@@ -146,6 +146,8 @@ export interface ScrollElementCommand extends BaseCommand {
   /** Element ID from highlight response (6-char hash). If not provided, scrolls the entire page */
   element_id?: string;
   direction?: ScrollDirection;
+  /** Scroll amount relative to page/element height (0.5 = half page, 1.0 = full page) */
+  scroll_amount?: number;
   /**
    * Target tab ID (optional - auto-resolved from conversation if not provided)
    * Note: Required in Python models, but optional here as extension auto-resolves it

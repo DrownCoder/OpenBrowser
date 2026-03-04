@@ -52,6 +52,12 @@ class OpenBrowserAction(Action):
     page: Optional[int] = Field(default=1, ge=1, description="Page number for pagination (1-indexed)")
     # Scroll parameters
     direction: Optional[str] = Field(default="down", description="Scroll direction: up/down/left/right")
+    scroll_amount: Optional[float] = Field(
+        default=0.5,
+        ge=0.1,
+        le=3.0,
+        description="Scroll amount relative to page/element height (0.5 = half page, 1.0 = full page, 2.0 = two pages)"
+    )
     
     # Keyboard input parameters
     text: Optional[str] = Field(default=None, description="Text to input")
@@ -645,6 +651,7 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 command = ScrollElementCommand(
                     element_id=action.element_id,
                     direction=pending['extra_data'].get('direction', 'down'),
+                    scroll_amount=pending['extra_data'].get('scroll_amount', 0.5),
                     conversation_id=self.conversation_id,
                     tab_id=action.tab_id
                 )
@@ -715,7 +722,7 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                         element_id=action.element_id or '',
                         action_type='scroll',
                         full_html=full_html,
-                        extra_data={'direction': action.direction or 'down', 'tab_id': action.tab_id},
+                        extra_data={'direction': action.direction or 'down', 'scroll_amount': action.scroll_amount or 0.5, 'tab_id': action.tab_id},
                         screenshot_data_url=screenshot
                     )
                     screenshot_data_url = screenshot
@@ -725,6 +732,7 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                     # directly execute for page scroll
                     command = ScrollElementCommand(
                         direction=action.direction,
+                        scroll_amount=action.scroll_amount or 0.5,
                         conversation_id=self.conversation_id,
                         tab_id=action.tab_id
                     )
@@ -1067,10 +1075,21 @@ You MUST visually verify and then confirm with `confirm_scroll_element`.
 // → Review the orange highlight + HTML
 // → Confirm:
 { "type": "confirm_scroll_element", "element_id": "d2f4a8", "tab_id": 123 }
+
+// Scroll by custom amount:
+{ "type": "scroll_element", "direction": "down", "scroll_amount": 1.0, "tab_id": 123 }  // Full page
+{ "type": "scroll_element", "direction": "down", "scroll_amount": 0.2, "tab_id": 123 }  // 20% of page
+{ "type": "scroll_element", "direction": "down", "scroll_amount": 2.0, "tab_id": 123 }  // Two pages
 ```
 Parameters:
 - `element_id`: (optional) Element ID from highlight response. If not provided, scrolls the entire page.
 - `direction`: "up", "down", "left", or "right" (default: "down")
+- `scroll_amount`: Relative amount to scroll based on page/element height (default: 0.5)
+  - `0.5` = half page (default)
+  - `1.0` = full page
+  - `2.0` = two pages
+  - `0.2` = 20% of page
+  - Range: 0.1 to 3.0
 Use this to:
 - Scroll within specific containers (when element_id is provided)
 - Scroll the entire page (when element_id is omitted)
