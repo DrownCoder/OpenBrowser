@@ -117,6 +117,7 @@ export interface HighlightElementsCommand extends BaseCommand {
   type: 'highlight_elements';
   element_type?: ElementType;  // Single element type for stable pagination
   page?: number;  // 1-indexed page number for collision-aware pagination
+  keywords?: string;  // Filter elements by HTML content (no pagination needed when provided)
 }
 
 export interface ClickElementCommand extends BaseCommand {
@@ -277,6 +278,7 @@ export interface HighlightOptions {
   elementType?: ElementType;   // Single type to highlight (for stable pagination)
   page?: number;                 // 1-indexed page number for collision-aware pagination
   scale?: number;                // Device pixel ratio for coordinate scaling
+  keywords?: string;              // Keywords to filter elements by HTML content (no pagination needed when provided)
 }
 
 export interface ElementActionResult {

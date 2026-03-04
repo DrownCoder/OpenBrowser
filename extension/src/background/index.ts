@@ -1042,6 +1042,7 @@ return {
         
         const elementType = command.element_type || 'clickable';
         const page = command.page || 1;  // 1-indexed page for collision-aware pagination
+        const keywords = command.keywords;
         
         // Build script to detect elements IN PAGE CONTEXT
         const detectionScript = `
@@ -1408,22 +1409,42 @@ return {
         
         const allElements = detectionResult.result.value.elements || [];
 
-        // Generate hash IDs for all elements (collision-free)
+        // Filter by keywords if provided
+        let filteredElements = allElements;
+        if (keywords && keywords.trim()) {
+          const searchTerm = keywords.trim().toLowerCase();
+          filteredElements = allElements.filter((el: InteractiveElement) => 
+            el.html && el.html.toLowerCase().includes(searchTerm)
+          );
+          console.log(`🔍 [HighlightElements] Keyword filter \"${keywords}\" matched ${filteredElements.length} of ${allElements.length} elements`);
+        }
+
+        // Generate hash IDs for filtered elements (collision-free)
         const existingHashes = new Set<string>();
-        for (const element of allElements) {
+        for (const element of filteredElements) {
           const { id } = generateElementId(element.type, element.selector, existingHashes);
           element.id = id;
           existingHashes.add(id);
         }
+
+        let paginatedElements: InteractiveElement[];
+        let totalPages: number;
+        let currentPage = page;
         
-        // Collision-aware pagination
-        const paginatedElements = selectCollisionFreePage(allElements, page);
-        
-        // Calculate total pages for pagination info
-        const totalPages = calculateTotalPages(allElements);
-        console.log(`📄 [HighlightElements] Page ${page}/${totalPages}, showing ${paginatedElements.length} of ${allElements.length} elements`);
-        
-        elementCache.storeElements(conversationId, activeTabId, allElements);
+        if (keywords && keywords.trim()) {
+          // Keyword mode: return all matching elements, no pagination
+          paginatedElements = filteredElements;
+          totalPages = 1;
+          currentPage = 1;
+          console.log(`🔍 [HighlightElements] Keyword filter \"${keywords}\" matched ${paginatedElements.length} elements (no pagination)`);
+        } else {
+          // Normal collision-aware pagination
+          paginatedElements = selectCollisionFreePage(filteredElements, page);
+          totalPages = calculateTotalPages(filteredElements);
+          console.log(`📄 [HighlightElements] Page ${page}/${totalPages}, showing ${paginatedElements.length} of ${filteredElements.length} elements`);
+        }
+
+        elementCache.storeElements(conversationId, activeTabId, filteredElements);
         
         // Capture screenshot
         const screenshotResult = await captureScreenshot(activeTabId, conversationId, true, 90, false, 0);
@@ -1462,9 +1483,9 @@ return {
           success: true,
           data: {
             elements: paginatedElements,
-            totalElements: allElements.length,
+            totalElements: filteredElements.length,
             totalPages: totalPages,
-            page: page,
+            page: currentPage,
             screenshot: await compressIfNeeded(highlightedScreenshot, getCompressionThreshold()),
           },
           timestamp: Date.now(),
