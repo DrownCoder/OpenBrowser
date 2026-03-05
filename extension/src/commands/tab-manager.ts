@@ -153,27 +153,22 @@ export class TabManager {
   }
 
   /**
+   * Position a tab group to the left side (after pinned tabs)
+   */
+  private async positionTabGroup(groupId: number, windowId: number): Promise<void> {
+    try {
+      const pinnedTabs = await chrome.tabs.query({ pinned: true, windowId });
+      await chrome.tabGroups.move(groupId, { index: pinnedTabs.length });
+      console.log(`✅ [TabManager] Positioned group ${groupId} after ${pinnedTabs.length} pinned tabs`);
+    } catch (error) {
+      console.warn(`⚠️ [TabManager] Could not position group ${groupId}:`, error);
+    }
+  }
+
+  /**
    * Create a new tab group for a conversation
    * Note: This now just prepares the group, no dummy tab needed
    */
-  private async createTabGroup(_windowId: number, conversationId: string): Promise<number> {
-    try {
-      const session = this.getOrCreateSession(conversationId);
-      const groupName = this.generateGroupName(conversationId);
-      
-      // ✅ FIX: Don't create dummy tab - group will be created when first real tab is added
-      // Store the intended group name in session for later use
-      session.groupId = null; // Will be set when first tab is added
-      
-      console.log(`✅ [TabManager] Prepared tab group settings for ${conversationId}: ${groupName}`);
-      
-      // Return 0 to indicate no group created yet, but settings are ready
-      return 0;
-    } catch (error) {
-      console.error(`❌ [TabManager] Error preparing tab group for ${conversationId}:`, error);
-      throw error;
-    }
-  }
 
   /**
    * Initialize a new managed session with a starting URL
@@ -186,33 +181,32 @@ export class TabManager {
     
     // Ensure URL has protocol
     let targetUrl = startUrl;
-    if (!startUrl.match(/^https?:\/\//)) {
-      targetUrl = `https://${startUrl}`;
-    }
+
+    // FIXME(softpudding): I removed this so file can be accessed directly.
+    // if (!startUrl.match(/^https?:\/\//)) {
+    //   targetUrl = `https://${startUrl}`;
+    // }
     
     // First, ensure we have a tab group (find existing or create new)
     
     // ⬇️ DEBUG: Print current window's existing tab groups before initialization
-    if (chrome.tabGroups) {
-      try {
-        const currentWindow = await chrome.windows.getCurrent();
-        const allGroups = await chrome.tabGroups.query({ windowId: currentWindow.id });
-        console.log(`🔍 [DEBUG-${conversationId.substring(0, 8)}] Current window has ${allGroups.length} existing groups:`, 
-          allGroups.map(g => ({ id: g.id, title: g.title, color: g.color })));
-      } catch (e) {
-        console.log(`🔍 [DEBUG-${conversationId.substring(0, 8)}] Failed to query existing groups:`, e);
-      }
+    if (!chrome.tabGroups) {
+      throw new Error('chrome.tabGroups API is not available. Ensure Chrome version >= 85 and "tabGroups" permission is declared in manifest.json');
+    }
+    try {
+      const currentWindow = await chrome.windows.getCurrent();
+      const allGroups = await chrome.tabGroups.query({ windowId: currentWindow.id });
+      console.log(`🔍 [DEBUG-${conversationId.substring(0, 8)}] Current window has ${allGroups.length} existing groups:`,
+        allGroups.map(g => ({ id: g.id, title: g.title, color: g.color })));
+    } catch (e) {
+      console.log(`🔍 [DEBUG-${conversationId.substring(0, 8)}] Failed to query existing groups:`, e);
     }
     if (!session.groupId && chrome.tabGroups) {
       console.log(`📁 [TabManager] Finding or creating tab group for session ${conversationId}`);
       const groupId = await this.findOrCreateTabGroup(conversationId);
       console.log(`🔍 [DEBUG-${conversationId.substring(0, 8)}] findOrCreateTabGroup returned: ${groupId}`);
       if (!groupId) {
-        // Get current window
-        const currentWindow = await chrome.windows.getCurrent();
-        console.log(`🔍 [DEBUG-${conversationId.substring(0, 8)}] No group found, calling createTabGroup for window ${currentWindow.id}`);
-        await this.createTabGroup(currentWindow.id!, conversationId);
-        console.log(`🔍 [DEBUG-${conversationId.substring(0, 8)}] After createTabGroup, session.groupId: ${session.groupId}`);
+        console.log(`📁 [TabManager] No existing tab group found for ${conversationId}, will create with first tab`);
       }
       console.log(`✅ [TabManager] Tab group ready for ${conversationId}: ${session.groupId}`);
     }
@@ -302,46 +296,33 @@ export class TabManager {
     // Create the tab
     const tab = await chrome.tabs.create({ url: targetUrl, active });
     
-    // Add to tab group if available
-    let groupId = session.groupId;
-    if (chrome.tabGroups && tab.id) {
-      if (!session.groupId) {
-        // Create group if it doesn't exist
-        groupId = await this.createTabGroup(tab.windowId, conversationId);
-      }
-      
-      // Add tab to group
-      if (groupId && tab.id) {
-        try {
-          await chrome.tabs.group({
-            groupId,
-            tabIds: [tab.id]
-          });
-          
-          // Move group to left side (after pinned tabs)
-          const pinnedTabs = await chrome.tabs.query({ pinned: true, windowId: tab.windowId });
-          await chrome.tabGroups.move(groupId, { index: pinnedTabs.length });
-        } catch (error) {
-          console.warn(`⚠️ [TabManager] Could not add tab to group for ${conversationId}:`, error);
-        }
-      }
+    // Use addTabToManagement for consistent group handling
+    const added = await this.addTabToManagement(tab.id!, conversationId);
+    if (!added) {
+      console.warn(`⚠️ [TabManager] Failed to add tab ${tab.id} to management for ${conversationId}`);
+      // Fall back to creating managed tab record manually
+      const fallbackManagedTab: ManagedTab = {
+        tabId: tab.id!,
+        groupId: undefined,
+        windowId: tab.windowId,
+        url: targetUrl,
+        title: tab.title,
+        createdAt: Date.now(),
+        lastActivity: Date.now()
+      };
+      session.managedTabs.set(tab.id!, fallbackManagedTab);
+      session.lastActivity = Date.now();
+      console.log(`✅ [TabManager] Opened managed tab ${tab.id} for ${conversationId} (fallback, no group)`);
+      return fallbackManagedTab;
     }
     
-    // Create managed tab record
-    const managedTab: ManagedTab = {
-      tabId: tab.id!,
-      groupId: groupId || undefined,
-      windowId: tab.windowId,
-      url: targetUrl,
-      title: tab.title,
-      createdAt: Date.now(),
-      lastActivity: Date.now()
-    };
+    // Get the managed tab that was created by addTabToManagement
+    const managedTab = session.managedTabs.get(tab.id!);
+    if (!managedTab) {
+      throw new Error(`Failed to retrieve managed tab ${tab.id} after adding to management`);
+    }
     
-    session.managedTabs.set(tab.id!, managedTab);
-    session.lastActivity = Date.now();
-    
-    console.log(`✅ [TabManager] Opened managed tab ${tab.id} for ${conversationId} in ${groupId ? 'group ' + groupId : 'no group'}`);
+    console.log(`✅ [TabManager] Opened managed tab ${tab.id} for ${conversationId} in ${managedTab.groupId ? 'group ' + managedTab.groupId : 'no group'}`);
     
     return managedTab;
   }
@@ -386,12 +367,18 @@ export class TabManager {
           
           session.groupId = groupId;
           console.log(`✅ [TabManager] Created tab group for ${conversationId}: ${groupName} (ID: ${groupId})`);
+          
+          // Position the new group
+          await this.positionTabGroup(groupId, tab.windowId);
         } else {
           // Add to existing group
           await chrome.tabs.group({
             groupId: groupId!,
             tabIds: [tab.id]
           });
+          
+          // Position the group (ensure consistent placement)
+          await this.positionTabGroup(groupId!, tab.windowId);
         }
       }
       
@@ -477,19 +464,7 @@ export class TabManager {
     return null;
   }
 
-  /**
-   * Find conversation ID by window ID (alternative detection when openerTabId fails)
-   */
-  findConversationByWindow(windowId: number): string | null {
-    for (const [conversationId, session] of this.sessions.entries()) {
-      for (const managedTab of session.managedTabs.values()) {
-        if (managedTab.windowId === windowId) {
-          return conversationId;
-        }
-      }
-    }
-    return null;
-  }
+
 
   /**
    * Find conversation ID by tab group ID (most accurate for managed tabs)
@@ -754,14 +729,7 @@ export class TabManager {
         }
       }
       
-      // Method C: If both failed, try window-based detection
-      if (!conversationId && tab.windowId) {
-        conversationId = this.findConversationByWindow(tab.windowId);
-        if (conversationId) {
-          detectionMethod = 'windowId';
-          console.log(`➕ [TabManager] New tab ${tabId} detected via window ${tab.windowId} in conversation ${conversationId} (via ${detectionMethod})`);
-        }
-      }
+
       
       // If we found a conversation, add to management and set as active
       if (conversationId) {
@@ -798,18 +766,7 @@ export class TabManager {
         }
       }
       
-      // Method C: If still not found, try window-based detection
-      if (!conversationId && windowId) {
-        conversationId = this.findConversationByWindow(windowId);
-        if (conversationId) {
-          detectionMethod = 'windowId';
-          console.log(`🎯 [TabManager] Activated tab ${tabId} not in managedTabs, but window ${windowId} belongs to conversation ${conversationId}`);
-          
-          // Add this tab to management since it's in a managed window
-          await this.addTabToManagement(tabId, conversationId);
-          console.log(`➕ [TabManager] Added activated tab ${tabId} to management via window detection`);
-        }
-      }
+
       
       if (conversationId) {
         // Update as active for its conversation
