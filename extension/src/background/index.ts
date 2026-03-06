@@ -913,10 +913,24 @@ default:
         const jsDuration = Date.now() - jsStartTime;
         console.log(`✅ [JavaScript] Execution completed in ${jsDuration}ms`);
         
-return {
+        // Determine which tab to screenshot: latest new tab if created, otherwise original tab
+        let screenshotTabId = activeTabId;
+        if (jsResult.new_tabs_created && jsResult.new_tabs_created.length > 0) {
+          const latestNewTab = jsResult.new_tabs_created[jsResult.new_tabs_created.length - 1];
+          screenshotTabId = latestNewTab.tabId;
+          console.log(`📸 [JavaScript] New tabs detected, screenshot will be on latest new tab ${screenshotTabId}`);
+          
+          // Update active tab for the conversation to the new tab
+          tabManager.setCurrentActiveTabId(conversationId, screenshotTabId);
+        }
+        
+        // Always take screenshot
+        const jsScreenshotResult = await captureScreenshot(screenshotTabId, conversationId, true, 90, false, 0);
+        
+        return {
           success: true,
           message: 'JavaScript executed successfully',
-          data: jsResult,
+          data: { ...jsResult, screenshot: jsScreenshotResult?.imageData },
           timestamp: Date.now(),
           duration: jsDuration,
         };
@@ -1516,7 +1530,19 @@ return {
         if (clickTabId === undefined || clickTabId === null) throw new Error('tab_id is required');
         
         const clickResult = await performElementClick(command.conversation_id, command.element_id, clickTabId);
-        const clickScreenshotResult = await captureScreenshot(clickTabId, command.conversation_id, true, 90, false, 0);
+        
+        // Determine which tab to screenshot: latest new tab if created, otherwise original tab
+        let screenshotTabId = clickTabId;
+        if (clickResult.new_tabs_created && clickResult.new_tabs_created.length > 0) {
+          const latestNewTab = clickResult.new_tabs_created[clickResult.new_tabs_created.length - 1];
+          screenshotTabId = latestNewTab.tabId;
+          console.log(`📸 [ClickElement] New tabs detected, screenshot will be on latest new tab ${screenshotTabId}`);
+          
+          // Update active tab for the conversation to the new tab
+          tabManager.setCurrentActiveTabId(command.conversation_id, screenshotTabId);
+        }
+        
+        const clickScreenshotResult = await captureScreenshot(screenshotTabId, command.conversation_id, true, 90, false, 0);
         
         return {
           success: clickResult.success,
