@@ -208,6 +208,11 @@ OpenBrowser has explicit screenshot control for maximum flexibility:
 
 | Command | Auto-Screenshot | Notes |
 |---------|------------------|-------|
+| `tab init` | Yes | Verify page load |
+| `tab open` | Yes | Verify new tab |
+| `tab switch` | Yes | Verify tab switch |
+| `tab refresh` | Yes | Verify refresh result |
+|---------|------------------|-------|
 | `highlight_elements` | Yes | Visual overlay for element selection |
 | `click_element` | Yes | Verify interaction result |
 | `hover_element` | Yes | Verify hover state |
@@ -220,6 +225,10 @@ OpenBrowser has explicit screenshot control for maximum flexibility:
 
 | Command | Behavior | How to Get Screenshot |
 |---------|----------|----------------------|
+| `tab list` | Returns tab list only | N/A |
+| `tab close` | Returns close result only | N/A |
+| `javascript_execute` | Returns JS result only | Call `screenshot` after |
+|---------|----------|----------------------|
 | `tab init` | Returns tab info only | Call `screenshot` after |
 | `tab open` | Returns tab info only | Call `screenshot` after |
 | `tab switch` | Returns tab info only | Call `screenshot` after |
@@ -228,7 +237,10 @@ OpenBrowser has explicit screenshot control for maximum flexibility:
 
 ### Best Practice
 
-When you need visual feedback after navigation or JavaScript execution:
+When you need visual feedback after JavaScript execution:
+```
+1. javascript_execute "document.querySelector('#button').click()"  # No screenshot
+2. screenshot                                                # Explicit request for visual feedback
 ```
 1. tab init https://example.com    # No screenshot
 2. screenshot                      # Explicit request for visual feedback
