@@ -312,11 +312,7 @@ class CommandProcessor:
                 elif response.data and "tab_id" in response.data:
                     self._set_current_tab_id(response.data["tab_id"], conversation_id)
 
-        # Add screenshot for init/switch/open/refresh actions
-        if response.success and command.action in ("init", "switch", "open", "refresh"):
-            return await self._add_screenshot_to_response(
-                response, command.conversation_id
-            )
+
 
         # Add message for close action
         if response.success and command.action == "close":
@@ -349,10 +345,7 @@ class CommandProcessor:
         """Execute JavaScript code in browser tab and return result with screenshot"""
         response = await self._send_prepared_command(command)
 
-        if response.success:
-            return await self._add_screenshot_to_response(
-                response, command.conversation_id
-            )
+
 
         return response
 
