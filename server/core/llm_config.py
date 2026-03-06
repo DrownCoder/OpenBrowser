@@ -142,6 +142,11 @@ class LLMConfigManager:
         config = self._load_config()
         return config.llm.api_key is not None and len(config.llm.api_key) > 0
     
+    def reload_config(self) -> AppConfig:
+        """Force reload configuration from disk, bypassing cache"""
+        self._config = None
+        return self._load_config()
+    
     def reset_config(self):
         """Reset configuration to defaults"""
         self._config = None

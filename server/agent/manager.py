@@ -45,9 +45,6 @@ class OpenBrowserAgentManager:
     def __init__(self):
         self.conversations: Dict[str, ConversationState] = {}
 
-        # Lazy initialization of LLM (only when needed)
-        self._llm: Optional[LLM] = None
-
         # Default tools
         self.default_tools = [
             Tool(name="open_browser"),  # Our browser automation tool
@@ -56,17 +53,12 @@ class OpenBrowserAgentManager:
             Tool(name=TaskTrackerTool.name),  # Task tracking
         ]
 
-    @property
-    def llm(self) -> LLM:
-        """Lazy initialization of LLM"""
-        if self._llm is None:
-            self._llm = self._create_default_llm()
-        return self._llm
+
 
     def _create_default_llm(self) -> LLM:
         """Create default LLM configuration from config file"""
-        # Load LLM configuration from file
-        llm_config = llm_config_manager.get_llm_config()
+        # Load LLM configuration from file (force reload from disk)
+        llm_config = llm_config_manager.reload_config().llm
 
         # Check if API key is configured
         if not llm_config.api_key:
@@ -111,11 +103,12 @@ class OpenBrowserAgentManager:
 
         # Create agent with tools
         agent_context = AgentContext(current_datetime=datetime.now())
+        llm_instance = self._create_default_llm()
         agent = Agent(
-            llm=self.llm,
+            llm=llm_instance,
             tools=self.default_tools,
             condenser=get_default_condenser(
-                llm=self.llm.model_copy(update={"usage_id": "condenser"})
+                llm=llm_instance.model_copy(update={"usage_id": "condenser"})
             ),
             agent_context=agent_context,
         )
@@ -175,8 +168,9 @@ class OpenBrowserAgentManager:
         # Create new conversation with the given ID
         # Create agent with tools
         agent_context = AgentContext(current_datetime=datetime.now())
+        llm_instance = self._create_default_llm()
         agent = Agent(
-            llm=self.llm, tools=self.default_tools, agent_context=agent_context
+            llm=llm_instance, tools=self.default_tools, agent_context=agent_context
         )
 
         # Create visualizer (queue will be set when processing messages)
