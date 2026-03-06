@@ -787,32 +787,9 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 if tabs_result.get('success') and tabs_result.get('data') and 'tabs' in tabs_result['data']:
                     tabs_data = tabs_result['data']['tabs']
 
-                # Capture screenshot after tab operations (except list)
-                if action_str != "list":
-                    try:
-                        screenshot_cmd = ScreenshotCommand(
-                            conversation_id=self.conversation_id
-                        )
-                        screenshot_result = self._execute_command_sync(screenshot_cmd)
-                        if screenshot_result and screenshot_result.get('success'):
-                            screenshot_data_url = screenshot_result.get('data', {}).get('screenshot')
-                            logger.debug(f"DEBUG: Captured screenshot after tab '{action_str}', length={len(screenshot_data_url) if screenshot_data_url else 0}")
-                    except Exception as e:
-                        logger.warning(f"Failed to capture screenshot after tab action: {e}")
+
             
-            # Capture screenshot after javascript_execute (if no dialog opened)
-            if action_type == "javascript_execute" and result_dict:
-                if not result_dict.get('dialog_opened', False):
-                    try:
-                        screenshot_cmd = ScreenshotCommand(
-                            conversation_id=self.conversation_id
-                        )
-                        screenshot_result = self._execute_command_sync(screenshot_cmd)
-                        if screenshot_result and screenshot_result.get('success'):
-                            screenshot_data_url = screenshot_result.get('data', {}).get('screenshot')
-                            logger.debug(f"DEBUG: Captured screenshot after javascript_execute, length={len(screenshot_data_url) if screenshot_data_url else 0}")
-                    except Exception as e:
-                        logger.warning(f"Failed to capture screenshot after javascript_execute: {e}")
+
 
             # Extract success and dialog info from result_dict
             success = True  # Default to True

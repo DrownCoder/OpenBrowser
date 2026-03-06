@@ -173,6 +173,41 @@ understand page structure and select elements.
 ]
 ```
 
+
+## SCREENSHOT BEHAVIOR
+
+The screenshot logic is controlled by the Extension layer. The server layer routes commands while the Extension layer decides when to capture screenshots.
+
+### Commands That Return Screenshots
+
+| Command | Returns Screenshot | Notes |
+|---------|--------------------|-------|
+| `screenshot` | Yes | Explicit screenshot request |
+| `highlight_elements` | Yes | Visual overlay for element selection |
+| `highlight_single_element` | Yes | 2PC confirmation overlay |
+| `click_element` | Yes | Verify interaction result |
+| `hover_element` | Yes | Verify hover state |
+| `scroll_element` | Yes | Verify scroll position |
+| `keyboard_input` | Yes | Verify input result |
+| `handle_dialog` | Yes | Verify dialog handling result |
+
+### Commands That Do NOT Return Screenshots
+
+| Command | Behavior | How to Get Screenshot |
+|---------|----------|----------------------|
+| `tab init` | Returns tab info only | Call `screenshot` after |
+| `tab open` | Returns tab info only | Call `screenshot` after |
+| `tab switch` | Returns tab info only | Call `screenshot` after |
+| `tab refresh` | Returns tab info only | Call `screenshot` after |
+| `javascript_execute` | Returns JS result only | Call `screenshot` after |
+
+### Implementation Note
+
+After the screenshot refactor, the server layer no longer proactively triggers screenshots in tab and javascript_execute commands. All screenshot decisions are made by the Extension layer.
+
+**Best Practice:** Use explicit `screenshot` command when visual feedback is needed after navigation or JavaScript execution.
+
+
 ## NOTES
 
 - WebSocket runs on port 8766, HTTP on 8765

@@ -671,6 +671,9 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
             // Set the newly created tab as active
             tabManager.setCurrentActiveTabId(conversationId, initResult.tabId);
             
+            // Capture screenshot after initialization
+            const initScreenshotResult = await captureScreenshot(initResult.tabId, conversationId, true, 90, false, 0);
+            
             return {
               success: true,
               message: `Session ${conversationId} initialized with ${command.url}`,
@@ -680,6 +683,7 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
                 url: initResult.url,
                 conversationId: conversationId,
                 isManaged: true,
+                screenshot: initScreenshotResult?.imageData,
               },
               timestamp: Date.now(),
             };
@@ -695,12 +699,17 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
               tabManager.setCurrentActiveTabId(conversationId, openResult.tabId);
             }
             
+            // Capture screenshot after opening
+            const openScreenshotResult = openResult.tabId ? 
+              await captureScreenshot(openResult.tabId, conversationId, true, 90, false, 0) : null;
+            
             return {
               success: true,
               message: openResult.message,
               data: {
                 ...openResult,
-                conversationId: conversationId
+                conversationId: conversationId,
+                screenshot: openScreenshotResult?.imageData,
               },
               timestamp: Date.now(),
             };
@@ -731,12 +740,16 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
             // Set the switched-to tab as active
             tabManager.setCurrentActiveTabId(conversationId, command.tab_id);
             
+            // Capture screenshot after switching
+            const switchScreenshotResult = await captureScreenshot(command.tab_id, conversationId, true, 90, false, 0);
+            
             return {
               success: true,
               message: switchResult.message,
               data: {
                 ...switchResult,
-                conversationId: conversationId
+                conversationId: conversationId,
+                screenshot: switchScreenshotResult?.imageData,
               },
               timestamp: Date.now(),
             };
@@ -763,12 +776,17 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
             await tabManager.ensureTabManaged(command.tab_id, conversationId);
             tabManager.updateTabActivity(command.tab_id, conversationId);
             const refreshResult = await tabs.refreshTab(command.tab_id);
+            
+            // Capture screenshot after refresh
+            const refreshScreenshotResult = await captureScreenshot(command.tab_id, conversationId, true, 90, false, 0);
+            
             return {
               success: true,
               message: refreshResult.message,
               data: {
                 ...refreshResult,
-                conversationId: conversationId
+                conversationId: conversationId,
+                screenshot: refreshScreenshotResult?.imageData,
               },
               timestamp: Date.now(),
             };
