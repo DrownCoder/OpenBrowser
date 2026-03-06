@@ -200,6 +200,46 @@ uv run chrome-cli tabs list
 uv run chrome-cli javascript execute "document.title"
 ```
 
+## SCREENSHOT BEHAVIOR
+
+OpenBrowser has explicit screenshot control for maximum flexibility:
+
+### Commands That Return Screenshots
+
+| Command | Auto-Screenshot | Notes |
+|---------|------------------|-------|
+| `highlight_elements` | Yes | Visual overlay for element selection |
+| `click_element` | Yes | Verify interaction result |
+| `hover_element` | Yes | Verify hover state |
+| `scroll_element` | Yes | Verify scroll position |
+| `keyboard_input` | Yes | Verify input result |
+| `handle_dialog` | Yes | Verify dialog handling result |
+| `screenshot` | Yes | Explicit screenshot request |
+
+### Commands That Do NOT Return Screenshots
+
+| Command | Behavior | How to Get Screenshot |
+|---------|----------|----------------------|
+| `tab init` | Returns tab info only | Call `screenshot` after |
+| `tab open` | Returns tab info only | Call `screenshot` after |
+| `tab switch` | Returns tab info only | Call `screenshot` after |
+| `tab refresh` | Returns tab info only | Call `screenshot` after |
+| `javascript_execute` | Returns JS result only | Call `screenshot` after |
+
+### Best Practice
+
+When you need visual feedback after navigation or JavaScript execution:
+```
+1. tab init https://example.com    # No screenshot
+2. screenshot                      # Explicit request for visual feedback
+3. highlight_elements()            # Get interactive elements
+```
+
+This explicit approach gives the AI full control over when visual feedback is needed.
+
+---
+
+
 ## NOTES
 
 - **Git dependencies:** `openhands-sdk` and `openhands-tools` from git subdirectories
