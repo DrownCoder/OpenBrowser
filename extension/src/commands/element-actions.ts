@@ -13,7 +13,7 @@ import type { ElementActionResult } from '../types';
 
 import { elementCache } from './element-cache';
 import { executeJavaScript, type JavaScriptResult } from './javascript';
-import { captureScreenshot } from './screenshot';
+
 
 /**
  * Result type for element click operation
@@ -40,14 +40,13 @@ export interface HoverResult extends ElementActionResult {
  * 1. Look up element from cache
  * 2. Build JavaScript to click with full event sequence
  * 3. Execute with dialog detection
- * 4. Capture screenshot for verification
- * 5. Return result with dialog info if applicable
+ * 4. Return result with dialog info if applicable
  *
  * @param conversationId Session ID for element cache lookup
  * @param elementId Cached element ID (e.g., "click-1", "scroll-1")
  * @param tabId Target tab ID
  * @param timeout Maximum execution time in milliseconds (default: 30000)
- * @returns Click result with success status, screenshot, and dialog info
+ * @returns Click result with success status and dialog info
  */
 export async function performElementClick(
   conversationId: string,
@@ -182,14 +181,6 @@ export async function performElementClick(
   if (jsResult.dialog_opened && jsResult.dialog) {
     console.log(`💬 [ElementClick] Dialog opened during click: type=${jsResult.dialog.type}`);
 
-    // Try to capture screenshot even with dialog (may fail)
-    let screenshotDataUrl: string | undefined;
-    try {
-      const screenshotResult = await captureScreenshot(tabId, conversationId, false, 80);
-      screenshotDataUrl = screenshotResult?.dataUrl;
-    } catch {
-      // Screenshot may fail with dialog open, that's okay
-    }
 
     return {
       success: true,
@@ -200,7 +191,7 @@ export async function performElementClick(
         type: jsResult.dialog.type,
         message: jsResult.dialog.message,
       },
-      screenshotDataUrl,
+
       new_tabs_created: jsResult.new_tabs_created,
     };
 
@@ -242,25 +233,13 @@ export async function performElementClick(
     };
   }
 
-  // ============================================================
-  // STEP 5: Capture screenshot for verification
-  // ============================================================
   console.log(`✅ [ElementClick] Click executed successfully`);
-
-  let screenshotDataUrl: string | undefined;
-  try {
-    const screenshotResult = await captureScreenshot(tabId, conversationId, false, 80);
-    screenshotDataUrl = screenshotResult?.dataUrl;
-  } catch (screenshotError) {
-    console.warn(`⚠️ [ElementClick] Failed to capture screenshot:`, screenshotError);
-    // Continue without screenshot
-  }
 
   return {
     success: true,
     elementId,
     clicked: true,
-    screenshotDataUrl,
+
     new_tabs_created: jsResult.new_tabs_created,
   };
 
@@ -274,14 +253,13 @@ export async function performElementClick(
  * 1. Look up element from cache
  * 2. Build JavaScript to dispatch hover events
  * 3. Execute JavaScript
- * 4. Capture screenshot for verification
- * 5. Return result
+ * 4. Return result
  *
  * @param conversationId Session ID for element cache lookup
  * @param elementId Cached element ID (e.g., "click-1", "scroll-1")
  * @param tabId Target tab ID
  * @param timeout Maximum execution time in milliseconds (default: 30000)
- * @returns Hover result with success status and screenshot
+ * @returns Hover result with success status
  */
 export async function performElementHover(
   conversationId: string,
@@ -411,25 +389,13 @@ export async function performElementHover(
     };
   }
 
-  // ============================================================
-  // STEP 5: Capture screenshot for verification
-  // ============================================================
   console.log(`✅ [ElementHover] Hover executed successfully`);
-
-  let screenshotDataUrl: string | undefined;
-  try {
-    const screenshotResult = await captureScreenshot(tabId, conversationId, false, 80);
-    screenshotDataUrl = screenshotResult?.dataUrl;
-  } catch (screenshotError) {
-    console.warn(`⚠️ [ElementHover] Failed to capture screenshot:`, screenshotError);
-    // Continue without screenshot
-  }
 
   return {
     success: true,
     elementId,
     hovered: true,
-    screenshotDataUrl,
+
   };
 }
 
@@ -455,14 +421,14 @@ export interface ScrollResult extends ElementActionResult {
  * Flow:
  * 1. If elementId provided, look up element from cache
  * 2. Build JavaScript to scroll element or page
- * 3. Execute and return with screenshot
+ * 3. Execute and return result
  *
  * @param conversationId Session ID for element cache lookup
  * @param elementId Cached element ID (e.g., "scroll-1"). Optional - if not provided, scrolls the entire page
  * @param direction Scroll direction ('up', 'down', 'left', 'right')
  * @param tabId Target tab ID
  * @param timeout Maximum execution time in milliseconds (default: 30000)
- * @returns Scroll result with success status, screenshot, and scroll position
+ * @returns Scroll result with success status and scroll position
  */
 export async function performElementScroll(
   conversationId: string,
@@ -667,26 +633,14 @@ export async function performElementScroll(
     };
   }
 
-  // ============================================================
-  // STEP 3: Capture screenshot for verification
-  // ============================================================
   console.log(`✅ [ElementScroll] Scroll executed successfully`);
-
-  let screenshotDataUrl: string | undefined;
-  try {
-    const screenshotResult = await captureScreenshot(tabId, conversationId, false, 80);
-    screenshotDataUrl = screenshotResult?.dataUrl;
-  } catch (screenshotError) {
-    console.warn(`⚠️ [ElementScroll] Failed to capture screenshot:`, screenshotError);
-    // Continue without screenshot
-  }
 
   return {
     success: true,
     elementId,
     scrolled: true,
     scrollPosition: scrollResult.scrollPosition,
-    screenshotDataUrl,
+
   };
 }
 
@@ -707,15 +661,14 @@ export interface InputResult extends ElementActionResult {
  * 1. Look up element from cache
  * 2. Build JavaScript to focus, set value, and dispatch events
  * 3. Execute with dialog detection
- * 4. Capture screenshot for verification
- * 5. Return result with input value
+ * 4. Return result with input value
  *
  * @param conversationId Session ID for element cache lookup
  * @param elementId Cached element ID (e.g., "input-1", "textarea-1")
  * @param text Text to input into the element
  * @param tabId Target tab ID
  * @param timeout Maximum execution time in milliseconds (default: 30000)
- * @returns Input result with success status, screenshot, and input value
+ * @returns Input result with success status and input value
  */
 export async function performKeyboardInput(
   conversationId: string,
@@ -845,14 +798,7 @@ export async function performKeyboardInput(
   if (jsResult.dialog_opened && jsResult.dialog) {
     console.log(`💬 [KeyboardInput] Dialog opened during input: type=${jsResult.dialog.type}`);
 
-    // Try to capture screenshot even with dialog (may fail)
-    let screenshotDataUrl: string | undefined;
-    try {
-      const screenshotResult = await captureScreenshot(tabId, conversationId, false, 80);
-      screenshotDataUrl = screenshotResult?.dataUrl;
-    } catch {
-      // Screenshot may fail with dialog open, that's okay
-    }
+
 
     return {
       success: true,
@@ -863,7 +809,7 @@ export async function performKeyboardInput(
         type: jsResult.dialog.type,
         message: jsResult.dialog.message,
       },
-      screenshotDataUrl,
+
     };
   }
 
@@ -895,26 +841,14 @@ export async function performKeyboardInput(
     };
   }
 
-  // ============================================================
-  // STEP 5: Capture screenshot for verification
-  // ============================================================
   console.log(`✅ [KeyboardInput] Input executed successfully, value="${inputResult.value}"`);
-
-  let screenshotDataUrl: string | undefined;
-  try {
-    const screenshotResult = await captureScreenshot(tabId, conversationId, false, 80);
-    screenshotDataUrl = screenshotResult?.dataUrl;
-  } catch (screenshotError) {
-    console.warn(`⚠️ [KeyboardInput] Failed to capture screenshot:`, screenshotError);
-    // Continue without screenshot
-  }
 
   return {
     success: true,
     elementId,
     input: true,
     value: inputResult.value,
-    screenshotDataUrl,
+
   };
 }
 
