@@ -2416,6 +2416,11 @@
                 eventSource.close();
             }
             
+            // Abort any ongoing SSE request
+            if (abortController) {
+                abortController.abort();
+            }
+            
             // Setup SSE connection (cwd already validated)
             setupEventSource(conversationId, command, cwd);
         }
@@ -2424,6 +2429,11 @@
         function setupEventSource(conversationId, command, cwd) {
             const url = apiUrl(`agent/conversations/${conversationId}/messages`);
             console.log(`[Frontend] Setting up EventSource for URL: ${url}, cwd=${cwd}`);
+            
+            // Abort any ongoing request before starting a new one
+            if (abortController) {
+                abortController.abort();
+            }
             
             // Using fetch API for SSE streaming (EventSource only works with GET)
             eventSource = null; // No EventSource object, using fetch instead
@@ -2662,8 +2672,15 @@
                     document.getElementById('send-button').disabled = false;
                     document.getElementById('send-button').style.display = 'inline-block';
                     document.getElementById('pause-button').style.display = 'none';
-                    // Note: Cannot abort fetch from here as abortController is in fetch scope
-                    // The fetch will eventually complete or error on its own
+                    // Abort the ongoing fetch request
+                    if (abortController) {
+                        abortController.abort();
+                    }
+                    // Clear the timeout reference
+                    if (completionTimeout) {
+                        clearTimeout(completionTimeout);
+                        completionTimeout = null;
+                    }
                 }
             }, 300000);
             
