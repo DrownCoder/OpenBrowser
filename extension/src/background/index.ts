@@ -1475,10 +1475,10 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
           console.log(`🔍 [HighlightElements] Keyword filter \"${keywords}\" matched ${filteredElements.length} of ${allElements.length} elements`);
         }
 
-        // Generate hash IDs for filtered elements (collision-free)
+        // Generate hash IDs for filtered elements (collision-free, content-aware)
         const existingHashes = new Set<string>();
         for (const element of filteredElements) {
-          const { id } = generateElementId(element.type, element.selector, existingHashes);
+          const { id } = generateElementId(element.type, element.selector, existingHashes, element.html);
           element.id = id;
           existingHashes.add(id);
         }

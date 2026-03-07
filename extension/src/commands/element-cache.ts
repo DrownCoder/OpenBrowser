@@ -24,8 +24,8 @@ class ElementCacheImpl {
 
   /**
    * Store elements for a conversation and tab
-   * - New elements are added (not replacing existing)
-   * - Existing elements have their timestamp refreshed (TTL extension)
+   * - Elements are stored/overwritten by their ID
+   * - If an element with same ID already exists, it is replaced with new data
    * - No limit on element count - relies on TTL for cleanup
    */
   storeElements(conversationId: string, tabId: number, elements: InteractiveElement[]): void {
@@ -38,7 +38,7 @@ class ElementCacheImpl {
 
     const timestamp = Date.now();
     let added = 0;
-    let refreshed = 0;
+    let updated = 0;
 
     for (const element of elements) {
       const key = this.buildKey(conversationId, tabId, element.id);
@@ -53,14 +53,18 @@ class ElementCacheImpl {
         });
         added++;
       } else {
-        // Element already exists: just refresh timestamp (extend TTL)
-        existing.timestamp = timestamp;
-        refreshed++;
+        // Element already exists: replace with new data (content may have changed)
+        this.cache.set(key, {
+          element,
+          tabId,
+          timestamp,
+        });
+        updated++;
       }
     }
 
     console.log(
-      `📁 [ElementCache] Added ${added}, refreshed ${refreshed} elements for conversation ${conversationId}, tab ${tabId} (total: ${this.cache.size})`
+      `📁 [ElementCache] Added ${added}, updated ${updated} elements for conversation ${conversationId}, tab ${tabId} (total: ${this.cache.size})`
     );
   }
 

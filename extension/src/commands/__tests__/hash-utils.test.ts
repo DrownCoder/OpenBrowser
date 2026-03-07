@@ -29,8 +29,15 @@ describe('hash-utils', () => {
     test('salt changes the hash output', () => {
       const cssPath = 'div#content';
       const hashNoSalt = generateShortHash(cssPath);
-      const hashWithSalt = generateShortHash(cssPath, 1);
+      const hashWithSalt = generateShortHash(cssPath, undefined, 1);
       expect(hashNoSalt).not.toBe(hashWithSalt);
+    });
+
+    test('HTML content changes hash output', () => {
+      const cssPath = 'div#content';
+      const hashNoHtml = generateShortHash(cssPath);
+      const hashWithHtml = generateShortHash(cssPath, '<button>Click</button>');
+      expect(hashNoHtml).not.toBe(hashWithHtml);
     });
   });
 
@@ -45,7 +52,7 @@ describe('hash-utils', () => {
     test('collision resolution works (same hash + salt increment)', () => {
       // Create a collision scenario
       const cssPath = 'div#content';
-      const firstHash = generateShortHash(cssPath, 0);
+      const firstHash = generateShortHash(cssPath, undefined, 0);
       const existingHashes = new Set<string>([firstHash]);
 
       const result = generateUniqueHash(cssPath, existingHashes);
@@ -62,11 +69,11 @@ describe('hash-utils', () => {
       // Generate many hashes to simulate collision scenario
       // We'll use a low maxAttempts to trigger fallback faster
       for (let i = 0; i < 5; i++) {
-        existingHashes.add(generateShortHash(cssPath, i));
+        existingHashes.add(generateShortHash(cssPath, undefined, i));
       }
 
       // With maxAttempts=5, should trigger fallback
-      const result = generateUniqueHash(cssPath, existingHashes, 5);
+      const result = generateUniqueHash(cssPath, existingHashes, undefined, 5);
       expect(result.salt).toBeGreaterThan(5); // timestamp-based salt
       expect(result.hash.length).toBe(6);
     });
@@ -101,6 +108,36 @@ describe('hash-utils', () => {
       const result1 = generateElementId('click', 'div#content', existingHashes);
       const result2 = generateElementId('input', 'div#content', existingHashes);
       expect(result1.hash).toBe(result2.hash);
+    });
+
+    test('same CSS path with same HTML produces same hash', () => {
+      const cssPath = 'div#content';
+      const html = '<button>Submit</button>';
+
+      const hash1 = generateShortHash(cssPath, html);
+      const hash2 = generateShortHash(cssPath, html);
+
+      expect(hash1).toBe(hash2);
+    });
+
+    test('CSS path without HTML produces consistent hash', () => {
+      const cssPath = 'div#content';
+
+      const hash1 = generateShortHash(cssPath);
+      const hash2 = generateShortHash(cssPath, undefined);
+
+      expect(hash1).toBe(hash2);
+    });
+
+    test('generateElementId with HTML produces different hash than without HTML', () => {
+      const existingHashes = new Set<string>();
+      const cssPath = 'div#content';
+      const html = '<button>Submit</button>';
+
+      const resultWithoutHtml = generateElementId('click', cssPath, existingHashes);
+      const resultWithHtml = generateElementId('click', cssPath, existingHashes, html);
+
+      expect(resultWithoutHtml.hash).not.toBe(resultWithHtml.hash);
     });
   });
 });
