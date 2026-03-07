@@ -1156,6 +1156,48 @@
             font-size: 12px;
             line-height: 1.5;
         }
+        
+        /* Sisyphus prompt items */
+        .prompt-item {
+            margin-bottom: 15px;
+        }
+        .prompt-textarea {
+            flex: 1;
+            min-height: 60px;
+            font-family: monospace;
+            font-size: 12px;
+            padding: 8px;
+            background: #222222;
+            border: 1px solid #444444;
+            color: #cccccc;
+            border-radius: 3px;
+            resize: vertical;
+        }
+        .prompt-textarea:focus {
+            border-color: #666666;
+            outline: none;
+        }
+        .prompt-item-row {
+            display: flex;
+            margin-bottom: 10px;
+            align-items: flex-start;
+        }
+        .prompt-remove-btn {
+            margin-left: 10px;
+            background: #662222;
+            border: 1px solid #882222;
+            color: #cccccc;
+            padding: 4px 12px;
+            cursor: pointer;
+            border-radius: 3px;
+            font-size: 11px;
+            flex-shrink: 0;
+            height: fit-content;
+        }
+        .prompt-remove-btn:hover {
+            background: #882222;
+            border-color: #aa2222;
+        }
     </style>
 </head>
 <body>
@@ -1227,6 +1269,11 @@
                     ⚙️ Settings
                 </button>
             </div>
+            <div class="status-item">
+                <button onclick="openSisyphusConfig()" style="background: #333333; border: 1px solid #666666; color: #cccccc; padding: 4px 12px; cursor: pointer; border-radius: 3px; font-size: 11px;" title="Configure Sisyphus Mode">
+                    🔄 Sisyphus
+                </button>
+            </div>
         </div>
     </div>
     
@@ -1253,6 +1300,8 @@
                 <input type="text" class="command-input" id="command-input" placeholder="Type a command (e.g., 'open google.com') and press Enter" autofocus>
                 <button class="send-button" id="send-button" onclick="sendCommand()">SEND</button>
                 <button class="pause-button" id="pause-button" onclick="pauseConversation()" style="display: none;">PAUSE</button>
+                <button class="sisyphus-start-button" id="sisyphus-start-btn" onclick="startSisyphus()" style="display: none; background: #224422; border: 1px solid #448844; color: #cccccc; padding: 4px 12px; cursor: pointer; border-radius: 3px; font-size: 11px;">START Sisyphus</button>
+                <button class="sisyphus-stop-button" id="sisyphus-stop-btn" onclick="stopSisyphus()" style="display: none; background: #662222; border: 1px solid #882222; color: #cccccc; padding: 4px 12px; cursor: pointer; border-radius: 3px; font-size: 11px;">STOP Sisyphus</button>
             </div>
         </div>
         
@@ -1425,6 +1474,53 @@
             </div>
         </div>
     </div>
+
+    <!-- Sisyphus Configuration Page -->
+    <div id="sisyphus-config-page" class="config-page" style="display: none;">
+        <div class="config-container">
+            <button onclick="hideSisyphusConfigPage()" style="position: absolute; top: 15px; right: 15px; background: #444444; border: 1px solid #666666; color: #cccccc; width: 30px; height: 30px; border-radius: 50%; cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center; transition: all 0.2s;" title="Close Sisyphus Config" onmouseover="this.style.background='#666666'" onmouseout="this.style.background='#444444'">
+                ✕
+            </button>
+            <div class="config-header">
+                <h1>Sisyphus Mode Configuration</h1>
+                <p class="config-subtitle">Configure prompts for automatic looping. When enabled, the input box will be replaced with Start/Stop buttons.</p>
+            </div>
+            
+            <div class="config-tabs">
+                <button class="config-tab active" onclick="switchSisyphusTab('prompts')">Prompts</button>
+                <button class="config-tab" onclick="switchSisyphusTab('settings')">Settings</button>
+            </div>
+            
+            <div id="sisyphus-prompts-tab" class="config-tab-content active">
+                <div class="form-group">
+                    <label>Prompts (will be sent in order):</label>
+                    <div id="sisyphus-prompts-list">
+                        <!-- Prompts will be added here dynamically -->
+                    </div>
+                    <button type="button" class="btn-secondary" onclick="addSisyphusPrompt()" style="margin-top: 10px;">+ Add Prompt</button>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn-primary" onclick="saveSisyphusConfig()">Save Configuration</button>
+                </div>
+            </div>
+            
+            <div id="sisyphus-settings-tab" class="config-tab-content" style="display: none;">
+                <div class="form-group">
+                    <label for="sisyphus-enabled">Enable Sisyphus Mode:</label>
+                    <input type="checkbox" id="sisyphus-enabled" onchange="toggleSisyphusMode()">
+                    <small class="help-text">When enabled, the command input will be hidden and replaced with Start/Stop buttons.</small>
+                </div>
+                <div class="form-group">
+                    <label for="sisyphus-auto-start">Auto-start on page load:</label>
+                    <input type="checkbox" id="sisyphus-auto-start">
+                    <small class="help-text">Automatically start Sisyphus mode when the page loads.</small>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn-primary" onclick="saveSisyphusConfig()">Save Configuration</button>
+                </div>
+            </div>
+        </div>
+    </div>
     
     <!-- Settings button on main interface -->
     <button id="settings-btn" class="settings-btn" onclick="openConfigPage()" title="Open Settings">
@@ -1449,6 +1545,15 @@
         let currentImageUrl = null; // Track current displayed image URL
         let cwdWarningShown = false; // Track if CWD warning has been shown
         
+        // Sisyphus mode variables
+        let sisyphusEnabled = false;
+        let sisyphusPrompts = [];
+        let sisyphusAutoStart = false;
+        let sisyphusRunning = false;
+        let sisyphusCurrentPromptIndex = 0;
+        let sisyphusLoopInterval = null;
+        let sisyphusCurrentConversationId = null;
+        
         // Server URL configuration
         const isFileProtocol = window.location.protocol === 'file:';
         const serverBaseUrl = isFileProtocol ? 'http://127.0.0.1:8765' : '';
@@ -1458,6 +1563,313 @@
             // Remove leading slash if present to avoid double slashes
             const cleanPath = path.startsWith('/') ? path.substring(1) : path;
             return serverBaseUrl ? `${serverBaseUrl}/${cleanPath}` : `/${cleanPath}`;
+        }
+        
+        // Sisyphus Mode Functions
+        function openSisyphusConfig() {
+            // Load saved configuration
+            loadSisyphusConfig();
+            // Show config page
+            document.getElementById('sisyphus-config-page').style.display = 'flex';
+            document.getElementById('main-interface').style.display = 'none';
+        }
+        
+        function hideSisyphusConfigPage() {
+            document.getElementById('sisyphus-config-page').style.display = 'none';
+            document.getElementById('main-interface').style.display = '';
+        }
+        
+        function switchSisyphusTab(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('#sisyphus-config-page .config-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            // Update tab content
+            document.querySelectorAll('#sisyphus-config-page .config-tab-content').forEach(content => {
+                content.style.display = 'none';
+                content.classList.remove('active');
+            });
+            
+            const targetTab = document.getElementById(`sisyphus-${tabName}-tab`);
+            if (targetTab) {
+                targetTab.style.display = 'block';
+                targetTab.classList.add('active');
+            }
+        }
+        
+        function addSisyphusPrompt(promptText = '') {
+            const list = document.getElementById('sisyphus-prompts-list');
+            const promptId = 'prompt-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            const promptItem = document.createElement('div');
+            promptItem.className = 'prompt-item';
+            promptItem.innerHTML = `
+                <div class="prompt-item-row">
+                    <textarea class="prompt-textarea" placeholder="Enter prompt text...">${promptText}</textarea>
+                    <button type="button" class="prompt-remove-btn" onclick="removeSisyphusPrompt('${promptId}')" title="Remove prompt">🗑️</button>
+                </div>
+            `;
+            list.appendChild(promptItem);
+        }
+        
+        function removeSisyphusPrompt(promptId) {
+            // Since we don't have IDs on each item, we'll find the parent prompt-item
+            // This is a simplified implementation; we'll find the button's parent
+            const btn = document.querySelector(`button[onclick*="${promptId}"]`);
+            if (btn) {
+                const promptItem = btn.closest('.prompt-item');
+                if (promptItem) {
+                    promptItem.remove();
+                }
+            }
+        }
+        
+        function loadSisyphusConfig() {
+            // Load from localStorage
+            const saved = localStorage.getItem('openbrowser_sisyphus_config');
+            if (saved) {
+                try {
+                    const config = JSON.parse(saved);
+                    sisyphusPrompts = config.prompts || [];
+                    sisyphusEnabled = config.enabled || false;
+                    sisyphusAutoStart = config.autoStart || false;
+                    
+                    // Update UI
+                    document.getElementById('sisyphus-enabled').checked = sisyphusEnabled;
+                    document.getElementById('sisyphus-auto-start').checked = sisyphusAutoStart;
+                    
+                    // Render prompts
+                    const list = document.getElementById('sisyphus-prompts-list');
+                    list.innerHTML = '';
+                    sisyphusPrompts.forEach(prompt => {
+                        addSisyphusPrompt(prompt);
+                    });
+                    
+                    // If no prompts, add one empty prompt
+                    if (sisyphusPrompts.length === 0) {
+                        addSisyphusPrompt();
+                    }
+                } catch (e) {
+                    console.error('Failed to parse sisyphus config:', e);
+                }
+            } else {
+                // Add one empty prompt by default
+                addSisyphusPrompt();
+            }
+        }
+        
+        function saveSisyphusConfig() {
+            // Collect prompts from textareas
+            const textareas = document.querySelectorAll('#sisyphus-prompts-list .prompt-textarea');
+            const prompts = Array.from(textareas).map(ta => ta.value.trim()).filter(p => p.length > 0);
+            
+            // Update global variables
+            sisyphusPrompts = prompts;
+            sisyphusEnabled = document.getElementById('sisyphus-enabled').checked;
+            sisyphusAutoStart = document.getElementById('sisyphus-auto-start').checked;
+            
+            // Save to localStorage
+            const config = {
+                prompts: sisyphusPrompts,
+                enabled: sisyphusEnabled,
+                autoStart: sisyphusAutoStart,
+                savedAt: new Date().toISOString()
+            };
+            localStorage.setItem('openbrowser_sisyphus_config', JSON.stringify(config));
+            
+            // Update UI based on enabled state
+            toggleSisyphusMode();
+            
+            // Close config page
+            hideSisyphusConfigPage();
+            
+            alert('Sisyphus configuration saved!');
+        }
+        
+        function toggleSisyphusMode() {
+            sisyphusEnabled = document.getElementById('sisyphus-enabled').checked;
+            updateInputAreaVisibility();
+        }
+        
+        function updateInputAreaVisibility() {
+            const commandInput = document.getElementById('command-input');
+            const sendButton = document.getElementById('send-button');
+            const pauseButton = document.getElementById('pause-button');
+            const startBtn = document.getElementById('sisyphus-start-btn');
+            const stopBtn = document.getElementById('sisyphus-stop-btn');
+            
+            if (sisyphusEnabled) {
+                // Hide regular input and buttons
+                commandInput.style.display = 'none';
+                sendButton.style.display = 'none';
+                pauseButton.style.display = 'none';
+                // Show appropriate Sisyphus button
+                if (sisyphusRunning) {
+                    startBtn.style.display = 'none';
+                    stopBtn.style.display = 'inline-block';
+                } else {
+                    startBtn.style.display = 'inline-block';
+                    stopBtn.style.display = 'none';
+                }
+            } else {
+                // Show regular input, hide Sisyphus buttons
+                commandInput.style.display = '';
+                sendButton.style.display = '';
+                pauseButton.style.display = 'none'; // Only shown when conversation is running
+                startBtn.style.display = 'none';
+                stopBtn.style.display = 'none';
+            }
+        }
+        
+        function startSisyphus() {
+            if (sisyphusRunning) return;
+            if (sisyphusPrompts.length === 0) {
+                alert('No prompts configured for Sisyphus mode.');
+                return;
+            }
+            
+            sisyphusRunning = true;
+            sisyphusCurrentPromptIndex = 0;
+            sisyphusCurrentConversationId = null;
+            
+            // Update UI
+            updateInputAreaVisibility();
+            
+            // Start the loop
+            sisyphusLoop();
+        }
+        
+        function stopSisyphus() {
+            sisyphusRunning = false;
+            if (sisyphusLoopInterval) {
+                clearInterval(sisyphusLoopInterval);
+                sisyphusLoopInterval = null;
+            }
+            
+            // Update UI
+            updateInputAreaVisibility();
+        }
+        
+        async function sisyphusLoop() {
+            if (!sisyphusRunning) return;
+            
+            console.log(`[Sisyphus] Starting loop iteration, prompt index: ${sisyphusCurrentPromptIndex}/${sisyphusPrompts.length}`);
+            
+            // If we've gone through all prompts, reset index
+            if (sisyphusCurrentPromptIndex >= sisyphusPrompts.length) {
+                console.log('[Sisyphus] Completed all prompts, resetting to first prompt');
+                sisyphusCurrentPromptIndex = 0;
+                // Refresh conversation ID (start new session)
+                sisyphusCurrentConversationId = null;
+            }
+            
+            const prompt = sisyphusPrompts[sisyphusCurrentPromptIndex];
+            console.log(`[Sisyphus] Sending prompt ${sisyphusCurrentPromptIndex}: "${prompt.substring(0, 50)}${prompt.length > 50 ? '...' : ''}"`);
+            
+            // If no conversation ID, create a new one
+            if (!sisyphusCurrentConversationId) {
+                try {
+                    const cwd = document.getElementById('cwd-input').value.trim() || '/tmp';
+                    console.log(`[Sisyphus] Creating new conversation with cwd: ${cwd}`);
+                    const response = await fetch(apiUrl('agent/conversations'), {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ cwd: cwd })
+                    });
+                    const data = await response.json();
+                    sisyphusCurrentConversationId = data.conversation_id;
+                    currentConversationId = sisyphusCurrentConversationId;
+                    console.log(`[Sisyphus] Created conversation: ${sisyphusCurrentConversationId}`);
+                    updateConversationIdDisplay();
+                } catch (error) {
+                    addEvent({
+                        type: 'ErrorEvent',
+                        text: `Failed to create conversation for Sisyphus: ${error.message}`,
+                        timestamp: new Date().toISOString()
+                    });
+                    stopSisyphus();
+                    return;
+                }
+            }
+            
+            // Ensure we're using the sisyphus conversation ID
+            currentConversationId = sisyphusCurrentConversationId;
+            
+            // Set the command input value and send
+            const input = document.getElementById('command-input');
+            input.value = prompt;
+            
+            // Send the command using existing sendCommand function
+            console.log(`[Sisyphus] Calling sendCommand for prompt ${sisyphusCurrentPromptIndex}`);
+            try {
+                await sendCommand();
+                
+                // Wait for conversation to stop (isProcessing becomes false)
+                console.log(`[Sisyphus] Waiting for conversation to complete for prompt ${sisyphusCurrentPromptIndex}`);
+                await waitForConversationStop();
+            } catch (error) {
+                console.error(`[Sisyphus] Error sending prompt ${sisyphusCurrentPromptIndex}:`, error);
+                addEvent({
+                    type: 'ErrorEvent',
+                    text: `Sisyphus error for prompt ${sisyphusCurrentPromptIndex}: ${error.message}`,
+                    timestamp: new Date().toISOString()
+                });
+                // Even if there's an error, we should continue to next prompt
+                // Force reset states to avoid getting stuck
+                isProcessing = false;
+                isConversationRunning = false;
+                updateInputAreaVisibility();
+            }
+            
+            // Move to next prompt
+            sisyphusCurrentPromptIndex++;
+            console.log(`[Sisyphus] Moved to next prompt index: ${sisyphusCurrentPromptIndex}`);
+            
+            // Schedule next iteration (immediate)
+            setTimeout(() => {
+                if (sisyphusRunning) {
+                    console.log(`[Sisyphus] Scheduling next iteration`);
+                    sisyphusLoop();
+                } else {
+                    console.log(`[Sisyphus] Not running, stopping loop`);
+                }
+            }, 100);
+        }
+        
+        async function sendSisyphusCommand(command) {
+            // Deprecated: now using sendCommand directly
+            console.warn('sendSisyphusCommand is deprecated, use sendCommand instead');
+            return Promise.reject(new Error('Use sendCommand instead'));
+        }
+        
+        function waitForConversationStop() {
+            return new Promise(resolve => {
+                const checkInterval = setInterval(() => {
+                    console.log(`[Sisyphus] Checking conversation state: isProcessing=${isProcessing}, isConversationRunning=${isConversationRunning}`);
+                    if (!isProcessing && !isConversationRunning) {
+                        console.log('[Sisyphus] Conversation stopped, continuing to next prompt');
+                        clearInterval(checkInterval);
+                        resolve();
+                    }
+                }, 500);
+            });
+        }
+        
+        // Initialize Sisyphus mode on page load
+        function initSisyphus() {
+            loadSisyphusConfig();
+            if (sisyphusEnabled) {
+                updateInputAreaVisibility();
+                if (sisyphusAutoStart) {
+                    // Auto-start after a short delay
+                    setTimeout(() => {
+                        if (sisyphusPrompts.length > 0) {
+                            startSisyphus();
+                        }
+                    }, 1000);
+                }
+            }
         }
         
         // Session Management Functions
@@ -1634,9 +2046,16 @@
             // Reset UI state
             isConversationRunning = false;
             isProcessing = false;
-            document.getElementById('send-button').disabled = false;
-            document.getElementById('send-button').style.display = 'inline-block';
-            document.getElementById('pause-button').style.display = 'none';
+            
+            // Only update button visibility if not in Sisyphus mode
+            if (!sisyphusRunning) {
+                document.getElementById('send-button').disabled = false;
+                document.getElementById('send-button').style.display = 'inline-block';
+                document.getElementById('pause-button').style.display = 'none';
+            } else {
+                // In Sisyphus mode, ensure the stop button is visible
+                updateInputAreaVisibility();
+            }
             
             addEvent({
                 type: 'SystemEvent',
@@ -1813,6 +2232,7 @@
             // Check configuration and load saved settings
             checkConfiguration();
             loadConfigToForm();
+            initSisyphus();
             
             // Check URL parameters for conversation_id (before localStorage)
             checkConversationId();
@@ -1922,9 +2342,17 @@
             // Disable send button and show pause button
             isProcessing = true;
             isConversationRunning = true;
-            document.getElementById('send-button').disabled = true;
-            document.getElementById('send-button').style.display = 'none';
-            document.getElementById('pause-button').style.display = 'inline-block';
+            
+            if (sisyphusRunning) {
+                // In Sisyphus mode, only update the running state
+                // Button visibility is handled by updateInputAreaVisibility
+                updateInputAreaVisibility();
+            } else {
+                // Regular mode: hide send button, show pause button
+                document.getElementById('send-button').disabled = true;
+                document.getElementById('send-button').style.display = 'none';
+                document.getElementById('pause-button').style.display = 'inline-block';
+            }
             
             // Check if CWD is provided
             const cwdInput = document.getElementById('cwd-input');
@@ -2036,6 +2464,10 @@
                             clearTimeout(completionTimeout);
                             completionTimeout = null;
                         }
+                        
+                        // Mark conversation as stopped for Sisyphus mode
+                        isProcessing = false;
+                        isConversationRunning = false;
                     } else if (eventType === 'error') {
                         let errorMessage = 'SSE connection error';
                         try {
@@ -2059,6 +2491,10 @@
                             clearTimeout(completionTimeout);
                             completionTimeout = null;
                         }
+                        
+                        // Mark conversation as stopped for Sisyphus mode
+                        isProcessing = false;
+                        isConversationRunning = false;
                     } else if (eventType === 'connected') {
                         console.log(`[Frontend] SSE connected: ${eventData}`);
                     } else {
@@ -2190,9 +2626,17 @@
                 // Cleanup
                 isProcessing = false;
                 isConversationRunning = false;
-                document.getElementById('send-button').disabled = false;
-                document.getElementById('send-button').style.display = 'inline-block';
-                document.getElementById('pause-button').style.display = 'none';
+                
+                // Only update button visibility if not in Sisyphus mode
+                if (!sisyphusRunning) {
+                    document.getElementById('send-button').disabled = false;
+                    document.getElementById('send-button').style.display = 'inline-block';
+                    document.getElementById('pause-button').style.display = 'none';
+                } else {
+                    // In Sisyphus mode, ensure the stop button is visible
+                    updateInputAreaVisibility();
+                }
+                
                 if (completionTimeout) {
                     clearTimeout(completionTimeout);
                     completionTimeout = null;
@@ -2201,122 +2645,8 @@
             });
             
 
-            
-            eventSource.addEventListener('complete', function(event) {
-                try {
-                    if (event.data && typeof event.data === 'string' && event.data.trim() !== '') {
-                        const data = JSON.parse(event.data);
-                        addEvent({
-                            type: 'SystemEvent',
-                            text: `Conversation completed: ${data.message || 'Done'}`,
-                            timestamp: new Date().toISOString()
-                        });
-                    } else {
-                        addEvent({
-                            type: 'SystemEvent',
-                            text: 'Conversation completed',
-                            timestamp: new Date().toISOString()
-                        });
-                    }
-                    
-                    // Clear completion timeout
-                    if (completionTimeout) {
-                        clearTimeout(completionTimeout);
-                        completionTimeout = null;
-                    }
-                    
-                    // Re-enable send button
-                    isProcessing = false;
-                    isConversationRunning = false;
-                    document.getElementById('send-button').disabled = false;
-                    document.getElementById('send-button').style.display = 'inline-block';
-                    document.getElementById('pause-button').style.display = 'none';
-                    
-                    // Close EventSource
-                    if (eventSource) {
-                        eventSource.close();
-                        eventSource = null;
-                    }
-                } catch (error) {
-                    console.error('Error parsing complete event:', error, 'data:', event.data);
-                    addEvent({
-                        type: 'SystemEvent',
-                        text: 'Conversation completed with error',
-                        timestamp: new Date().toISOString()
-                    });
-                    isProcessing = false;
-                    isConversationRunning = false;
-                    document.getElementById('send-button').disabled = false;
-                    document.getElementById('send-button').style.display = 'inline-block';
-                    document.getElementById('pause-button').style.display = 'none';
-                }
-            });
-            
-            eventSource.addEventListener('error', function(event) {
-                try {
-                    // Mark error as handled
-                    errorHandled = true;
-                    
-                    
-                    // Clear completion timeout
-                    if (completionTimeout) {
-                        clearTimeout(completionTimeout);
-                        completionTimeout = null;
-                    }
-                    // Check if event.data exists and is a non-empty string (not undefined/null)
-                    if (event.data && typeof event.data === 'string' && event.data.trim() !== '') {
-                        // Try to parse as JSON if it doesn't look like a simple string
-                        if (event.data.trim().startsWith('{') && event.data.trim().endsWith('}')) {
-                            const data = JSON.parse(event.data);
-                            addEvent({
-                                type: 'ErrorEvent',
-                                text: `Error: ${data.error || data.message || 'Unknown error'}`,
-                                timestamp: new Date().toISOString()
-                            });
-                        } else {
-                            // If it's a string but not JSON, show it as-is
-                            addEvent({
-                                type: 'ErrorEvent',
-                                text: `Error: ${event.data}`,
-                                timestamp: new Date().toISOString()
-                            });
-                        }
-                    } else {
-                        // Generic SSE error when event.data is undefined, null, or empty
-                        addEvent({
-                            type: 'ErrorEvent',
-                            text: 'SSE connection error',
-                            timestamp: new Date().toISOString()
-                        });
-                    }
-                    
-                    // Re-enable send button
-                    isProcessing = false;
-                    isConversationRunning = false;
-                    document.getElementById('send-button').disabled = false;
-                    document.getElementById('send-button').style.display = 'inline-block';
-                    document.getElementById('pause-button').style.display = 'none';
-                    
-                    // Close EventSource
-                    if (eventSource) {
-                        eventSource.close();
-                        eventSource = null;
-                    }
-                } catch (error) {
-                    console.error('Error parsing error event:', error);
-                    addEvent({
-                        type: 'ErrorEvent',
-                        text: `SSE Error: ${error.message}`,
-                        timestamp: new Date().toISOString()
-                    });
-                    isProcessing = false;
-                    isConversationRunning = false;
-                    document.getElementById('send-button').disabled = false;
-                    document.getElementById('send-button').style.display = 'inline-block';
-                    document.getElementById('pause-button').style.display = 'none';
-                }
-            });
-            
+
+
             // Set completion timeout (300 seconds / 5 minutes)
             completionTimeout = setTimeout(() => {
                 console.warn('[Frontend] SSE completion timeout - no complete event received after 300 seconds');
