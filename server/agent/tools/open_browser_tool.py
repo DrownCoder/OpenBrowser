@@ -62,7 +62,7 @@ class OpenBrowserAction(Action):
     )
     
     # Tab operation parameters
-    action: Optional[str] = Field(default=None, description="Tab action: init/open/close/switch/list/refresh")
+    action: Optional[str] = Field(default=None, description="Tab action: init/open/close/switch/list/refresh/view")
     url: Optional[str] = Field(default=None, description="URL for tab operations")
     tab_id: Optional[int] = Field(default=None, description="Tab ID for operations")
     
@@ -499,7 +499,8 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                         'close': TabAction.CLOSE,
                         'switch': TabAction.SWITCH,
                         'list': TabAction.LIST,
-                        'refresh': TabAction.REFRESH
+                        'refresh': TabAction.REFRESH,
+                        'view': TabAction.VIEW
                     }
                     if action_str in action_map:
                         action_enum = action_map[action_str]
@@ -526,6 +527,8 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                     message = f"Refreshed tab ID: {action.tab_id}"
                 elif action_str == "list":
                     message = "Listed tabs"
+                elif action_str == "view":
+                    message = f"Viewed tab {action.tab_id}"
                 else:
                     message = f"Tab action: {action_str}"
 
@@ -854,7 +857,11 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                     if 'screenshot' in result_dict['data']:
                         screenshot_data_url = result_dict['data']['screenshot']
                         logger.debug(f"DEBUG: Extracted screenshot from result_dict['data']['screenshot'], length={len(screenshot_data_url) if screenshot_data_url else 0}")
-                    
+                        # FIXME: field imageData inconsistent with screenshot, as it's handled by index.ts screenshotcommand directly
+                    elif 'imageData' in result_dict['data']:
+                        screenshot_data_url = result_dict['data']['imageData']
+                        logger.debug(f"DEBUG: Extracted screenshot from result_dict['data']['imageData'], length={len(screenshot_data_url) if screenshot_data_url else 0}")
+
                     # Extract highlighted elements for highlight_elements action
                     if 'elements' in result_dict['data']:
                         highlighted_elements = result_dict['data']['elements']

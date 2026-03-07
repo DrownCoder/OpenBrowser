@@ -775,9 +775,34 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
                 screenshot: refreshScreenshotResult?.imageData,
               },
               timestamp: Date.now(),
+            };            
+          case 'view': {
+            // View action: Capture screenshot of current active tab
+            const viewActiveTabId = tabManager.getCurrentActiveTabId(conversationId);
+            if (!viewActiveTabId) {
+              throw new Error(`No active tab found for conversation ${conversationId}. Use tab init first.`);
+            }
+            
+            await tabManager.ensureTabManaged(viewActiveTabId, conversationId);
+            tabManager.updateTabActivity(viewActiveTabId, conversationId);
+            
+            console.log(`👁️ [Tab View] Capturing screenshot for tab ${viewActiveTabId}, conversation: ${conversationId}`);
+            
+            const viewScreenshotResult = await captureScreenshot(viewActiveTabId, conversationId, true, 90, false, 0);
+            
+            return {
+              success: true,
+              message: `View captured for tab ${viewActiveTabId}`,
+              data: {
+                tabId: viewActiveTabId,
+                conversationId: conversationId,
+                screenshot: viewScreenshotResult?.imageData,
+              },
+              timestamp: Date.now(),
             };
+          }
 
-default:
+          default:
             throw new Error(`Unknown tab action: ${(command as any).action}`);
         }
       }
