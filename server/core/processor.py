@@ -293,6 +293,12 @@ class CommandProcessor:
 
     async def _execute_tab_command(self, command: TabCommand) -> CommandResponse:
         """Execute tab management command and return a11y delta for page changes"""
+        # Handle "view" action specially - just take a clean screenshot
+        if command.action == "view":
+            conversation_id = command.conversation_id
+            screenshot_command = ScreenshotCommand(conversation_id=conversation_id)
+            return await self._execute_screenshot(screenshot_command)
+        
         response = await self._send_prepared_command(command)
 
         # Update current tab based on action (conversation-aware)
@@ -311,8 +317,6 @@ class CommandProcessor:
                     self._set_current_tab_id(response.data["tabId"], conversation_id)
                 elif response.data and "tab_id" in response.data:
                     self._set_current_tab_id(response.data["tab_id"], conversation_id)
-
-
 
         # Add message for close action
         if response.success and command.action == "close":

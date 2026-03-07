@@ -75,7 +75,7 @@ class OpenBrowserAction(Action):
 
     direction: Optional[str] = Field(default="down", description="Scroll direction: up/down/left/right")
     scroll_amount: Optional[float] = Field(
-        default=0.5,
+        default=0.9,
         ge=0.1,
         le=3.0,
         description="Scroll amount relative to page/element height (0.5 = half page, 1.0 = full page, 2.0 = two pages)"

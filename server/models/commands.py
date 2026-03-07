@@ -24,7 +24,7 @@ class TabAction(str, Enum):
     SWITCH = "switch"
     INIT = "init"
     REFRESH = "refresh"
-
+    VIEW = "view"
 
 class BaseCommand(BaseModel):
     """Base command model with common fields"""
