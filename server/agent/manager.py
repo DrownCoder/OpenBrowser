@@ -4,15 +4,11 @@ OpenBrowser Agent Manager
 Manages agent instances and conversations.
 """
 
-import json
-import logging
-import queue
-import threading
-import time
-import asyncio
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Any, Optional, AsyncGenerator
+from pathlib import Path
 
 from pydantic import SecretStr
 from openhands.sdk import (
@@ -117,11 +113,13 @@ class OpenBrowserAgentManager:
         visualizer = QueueVisualizer()
 
         # Create conversation with specified workspace and conversation_id
+        # Note: SDK expects UUID object, not string
+        conv_uuid = uuid.UUID(conversation_id) if isinstance(conversation_id, str) else conversation_id
         conversation = Conversation(
             agent=agent,
             visualizer=visualizer,
-            workspace=cwd,
-            conversation_id=conversation_id,
+            persistence_dir=str(Path.home() / ".openbrowser" / "conversations"),
+            conversation_id=conv_uuid,
         )
 
         # Store conversation state
@@ -177,11 +175,13 @@ class OpenBrowserAgentManager:
         visualizer = QueueVisualizer()
 
         # Create conversation with specified workspace and conversation_id
+        # Note: SDK expects UUID object, not string
+        conv_uuid = uuid.UUID(conversation_id) if isinstance(conversation_id, str) else conversation_id
         conversation = Conversation(
             agent=agent,
             visualizer=visualizer,
-            workspace=cwd,
-            conversation_id=conversation_id,
+            persistence_dir=str(Path.home() / ".openbrowser" / "conversations"),
+            conversation_id=conv_uuid,
         )
 
         # Store conversation state

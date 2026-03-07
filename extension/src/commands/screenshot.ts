@@ -7,6 +7,23 @@ import { cacheScreenshotMetadata } from './computer';
 import { CdpCommander } from './cdp-commander';
 import { debuggerSessionManager } from './debugger-manager';
 import { workerManager } from '../workers/worker-manager';
+import { dialogManager, DialogType } from './dialog';
+
+/**
+ * Error thrown when screenshot capture is blocked by an open dialog
+ */
+export class DialogBlockedError extends Error {
+  constructor(
+    public tabId: number,
+    public dialogType: DialogType,
+    public dialogMessage: string,
+    public needsDecision: boolean
+  ) {
+    super(`Cannot capture screenshot: A ${dialogType} dialog is open ("${dialogMessage}"). Use handle_dialog to respond first.`);
+    this.name = 'DialogBlockedError';
+  }
+}
+
 /**
  * Resize image using OffscreenCanvas and createImageBitmap
  * 
@@ -496,6 +513,18 @@ export async function captureScreenshot(
       throw new Error('[Screenshot] No active tab found');
     }
     targetTabId = tab.id;
+
+  // ⚠️ DIALOG BLOCKING CHECK: Cannot take screenshot while dialog is open
+  if (dialogManager.hasActiveDialog(targetTabId)) {
+    const dialog = dialogManager.getActiveDialog(targetTabId)!;
+    throw new DialogBlockedError(
+      targetTabId,
+      dialog.dialogType,
+      dialog.message,
+      dialog.needsDecision
+    );
+  }
+
   }
   
   // 会话 ID 是必需的

@@ -7,6 +7,8 @@
 
 import { wsClient } from '../websocket/client';
 import { captureScreenshot, compressIfNeeded, getCompressionThreshold } from '../commands/screenshot';
+import { DialogBlockedError } from '../commands/screenshot';
+import { DialogType } from '../commands/dialog';
 import { tabs } from '../commands/tabs';
 import { tabManager } from '../commands/tab-manager';
 import { javascript } from '../commands/javascript';
@@ -561,22 +563,6 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
           throw new Error(`No active tab found for conversation ${conversationId}. Use tab init or specify tab_id.`);
         }
         
-        // ⚠️ DIALOG BLOCKING CHECK: Cannot take screenshot while dialog is open
-        if (dialogManager.hasActiveDialog(activeTabId)) {
-          const dialog = dialogManager.getActiveDialog(activeTabId)!;
-          console.log(`💬 [Screenshot] Blocked: dialog open on tab ${activeTabId}`);
-          return {
-            success: false,
-            error: `Cannot capture screenshot: A ${dialog.dialogType} dialog is open ("${dialog.message}"). Use handle_dialog to respond first.`,
-            dialog_opened: true,
-            dialog: {
-              type: dialog.dialogType,
-              message: dialog.message,
-              needsDecision: dialog.needsDecision,
-            },
-            timestamp: Date.now(),
-          };
-        }
         
         console.log(`📸 [Screenshot] Using active tab ${activeTabId} for conversation ${conversationId} (ignoring provided tab_id: ${command.tab_id || 'none'})`);
         
@@ -1054,6 +1040,19 @@ default:
           
         } catch (error) {
           console.error(`❌ [HandleDialog] Failed to handle dialog:`, error);
+          if (error instanceof DialogBlockedError) {
+            return {
+              success: false,
+              error: error.message,
+              dialog_opened: true,
+              dialog: {
+                type: error.dialogType as DialogType,
+                message: error.dialogMessage,
+                needsDecision: error.needsDecision,
+              },
+              timestamp: Date.now(),
+            };
+          }
           return {
             success: false,
             error: `Failed to handle dialog: ${error instanceof Error ? error.message : String(error)}`,
@@ -1785,6 +1784,20 @@ default:
     }
   } catch (error) {
     console.error(`Command ${(command as any).type} failed:`, error);
+    if (error instanceof DialogBlockedError) {
+      return {
+        success: false,
+        command_id: command.command_id,
+        error: error.message,
+        dialog_opened: true,
+        dialog: {
+          type: error.dialogType as DialogType,
+          message: error.dialogMessage,
+          needsDecision: error.needsDecision,
+        },
+        timestamp: Date.now(),
+      };
+    }
     return {
       success: false,
       command_id: command.command_id,
