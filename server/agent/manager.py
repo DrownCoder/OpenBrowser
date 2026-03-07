@@ -118,6 +118,7 @@ class OpenBrowserAgentManager:
         conversation = Conversation(
             agent=agent,
             visualizer=visualizer,
+            workspace=cwd,
             persistence_dir=str(Path.home() / ".openbrowser" / "conversations"),
             conversation_id=conv_uuid,
         )
@@ -180,6 +181,7 @@ class OpenBrowserAgentManager:
         conversation = Conversation(
             agent=agent,
             visualizer=visualizer,
+            workspace=cwd,
             persistence_dir=str(Path.home() / ".openbrowser" / "conversations"),
             conversation_id=conv_uuid,
         )
