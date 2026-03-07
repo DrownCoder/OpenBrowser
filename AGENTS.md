@@ -13,6 +13,9 @@ Visual AI assistant powered by Qwen3.5-Plus for browser automation with visual f
 ```
 OpenBrowser/
 ├── server/           # FastAPI backend + agent logic + WebSocket
+│   ├── prompts/      # Jinja2 templates for agent prompts (new)
+│   ├── agent/        # Agent orchestration and tool definitions
+│   └── ...
 ├── extension/        # Chrome extension (MV3) for browser control
 ├── cli/              # Command-line tool (chrome-cli)
 ├── frontend/         # Static web UI (HTML)
@@ -29,6 +32,8 @@ OpenBrowser/
 | REST API routes | `server/api/routes/` | FastAPI endpoints |
 | WebSocket handling | `server/websocket/manager.py` | Extension communication |
 | Command models | `server/models/commands.py` | Pydantic command/response types |
+| **Prompt templates** | `server/prompts/` | **Jinja2 templates for agent prompts** |
+| Tool description | `server/agent/tools/open_browser_tool.py` | OpenBrowserTool with dynamic rendering |
 | Extension entry | `extension/src/background/index.ts` | Command handler, dialog processing |
 | Dialog manager | `extension/src/commands/dialog.ts` | CDP dialog events, cascading |
 | JavaScript execution | `extension/src/commands/javascript.ts` | CDP Runtime.evaluate, dialog race |
@@ -105,6 +110,31 @@ the system checks for new dialogs within 150ms.
 - **Strict mode:** enabled
 - **Path alias:** `@/*` → `src/*`
 - **Build:** Vite with multi-entry (background, content, workers)
+
+## PROMPT MANAGEMENT
+
+OpenBrowser uses Jinja2 templates for agent prompts, enabling dynamic content injection based on configuration.
+
+### Template Structure
+- **Location**: `server/prompts/` directory
+- **Format**: `.j2` extension with Jinja2 syntax
+- **Example**: `open_browser_description.j2` - main tool description
+
+### Dynamic JavaScript Control
+The `javascript_execute` command can be disabled via environment variable:
+```bash
+export OPEN_BROWSER_DISABLE_JAVASCRIPT_EXECUTE=1
+```
+When disabled:
+- Template removes all `javascript_execute` references using `{% if not disable_javascript %}` conditionals
+- `OpenBrowserAction.type` description excludes `'javascript_execute'`
+- Command execution returns error if attempted
+
+### Template Features
+- **Conditional rendering**: Use `{% if %}` blocks for configurable sections
+- **Variable injection**: Pass context variables like `disable_javascript` at render time
+- **Clean output**: `trim_blocks=True` and `lstrip_blocks=True` remove extra whitespace
+- **Caching**: Templates are cached after first load for performance
 
 ## ANTI-PATTERNS (THIS PROJECT)
 
