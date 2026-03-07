@@ -70,7 +70,7 @@ class OpenBrowserAction(Action):
     element_type: Optional[str] = Field(default="clickable", description="Single element type: clickable/scrollable/inputable/hoverable")
     element_id: Optional[str] = Field(default=None, description="Element ID from highlight response")
     page: Optional[int] = Field(default=1, ge=1, description="Page number for pagination (1-indexed). Ignored when keywords is provided.")
-    keywords: Optional[str] = Field(default=None, description="Keywords to filter elements by HTML content. When provided, only matching elements are returned (no pagination).")
+    keywords: Optional[str] = Field(default=None, description="Comma-separated keywords to filter elements by HTML content. When provided, returns all matching elements (no pagination). Example: 'button,submit,login'")
     # Scroll parameters
 
     direction: Optional[str] = Field(default="down", description="Scroll direction: up/down/left/right")

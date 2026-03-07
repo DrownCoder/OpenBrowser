@@ -86,7 +86,7 @@ Capture a screenshot with numbered visual markers on interactive elements of ONE
 { "type": "highlight_elements", "element_type": "scrollable" } // Scrollable areas
 { "type": "highlight_elements", "element_type": "hoverable" }  // Hoverable elements
 { "type": "highlight_elements", "page": 2 }                 // Next page of clickable elements
-{ "type": "highlight_elements", "keywords": "Submit" }      // Filter by keyword (no pagination needed)
+{ "type": "highlight_elements", "keywords": "Submit,提交" }      // Filter by keyword (no pagination needed)
 ```
 Parameters:
 - `element_type`: Single type to highlight - "clickable" (default), "scrollable", "inputable", or "hoverable"
@@ -106,7 +106,7 @@ Parameters:
 **Best practise for Keywords**:
 - Always provide multiple keywords for improving matching probability.
 - Provide chinese and english keywords together.
-- For example, when searching for a close button, use ["关闭", "close", "closing" ...]. When searching for a search button, use ["search", "搜索", "查询" ...]
+- For example, when searching for a close button, use "关闭,close,closing". When searching for a search button, use "search,搜索,query,查询"
 
 Initiate a click on an element by its visual ID.
 **⚠️ 2PC Flow**: This action returns a screenshot with the element highlighted in **ORANGE**.

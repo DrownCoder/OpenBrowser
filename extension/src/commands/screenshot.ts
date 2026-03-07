@@ -534,6 +534,10 @@ export async function captureScreenshot(
   
   console.log(`📸 [Screenshot] Starting screenshot capture for tab ${targetTabId} in session ${conversationId}`);
   console.log(`📸 [Screenshot] Parameters: quality=${quality}, resizeToPreset=${resizeToPreset} (已忽略), waitForRender=${waitForRender}`);
+
+  // ⏱️ Always wait 500ms before capturing to ensure page is fully rendered
+  console.log(`⏳ [Screenshot] Waiting 500ms before capture...`);
+  await new Promise((resolve) => setTimeout(resolve, 500));
   
   // Validate parameters
   if (quality < 1 || quality > 100) {

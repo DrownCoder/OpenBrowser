@@ -1465,14 +1465,21 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
         
         const allElements = detectionResult.result.value.elements || [];
 
-        // Filter by keywords if provided
+        // Filter by keywords if provided (comma-separated)
         let filteredElements = allElements;
         if (keywords && keywords.trim()) {
-          const searchTerm = keywords.trim().toLowerCase();
-          filteredElements = allElements.filter((el: InteractiveElement) => 
-            el.html && el.html.toLowerCase().includes(searchTerm)
-          );
-          console.log(`🔍 [HighlightElements] Keyword filter \"${keywords}\" matched ${filteredElements.length} of ${allElements.length} elements`);
+          // Parse comma-separated keywords into array
+          const keywordList = keywords.split(',').map(k => k.trim().toLowerCase()).filter(k => k.length > 0);
+          
+          if (keywordList.length > 0) {
+            filteredElements = allElements.filter((el: InteractiveElement) => {
+              if (!el.html) return false;
+              const htmlLower = el.html.toLowerCase();
+              // Match if ANY keyword is found (OR logic)
+              return keywordList.some(keyword => htmlLower.includes(keyword));
+            });
+            console.log(`🔍 [HighlightElements] Keywords [${keywordList.join(', ')}] matched ${filteredElements.length} of ${allElements.length} elements`);
+          }
         }
 
         // Generate hash IDs for filtered elements (collision-free, content-aware)
@@ -1492,7 +1499,8 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
           paginatedElements = filteredElements;
           totalPages = 1;
           currentPage = 1;
-          console.log(`🔍 [HighlightElements] Keyword filter \"${keywords}\" matched ${paginatedElements.length} elements (no pagination)`);
+          const keywordList = keywords.split(',').map(k => k.trim()).filter(k => k.length > 0);
+          console.log(`🔍 [HighlightElements] Keywords [${keywordList.join(', ')}] matched ${paginatedElements.length} elements (no pagination)`);
         } else {
           // Normal collision-aware pagination
           paginatedElements = selectCollisionFreePage(filteredElements, page);
