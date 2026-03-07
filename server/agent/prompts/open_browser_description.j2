@@ -103,6 +103,11 @@ Parameters:
 - More efficient than pagination when target is visually identifiable
 - No need for pagination - all matching elements are returned at once
 
+**Best practise for Keywords**:
+- Always provide multiple keywords for improving matching probability.
+- Provide chinese and english keywords together.
+- For example, when searching for a close button, use ["关闭", "close", "closing" ...]. When searching for a search button, use ["search", "搜索", "查询" ...]
+
 Initiate a click on an element by its visual ID.
 **⚠️ 2PC Flow**: This action returns a screenshot with the element highlighted in **ORANGE**.
 You MUST visually verify the orange-highlighted element and then confirm with `confirm_click_element`.
