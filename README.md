@@ -70,9 +70,9 @@ OpenBrowser is specifically designed for **Qwen3.5-Plus**, leveraging its unique
 
 OpenBrowser autonomously browses major news websites (WSJ, CNN, Reuters) to collect, summarize, and translate breaking news about the Iran conflict.
 
-![News Collection Demo](demo/collect_wsj_news-preview.gif)
+![News Collection Demo](demo/news_collection-preview.gif)
 
-[📺 Watch full video: collect_wsj_news.mp4](demo/collect_wsj_news.mp4)
+[📺 Watch full video: news_collection.mp4](demo/news_collection.mp4)
 
 #### Collected Articles
 
@@ -82,7 +82,21 @@ OpenBrowser collected the following articles and saved them as markdown files:
 - **[WSJ_伊朗历史首都成为美以空战震中.md](demo/WSJ_伊朗历史首都成为美以空战震中.md)** - WSJ report on Isfahan air strikes
 - **[WSJ_特朗普不排除向伊朗派遣地面部队_实时更新.md](demo/WSJ_特朗普不排除向伊朗派遣地面部队_实时更新.md)** - WSJ live updates on Trump's Iran policy
 - **[CNN_伊朗战争实时更新_能源设施袭击.md](demo/CNN_伊朗战争实时更新_能源设施袭击.md)** - CNN live coverage of energy facility attacks
-## Quick Start
+
+### AI-Powered Apartment Hunting on Xiaohongshu
+
+OpenBrowser searches for rental listings on Xiaohongshu (Little Red Book), automatically liking, saving, and commenting on posts to inquire about details. It also evaluates furniture and decor quality through visual analysis.
+
+![Xiaohongshu Apartment Hunting Demo](demo/apartment_hunting-preview.gif)
+
+[📺 Watch full video: apartment_hunting.mp4](demo/apartment_hunting.mp4)
+
+#### Key Features Demonstrated
+
+- **Autonomous Search**: Navigate and search on Xiaohongshu for rental listings
+- **Social Interactions**: Like, save, and comment on posts to contact landlords
+- **Visual Analysis**: Evaluate furniture quality and interior design through screenshots
+- **Multi-step Workflow**: Complete end-to-end apartment hunting process
 
 ### 1. Install Python Dependencies
 
