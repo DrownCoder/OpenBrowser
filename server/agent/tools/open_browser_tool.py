@@ -70,7 +70,7 @@ class OpenBrowserAction(Action):
     element_type: Optional[str] = Field(default="clickable", description="Single element type: clickable/scrollable/inputable/hoverable")
     element_id: Optional[str] = Field(default=None, description="Element ID from highlight response")
     page: Optional[int] = Field(default=1, ge=1, description="Page number for pagination (1-indexed). Ignored when keywords is provided.")
-    keywords: Optional[str] = Field(default=None, description="Comma-separated keywords to filter elements by HTML content. When provided, returns all matching elements (no pagination). Example: 'button,submit,login'")
+    keywords: Optional[List[str]] = Field(default=None, description="Keywords list to filter elements by HTML content. When provided, returns all matching elements (no pagination). Example: ['button', 'submit', 'login']")
     # Scroll parameters
 
     direction: Optional[str] = Field(default="down", description="Scroll direction: up/down/left/right")
@@ -641,7 +641,8 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 
                 # Adjust message based on whether keywords filtering was used
                 if keywords:
-                    message = f"Found {len(elements)} {element_type} elements matching '{keywords}' (total: {total_elements})"
+                    keywords_str = ', '.join(keywords)
+                    message = f"Found {len(elements)} {element_type} elements matching '{keywords_str}' (total: {total_elements})"
                 else:
                     message = f"Found {len(elements)} {element_type} elements on page {current_page}/{total_pages} (total: {total_elements})"
 
@@ -799,7 +800,7 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
                 result_dict = {'success': True, 'data': {}}
                 message = f"Keyboard input action pending confirmation for element: {action.element_id}"
             else:
-                raise ValueError(f"Unknown action type: {action_type}")
+                raise ValueError(f"Unknown type: {action_type}. " + TYPE_DESCRIPTION)
             
             # ========== Clear pending confirmation for non-confirm operations ==========
             # If action is not a confirm action, clear pending state
@@ -893,7 +894,7 @@ class OpenBrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation
         except ValueError as e:
             # Provide friendly error message for missing parameters
             logger.error(f"ValueError (sync): {e} in action '{action.type}'")
-            error_msg = f"Missing or invalid parameters for action '{action.type}': {e}"
+            error_msg = f"Missing or invalid parameters for type '{action.type}': {e}"
             return OpenBrowserObservation(
                 success=False,
                 error=error_msg,

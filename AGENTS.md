@@ -212,6 +212,34 @@ If operation fails twice:
 2. Inspect DOM structure
 3. Consider direct URL navigation
 
+## SISYPHUS MODE
+
+Automated looping mode for repetitive testing and monitoring.
+
+### Configuration
+1. Click the "🔄 Sisyphus" button in the status bar (next to Settings)
+2. Configure prompts in the Prompts tab (add/remove/edit)
+3. Enable Sisyphus mode in the Settings tab
+4. Save configuration
+
+### Behavior
+- When enabled, the command input field is replaced with START/STOP buttons
+- Click START to begin the Sisyphus loop:
+  1. Creates a new conversation session (fresh UUID)
+  2. Sends prompts in configured order
+  3. Waits for each conversation to complete before sending next prompt
+  4. After all prompts, repeats from step 1 with a new session
+- Loop continues indefinitely until STOP is clicked
+
+### Use Cases
+- Automated testing of multi-step workflows
+- Continuous monitoring of dynamic web pages
+- Repetitive data collection tasks
+- Stress testing browser interactions
+
+### Storage
+Configuration is saved to `localStorage` (key: `openbrowser_sisyphus_config`).
+
 ## COMMANDS
 
 ```bash
