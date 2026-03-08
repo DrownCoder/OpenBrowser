@@ -2450,6 +2450,32 @@
             function processSSEEvent(eventType, eventData) {
                 console.log(`[Frontend] Processing SSE event: ${eventType}, data: "${eventData.substring(0, 200)}..."`);
                 
+                // Reset timeout for any received event (except complete/error which clear it)
+                // This implements inter-event timeout: if no events received for 300 seconds (5 minutes), connection is considered hung
+                if (completionTimeout && eventType !== 'complete' && eventType !== 'error') {
+                    clearTimeout(completionTimeout);
+                    completionTimeout = setTimeout(() => {
+                        console.warn('[Frontend] SSE inter-event timeout - no events received after 300 seconds');
+                        if (!errorHandled) {
+                            errorHandled = true;
+                            addEvent({
+                                type: 'SystemEvent',
+                                text: 'SSE timeout - connection may have hung',
+                                timestamp: new Date().toISOString()
+                            });
+                            isProcessing = false;
+                            isConversationRunning = false;
+                            document.getElementById('send-button').disabled = false;
+                            document.getElementById('send-button').style.display = 'inline-block';
+                            document.getElementById('pause-button').style.display = 'none';
+                            // Abort the ongoing fetch request
+                            if (abortController) {
+                                abortController.abort();
+                            }
+                        }
+                    }, 300000);
+                }
+                
                 try {
                     if (eventType === 'agent_event') {
                         const data = JSON.parse(eventData);
@@ -2657,9 +2683,9 @@
 
 
 
-            // Set completion timeout (300 seconds / 5 minutes)
+            // Set initial inter-event timeout (300 seconds / 5 minutes)
             completionTimeout = setTimeout(() => {
-                console.warn('[Frontend] SSE completion timeout - no complete event received after 300 seconds');
+                console.warn('[Frontend] SSE inter-event timeout - no events received after 300 seconds');
                 if (!errorHandled) {
                     errorHandled = true;
                     addEvent({
