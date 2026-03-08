@@ -86,12 +86,12 @@ Capture a screenshot with numbered visual markers on interactive elements of ONE
 { "type": "highlight_elements", "element_type": "scrollable" } // Scrollable areas
 { "type": "highlight_elements", "element_type": "hoverable" }  // Hoverable elements
 { "type": "highlight_elements", "page": 2 }                 // Next page of clickable elements
-{ "type": "highlight_elements", "keywords": "Submit,提交" }      // Filter by keyword (no pagination needed)
+{ "type": "highlight_elements", "keywords": ["Submit", "提交"] }      // Filter by keyword list (no pagination needed)
 ```
 Parameters:
 - `element_type`: Single type to highlight - "clickable" (default), "scrollable", "inputable", or "hoverable"
 - `page`: Page number for pagination (1-indexed, default 1). Ignored when `keywords` is provided.
-- `keywords`: Filter elements by HTML content. When provided, only matching elements are returned without pagination.
+- `keywords`: Keywords list to filter elements by HTML content. When provided, only matching elements are returned without pagination. Example: ["button", "submit", "login"]
 
 **When to Use Pagination**:
 - If the element you want to interact with is NOT visible on the current page, increment `page` to see more elements
@@ -106,7 +106,8 @@ Parameters:
 **Best practise for Keywords**:
 - Always provide multiple keywords for improving matching probability.
 - Provide chinese and english keywords together.
-- For example, when searching for a close button, use "关闭,close,closing". When searching for a search button, use "search,搜索,query,查询"
+- DO NOT use keywords that's likely to match too many elements, like a simple "x".
+- For example, when searching for a close button, use ["关闭", "close", "closing"]. When searching for a search button, use ["search", "搜索", "query", "查询"]
 
 Initiate a click on an element by its visual ID.
 **⚠️ 2PC Flow**: This action returns a screenshot with the element highlighted in **ORANGE**.

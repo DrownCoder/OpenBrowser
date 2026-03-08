@@ -247,9 +247,9 @@ class HighlightElementsCommand(BaseCommand):
         ge=1,
         description="Page number for collision-aware pagination (1-indexed). Ignored when keywords is provided."
     )
-    keywords: Optional[str] = Field(
+    keywords: Optional[List[str]] = Field(
         default=None,
-        description="Keywords to filter elements by HTML content. When provided, only matching elements are returned (no pagination)."
+        description="Keywords list to filter elements by HTML content. When provided, only matching elements are returned (no pagination). Example: ['button', 'submit', 'login']"
     )
 
 class ClickElementCommand(BaseCommand):
