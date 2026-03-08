@@ -64,24 +64,24 @@ OpenBrowser is specifically designed for **Qwen3.5-Plus**, leveraging its unique
 - **Terminal Integration**: Execute bash commands for backend operations
 - **Multiple Interfaces**: REST API and WebSocket
 
-## Demos
+## Demo
 
-### Demo 1: Building and Testing an HTML Calculator
+### AI-Powered News Collection from WSJ, CNN, and Reuters
 
-A typical use case showing OpenBrowser developing an HTML calculator and visually verifying it in the browser.
+OpenBrowser autonomously browses major news websites (WSJ, CNN, Reuters) to collect, summarize, and translate breaking news about the Iran conflict.
 
-![Calculator Demo](demo/calculator-preview.gif)
+![News Collection Demo](demo/collect_wsj_news-preview.gif)
 
-[📺 Watch full video: calculator-demo-2x.mp4](demo/calculator-demo-2x.mp4)
+[📺 Watch full video: collect_wsj_news.mp4](demo/collect_wsj_news.mp4)
 
-### Demo 2: OpenBrowser Debugging Itself
+#### Collected Articles
 
-Real-world use case: OpenBrowser debugging its own frontend issues.
+OpenBrowser collected the following articles and saved them as markdown files:
 
-![OpenBrowser Debugging](demo/openbrowser-preview.gif)
-
-[📺 Watch full video: openbrowser-debug-openbrowser-1.5x.mp4](demo/openbrowser-debug-openbrowser-1.5x.mp4)
-
+- **[伊朗战争新闻汇总_2026-03-08.md](demo/伊朗战争新闻汇总_2026-03-08.md)** - Summary of all collected news with translations
+- **[WSJ_伊朗历史首都成为美以空战震中.md](demo/WSJ_伊朗历史首都成为美以空战震中.md)** - WSJ report on Isfahan air strikes
+- **[WSJ_特朗普不排除向伊朗派遣地面部队_实时更新.md](demo/WSJ_特朗普不排除向伊朗派遣地面部队_实时更新.md)** - WSJ live updates on Trump's Iran policy
+- **[CNN_伊朗战争实时更新_能源设施袭击.md](demo/CNN_伊朗战争实时更新_能源设施袭击.md)** - CNN live coverage of energy facility attacks
 ## Quick Start
 
 ### 1. Install Python Dependencies
