@@ -125,9 +125,52 @@
             display: flex;
             flex-direction: column;
             min-width: 350px;
-            max-width: 700px;
+            max-width: 100%; /* Removed fixed max-width, will be controlled by JavaScript */
             min-height: 0;
             overflow: hidden;
+        }
+        
+        /* Resizer styles */
+        .vertical-resizer {
+            width: 6px;
+            background-color: #444444;
+            cursor: col-resize;
+            flex-shrink: 0;
+            position: relative;
+            z-index: 100;
+            transition: background-color 0.2s;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+            display: block;
+            height: 100%;
+            align-self: stretch;
+        }
+        
+        .vertical-resizer:hover,
+        .vertical-resizer.dragging {
+            background-color: #888888;
+        }
+        
+        .horizontal-resizer {
+            height: 6px;
+            background-color: #444444;
+            cursor: row-resize;
+            flex-shrink: 0;
+            position: relative;
+            z-index: 100;
+            transition: background-color 0.2s;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+            display: block;
+            width: 100%;
+            align-self: stretch;
+        }
+        
+        .horizontal-resizer:hover,
+        .horizontal-resizer.dragging {
+            background-color: #888888;
         }
         
         .image-viewer {
@@ -649,6 +692,11 @@
             /* Ensure image viewer can display properly on small screens */
             .image-viewer {
                 min-height: 200px;
+            }
+            
+            /* Hide vertical resizer in column layout */
+            .vertical-resizer {
+                display: none;
             }
         }
         
@@ -1305,6 +1353,8 @@
             </div>
         </div>
         
+        <div class="vertical-resizer" id="vertical-resizer"></div>
+        
         <div class="right-panel">
             <div class="image-viewer">
                 <div class="image-viewer-title">LIVE VIEW</div>
@@ -1317,6 +1367,8 @@
                 </div>
                 <div class="image-viewer-title" style="font-size: 12px; text-align: center;">OpenBrowser's Chrome</div>
             </div>
+            
+            <div class="horizontal-resizer" id="horizontal-resizer"></div>
             
             <div class="sidebar scrollbar">
                 <div class="sidebar-section">
@@ -3342,6 +3394,120 @@
                 targetTab.style.display = 'block';
                 targetTab.classList.add('active');
             }
+        }
+        
+        // Resizer functionality
+        function setupResizers() {
+            console.log('Setting up resizers...');
+            const verticalResizer = document.getElementById('vertical-resizer');
+            const horizontalResizer = document.getElementById('horizontal-resizer');
+            const container = document.querySelector('.container');
+            const rightPanel = document.querySelector('.right-panel');
+            const imageViewer = document.querySelector('.image-viewer');
+            const sidebar = document.querySelector('.sidebar');
+            
+            console.log('Resizer elements:', { verticalResizer, horizontalResizer, rightPanel, imageViewer, sidebar });
+            
+            if (!verticalResizer || !horizontalResizer || !rightPanel || !imageViewer || !sidebar) {
+                console.error('Missing required elements for resizers');
+                return;
+            }
+            
+            let isVerticalDragging = false;
+            let isHorizontalDragging = false;
+            let startX, startY, startRightPanelWidth, startImageViewerHeight;
+            
+            // Vertical resizer (adjust width of right-panel)
+            verticalResizer.addEventListener('mousedown', (e) => {
+                console.log('Vertical resizer mousedown', e.clientX, e.clientY);
+                isVerticalDragging = true;
+                startX = e.clientX;
+                startRightPanelWidth = rightPanel.offsetWidth;
+                console.log('Initial right panel width:', startRightPanelWidth);
+                verticalResizer.classList.add('dragging');
+                document.addEventListener('mousemove', handleVerticalMouseMove);
+                document.addEventListener('mouseup', handleVerticalMouseUp);
+                e.preventDefault();
+            });
+            
+            function handleVerticalMouseMove(e) {
+                if (!isVerticalDragging) return;
+                e.preventDefault();
+                // Reverse deltaX direction to match intuitive dragging
+                const deltaX = startX - e.clientX;
+                // Calculate new width for right-panel based on initial width
+                const newWidth = startRightPanelWidth + deltaX;
+                const minWidth = 350;
+                // Maximum width is 50% of container width, but not less than minWidth
+                const maxWidth = Math.max(minWidth, Math.floor(container.offsetWidth * 0.5));
+                const clampedWidth = Math.max(minWidth, Math.min(maxWidth, newWidth));
+                console.log('Vertical move - deltaX:', deltaX, 'newWidth:', newWidth, 'clampedWidth:', clampedWidth, 'maxWidth(50%):', maxWidth, 'containerWidth:', container.offsetWidth);
+                // Use width and disable flex to allow manual sizing
+                rightPanel.style.flex = 'none';
+                rightPanel.style.width = clampedWidth + 'px';
+                rightPanel.style.minWidth = clampedWidth + 'px';
+                rightPanel.style.maxWidth = clampedWidth + 'px'; // Override CSS max-width
+                // Let main-terminal take remaining space
+                const mainTerminal = document.querySelector('.main-terminal');
+                if (mainTerminal) {
+                    mainTerminal.style.flex = '1 1 auto';
+                }
+            }
+            
+            function handleVerticalMouseUp() {
+                isVerticalDragging = false;
+                verticalResizer.classList.remove('dragging');
+                document.removeEventListener('mousemove', handleVerticalMouseMove);
+                document.removeEventListener('mouseup', handleVerticalMouseUp);
+            }
+            
+            // Horizontal resizer (adjust height of image-viewer)
+            horizontalResizer.addEventListener('mousedown', (e) => {
+                console.log('Horizontal resizer mousedown', e.clientX, e.clientY);
+                isHorizontalDragging = true;
+                startY = e.clientY;
+                startImageViewerHeight = imageViewer.offsetHeight;
+                console.log('Initial image viewer height:', startImageViewerHeight, 'right panel height:', rightPanel.offsetHeight);
+                horizontalResizer.classList.add('dragging');
+                document.addEventListener('mousemove', handleHorizontalMouseMove);
+                document.addEventListener('mouseup', handleHorizontalMouseUp);
+                e.preventDefault();
+            });
+            
+            function handleHorizontalMouseMove(e) {
+                if (!isHorizontalDragging) return;
+                e.preventDefault();
+                const deltaY = e.clientY - startY;
+                // Calculate new height for image-viewer based on initial height
+                const newHeight = startImageViewerHeight + deltaY;
+                const minHeight = 200; // minimum height for image viewer
+                const rightPanelHeight = rightPanel.offsetHeight;
+                const maxHeight = rightPanelHeight - 100; // leave some space for sidebar
+                const clampedHeight = Math.max(minHeight, Math.min(maxHeight, newHeight));
+                console.log('Horizontal move - deltaY:', deltaY, 'newHeight:', newHeight, 'clampedHeight:', clampedHeight, 'rightPanelHeight:', rightPanelHeight);
+                // Use height and disable flex to allow manual sizing
+                imageViewer.style.flex = 'none';
+                imageViewer.style.height = clampedHeight + 'px';
+                imageViewer.style.minHeight = clampedHeight + 'px';
+                // Let sidebar take remaining space and remove min-height restriction
+                sidebar.style.flex = '1 1 auto';
+                sidebar.style.minHeight = '100px'; // Reduced min-height to allow more flexibility
+            }
+            
+            function handleHorizontalMouseUp() {
+                isHorizontalDragging = false;
+                horizontalResizer.classList.remove('dragging');
+                document.removeEventListener('mousemove', handleHorizontalMouseMove);
+                document.removeEventListener('mouseup', handleHorizontalMouseUp);
+            }
+        }
+        
+        // Initialize resizers when page loads
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', setupResizers);
+        } else {
+            // DOM already loaded
+            setupResizers();
         }
     </script>
 </body>
