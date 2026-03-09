@@ -40,7 +40,9 @@ OpenBrowser searches for rental listings on Xiaohongshu (Little Red Book), autom
 
 ## Quick Start
 
-### 1. Install Python Dependencies
+### Try OpenBrowser with your browser
+
+#### 1. Install Python Dependencies
 
 ```bash
 # Using uv (recommended)
@@ -55,7 +57,7 @@ uv sync --group dev
 pip install -e ".[dev]"
 ```
 
-### 2. Start the Server
+#### 2. Start the Server
 
 ```bash
 uv run local-chrome-server serve
@@ -63,7 +65,7 @@ uv run local-chrome-server serve
 
 The server will start at `http://127.0.0.1:8765` (HTTP) and `ws://127.0.0.1:8766` (WebSocket).
 
-### 3. Configure LLM Settings
+#### 3. Configure LLM Settings
 
 On first access, you'll be prompted to configure your LLM settings through the web interface:
 
@@ -81,7 +83,7 @@ On first access, you'll be prompted to configure your LLM settings through the w
 > - You can modify settings anytime by clicking the **⚙️ Settings** button in the status bar
 > - Environment variables (LLM_API_KEY, LLM_MODEL, LLM_BASE_URL) are **no longer supported** - please use the web UI configuration
 
-### 4. Build the Chrome Extension
+#### 4. Build the Chrome Extension
 
 ```bash
 cd extension
@@ -89,14 +91,14 @@ npm install
 npm run build
 ```
 
-### 5. Install the Extension in Chrome
+#### 5. Install the Extension in Chrome
 
 1. Open Chrome and navigate to `chrome://extensions/`
 2. Enable **Developer mode** (toggle in top-right)
 3. Click **Load unpacked**
 4. Select the `extension/dist` directory
 
-### 6. Configure Chrome Pop-up Settings (IMPORTANT)
+#### 6. Configure Chrome Pop-up Settings (IMPORTANT)
 
 By default, Chrome blocks pop-up windows, which can prevent OpenBrowser from opening new tabs when clicking links. You need to configure Chrome to allow pop-ups:
 
@@ -114,7 +116,7 @@ By default, Chrome blocks pop-up windows, which can prevent OpenBrowser from ope
 
 > **Note**: If OpenBrowser clicks a link but no new tab opens, check the address bar for the blocked pop-up icon. This is a common issue for new users.
 
-### 7. Access the Web Frontend
+#### 7. Access the Web Frontend
 
 Open your browser and visit:
 
@@ -123,6 +125,12 @@ http://localhost:8765
 ```
 
 You can now interact with the AI Agent through the web interface.
+
+---
+
+### Try OpenBrowser with SKILL - install to your local agents
+
+Simply tell your agent to install skill/open-browser
 
 ## Why Qwen3.5-Plus?
 
