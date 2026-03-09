@@ -116,7 +116,7 @@ pip install -e ".[dev]"
 ### 2. Start the Server
 
 ```bash
-local-chrome-server serve
+uv run local-chrome-server serve
 ```
 
 The server will start at `http://127.0.0.1:8765` (HTTP) and `ws://127.0.0.1:8766` (WebSocket).
