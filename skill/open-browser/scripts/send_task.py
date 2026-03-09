@@ -201,7 +201,8 @@ def main():
     )
     parser.add_argument(
         "task",
-        help="Task description for the agent to execute"
+        nargs="?",
+        help="Task description for the agent to execute (optional with --check or --status)"
     )
     parser.add_argument(
         "--url",
@@ -278,6 +279,9 @@ def main():
         return
 
     # Foreground execution
+    if not args.task:
+        parser.error("Task description is required (unless using --check or --status)")
+
     try:
         # Check server first
         status = check_server_status(args.url)

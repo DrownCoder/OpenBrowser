@@ -274,36 +274,6 @@ Get user messages only.
 
 ---
 
-## Browser Commands (Internal)
-
-These are used by the agent internally via the extension:
-
-### Tab Management
-- `tab_init` - Initialize tab with URL
-- `tab_open` - Open new tab
-- `tab_switch` - Switch to tab
-- `tab_close` - Close tab
-- `tab_refresh` - Refresh page
-- `tab_list` - List all tabs
-
-### Visual Interaction
-- `highlight_elements` - Get interactive elements with IDs
-- `click_element` - Click element by ID
-- `hover_element` - Hover element by ID
-- `scroll_element` - Scroll element by ID
-- `keyboard_input` - Type text into element
-
-### JavaScript Execution
-- `javascript_execute` - Run arbitrary JavaScript
-
-### Screenshots
-- `screenshot` - Capture page screenshot
-
-### Dialogs
-- `handle_dialog` - Accept/dismiss browser dialogs
-
----
-
 ## Error Handling
 
 All endpoints return errors in consistent format:
@@ -327,28 +297,3 @@ No built-in rate limiting. Limited by:
 - LLM API rate limits (DashScope)
 - Browser rendering speed
 - Network latency
-
----
-
-## WebSocket Protocol
-
-Extension communication uses WebSocket on port 8766.
-
-**Message Format:**
-```json
-{
-  "type": "command_type",
-  "conversation_id": "...",
-  "params": {...}
-}
-```
-
-**Response Format:**
-```json
-{
-  "type": "response",
-  "conversation_id": "...",
-  "success": true,
-  "data": {...}
-}
-```

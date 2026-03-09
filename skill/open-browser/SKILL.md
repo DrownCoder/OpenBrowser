@@ -7,6 +7,8 @@ description: This skill should be used when the user asks to "automate browser",
 
 Delegate browser automation to OpenBrowser Agent for visual browser control.
 
+> **⚠️ Important**: Browser automation tasks are typically long-running. Always use a subagent to execute these tasks in the background while keeping the main conversation responsive.
+
 ## Quick Start
 
 ### 1. Check Prerequisites
@@ -113,6 +115,24 @@ python3 scripts/check_status.py
 # Should show: ✅ Extension: Connected
 ```
 
+### Step 4: Configure Chrome Pop-up Settings (CRITICAL)
+
+**⚠️ IMPORTANT: Chrome blocks pop-up windows by default, which prevents OpenBrowser from opening new tabs when clicking links.**
+
+**Instruct the user to configure pop-up permissions:**
+
+**Option A: Allow pop-ups for specific sites (Recommended)**
+1. When a pop-up is blocked, a blocked pop-up icon (🚫) appears in the address bar
+2. Click the icon and select "Always allow pop-ups and redirects from [site]"
+3. Click **Done**
+
+**Option B: Allow pop-ups globally**
+1. Navigate to `chrome://settings/content/popups`
+2. Under "Default behavior", select **Sites can send pop-ups and use redirects**
+3. Or add specific sites to "Allowed to send pop-ups" section
+
+**Common symptom**: User reports that OpenBrowser clicks a link but no new tab opens. This indicates pop-ups are blocked. Check the address bar for the blocked pop-up icon.
+
 ## Important Notes
 
 - **Long-running tasks can take minutes** - Always run in background
@@ -121,6 +141,19 @@ python3 scripts/check_status.py
 - **Uses your browser session** - Leverages existing logins/cookies
 
 ## Troubleshooting
+
+### Pop-ups Blocked - Links Don't Open New Tabs
+
+**Symptom**: OpenBrowser clicks a link but no new tab opens.
+
+**Cause**: Chrome blocks pop-up windows by default.
+
+**Solution**:
+1. Check the address bar for a blocked pop-up icon (🚫)
+2. Click the icon and select "Always allow pop-ups and redirects from [site]"
+3. Or configure globally at `chrome://settings/content/popups`
+
+See [Step 4: Configure Chrome Pop-up Settings](#step-4-configure-chrome-pop-up-settings-critical) for detailed instructions.
 
 ### Extension Not Connected (`websocket_connected: false`)
 
@@ -156,7 +189,4 @@ AI Assistant → REST API → OpenBrowser Agent → Chrome Extension
                                      ↓
                               Qwen3.5-Plus (Visual Understanding)
 ```
-
-## Task Examples
-
 

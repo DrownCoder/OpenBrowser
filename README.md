@@ -4,6 +4,126 @@
 
 > **Note**: OpenBrowser currently supports **Chrome only** (via Chrome extension) and has been tested exclusively with **Qwen3.5-Plus**. Other models are not officially supported.
 
+## Demo
+
+### AI-Powered News Collection from WSJ, CNN, and Reuters
+
+OpenBrowser autonomously browses major news websites (WSJ, CNN, Reuters) to collect, summarize, and translate breaking news about the Iran conflict.
+
+![News Collection Demo](demo/news_collection-preview.gif)
+
+[📺 Watch full video: news_collection.mp4](demo/news_collection.mp4)
+
+#### Collected Articles
+
+OpenBrowser collected the following articles and saved them as markdown files:
+
+- **[伊朗战争新闻汇总_2026-03-08.md](demo/伊朗战争新闻汇总_2026-03-08.md)** - Summary of all collected news with translations
+- **[WSJ_伊朗历史首都成为美以空战震中.md](demo/WSJ_伊朗历史首都成为美以空战震中.md)** - WSJ report on Isfahan air strikes
+- **[WSJ_特朗普不排除向伊朗派遣地面部队_实时更新.md](demo/WSJ_特朗普不排除向伊朗派遣地面部队_实时更新.md)** - WSJ live updates on Trump's Iran policy
+- **[CNN_伊朗战争实时更新_能源设施袭击.md](demo/CNN_伊朗战争实时更新_能源设施袭击.md)** - CNN live coverage of energy facility attacks
+
+### AI-Powered Apartment Hunting on Xiaohongshu
+
+OpenBrowser searches for rental listings on Xiaohongshu (Little Red Book), automatically liking, saving, and commenting on posts to inquire about details. It also evaluates furniture and decor quality through visual analysis.
+
+![Xiaohongshu Apartment Hunting Demo](demo/apartment_hunting-preview.gif)
+
+[📺 Watch full video: apartment_hunting.mp4](demo/apartment_hunting.mp4)
+
+#### Key Features Demonstrated
+
+- **Autonomous Search**: Navigate and search on Xiaohongshu for rental listings
+- **Social Interactions**: Like, save, and comment on posts to contact landlords
+- **Visual Analysis**: Evaluate furniture quality and interior design through screenshots
+- **Multi-step Workflow**: Complete end-to-end apartment hunting process
+
+## Quick Start
+
+### 1. Install Python Dependencies
+
+```bash
+# Using uv (recommended)
+uv sync
+
+# Or using pip
+pip install -e .
+
+# For development (includes dev dependencies like pytest, black, ruff)
+uv sync --group dev
+# Or with pip
+pip install -e ".[dev]"
+```
+
+### 2. Start the Server
+
+```bash
+uv run local-chrome-server serve
+```
+
+The server will start at `http://127.0.0.1:8765` (HTTP) and `ws://127.0.0.1:8766` (WebSocket).
+
+### 3. Configure LLM Settings
+
+On first access, you'll be prompted to configure your LLM settings through the web interface:
+
+1. Open `http://localhost:8765` in your browser
+2. You'll see the **Configuration Page**
+3. Fill in your API details:
+   - **Model**: Default is `dashscope/qwen3.5-plus`
+   - **Base URL**: Default is `https://dashscope.aliyuncs.com/compatible-mode/v1`
+   - **API Key**: Your API key (required)
+4. Optionally configure the **Default Working Directory** (CWD)
+5. Click **Save** and then **Continue to Main Interface**
+
+> **Note**: 
+> - Configuration is stored in `~/.openbrowser/llm_config.json`
+> - You can modify settings anytime by clicking the **⚙️ Settings** button in the status bar
+> - Environment variables (LLM_API_KEY, LLM_MODEL, LLM_BASE_URL) are **no longer supported** - please use the web UI configuration
+
+### 4. Build the Chrome Extension
+
+```bash
+cd extension
+npm install
+npm run build
+```
+
+### 5. Install the Extension in Chrome
+
+1. Open Chrome and navigate to `chrome://extensions/`
+2. Enable **Developer mode** (toggle in top-right)
+3. Click **Load unpacked**
+4. Select the `extension/dist` directory
+
+### 6. Configure Chrome Pop-up Settings (IMPORTANT)
+
+By default, Chrome blocks pop-up windows, which can prevent OpenBrowser from opening new tabs when clicking links. You need to configure Chrome to allow pop-ups:
+
+**Option A: Allow pop-ups for specific sites (Recommended)**
+
+1. When a pop-up is blocked, you'll see a blocked pop-up icon (🚫) in the address bar
+2. Click the icon and select "Always allow pop-ups and redirects from [site]"
+3. Click **Done**
+
+**Option B: Allow pop-ups globally**
+
+1. Open Chrome Settings: `chrome://settings/content/popups`
+2. Under "Default behavior", select **Sites can send pop-ups and use redirects**
+3. Alternatively, add specific sites to the "Allowed to send pop-ups" section
+
+> **Note**: If OpenBrowser clicks a link but no new tab opens, check the address bar for the blocked pop-up icon. This is a common issue for new users.
+
+### 7. Access the Web Frontend
+
+Open your browser and visit:
+
+```
+http://localhost:8765
+```
+
+You can now interact with the AI Agent through the web interface.
+
 ## Why Qwen3.5-Plus?
 
 We chose Qwen3.5-Plus as our foundation model because it offers exceptional multimodal capabilities at a fraction of the cost of competitors. Its native agentic design makes it ideal for tasks that require both visual understanding and code execution.
@@ -63,106 +183,6 @@ OpenBrowser is specifically designed for **Qwen3.5-Plus**, leveraging its unique
 - **Tab Management**: Open, close, switch, and manage browser tabs with session isolation
 - **Terminal Integration**: Execute bash commands for backend operations
 - **Multiple Interfaces**: REST API and WebSocket
-
-## Demo
-
-### AI-Powered News Collection from WSJ, CNN, and Reuters
-
-OpenBrowser autonomously browses major news websites (WSJ, CNN, Reuters) to collect, summarize, and translate breaking news about the Iran conflict.
-
-![News Collection Demo](demo/news_collection-preview.gif)
-
-[📺 Watch full video: news_collection.mp4](demo/news_collection.mp4)
-
-#### Collected Articles
-
-OpenBrowser collected the following articles and saved them as markdown files:
-
-- **[伊朗战争新闻汇总_2026-03-08.md](demo/伊朗战争新闻汇总_2026-03-08.md)** - Summary of all collected news with translations
-- **[WSJ_伊朗历史首都成为美以空战震中.md](demo/WSJ_伊朗历史首都成为美以空战震中.md)** - WSJ report on Isfahan air strikes
-- **[WSJ_特朗普不排除向伊朗派遣地面部队_实时更新.md](demo/WSJ_特朗普不排除向伊朗派遣地面部队_实时更新.md)** - WSJ live updates on Trump's Iran policy
-- **[CNN_伊朗战争实时更新_能源设施袭击.md](demo/CNN_伊朗战争实时更新_能源设施袭击.md)** - CNN live coverage of energy facility attacks
-
-### AI-Powered Apartment Hunting on Xiaohongshu
-
-OpenBrowser searches for rental listings on Xiaohongshu (Little Red Book), automatically liking, saving, and commenting on posts to inquire about details. It also evaluates furniture and decor quality through visual analysis.
-
-![Xiaohongshu Apartment Hunting Demo](demo/apartment_hunting-preview.gif)
-
-[📺 Watch full video: apartment_hunting.mp4](demo/apartment_hunting.mp4)
-
-#### Key Features Demonstrated
-
-- **Autonomous Search**: Navigate and search on Xiaohongshu for rental listings
-- **Social Interactions**: Like, save, and comment on posts to contact landlords
-- **Visual Analysis**: Evaluate furniture quality and interior design through screenshots
-- **Multi-step Workflow**: Complete end-to-end apartment hunting process
-
-### 1. Install Python Dependencies
-
-```bash
-# Using uv (recommended)
-uv sync
-
-# Or using pip
-pip install -e .
-
-# For development (includes dev dependencies like pytest, black, ruff)
-uv sync --group dev
-# Or with pip
-pip install -e ".[dev]"
-```
-
-### 2. Start the Server
-
-```bash
-uv run local-chrome-server serve
-```
-
-The server will start at `http://127.0.0.1:8765` (HTTP) and `ws://127.0.0.1:8766` (WebSocket).
-
-### 3. Configure LLM Settings
-
-On first access, you'll be prompted to configure your LLM settings through the web interface:
-
-1. Open `http://localhost:8765` in your browser
-2. You'll see the **Configuration Page**
-3. Fill in your API details:
-   - **Model**: Default is `dashscope/qwen3.5-plus`
-   - **Base URL**: Default is `https://dashscope.aliyuncs.com/compatible-mode/v1`
-   - **API Key**: Your API key (required)
-4. Optionally configure the **Default Working Directory** (CWD)
-5. Click **Save** and then **Continue to Main Interface**
-
-> **Note**: 
-> - Configuration is stored in `~/.openbrowser/llm_config.json`
-> - You can modify settings anytime by clicking the **⚙️ Settings** button in the status bar
-> - Environment variables (LLM_API_KEY, LLM_MODEL, LLM_BASE_URL) are **no longer supported** - please use the web UI configuration
-
-### 4. Build the Chrome Extension
-
-```bash
-cd extension
-npm install
-npm run build
-```
-
-### 5. Install the Extension in Chrome
-
-1. Open Chrome and navigate to `chrome://extensions/`
-2. Enable **Developer mode** (toggle in top-right)
-3. Click **Load unpacked**
-4. Select the `extension/dist` directory
-
-### 6. Access the Web Frontend
-
-Open your browser and visit:
-
-```
-http://localhost:8765
-```
-
-You can now interact with the AI Agent through the web interface.
 
 ## Architecture
 
