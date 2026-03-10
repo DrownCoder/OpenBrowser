@@ -1244,7 +1244,48 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
                   return false;
                 }
                 
+                // IMPORTANT: Skip elements that have a clickable ancestor
+                // This prevents nested elements inside <a>, <button>, etc. from being detected separately
+                if (hasClickableAncestor(el)) {
+                  return false;
+                }
+                
                 return true;
+              }
+              
+              return false;
+            }
+            
+            // Check if element has a clickable ancestor (traverse up the DOM tree)
+            // This prevents nested elements inside <a>, <button>, etc. from being detected as separate clickables
+            function hasClickableAncestor(el) {
+              let parent = el.parentElement;
+              
+              while (parent && parent !== document.body) {
+                const parentTag = parent.tagName.toLowerCase();
+                
+                // Check if parent is inherently clickable (tag-based)
+                if (parentTag === 'a' || parentTag === 'button') {
+                  return true;
+                }
+                
+                // Check for input types that are clickable
+                if (parentTag === 'input') {
+                  const type = parent.type?.toLowerCase();
+                  if (type === 'submit' || type === 'button' || type === 'image' || type === 'reset') {
+                    return true;
+                  }
+                }
+                
+                // Check for explicit click attributes
+                if (parent.getAttribute('role') === 'button' ||
+                    parent.hasAttribute('onclick') ||
+                    parent.hasAttribute('ng-click') ||
+                    parent.hasAttribute('@click')) {
+                  return true;
+                }
+                
+                parent = parent.parentElement;
               }
               
               return false;
@@ -1440,6 +1481,7 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
                 deduplicated.push(larger);
               }
             }
+            
             
             return { elements: deduplicated, counts };
           })();
