@@ -138,7 +138,7 @@ class TestTabTool:
     def test_create_with_executor(self) -> None:
         """Test that create() can accept an executor."""
         # Just verify it doesn't raise an error
-        tools = TabTool.create(executor=None)
+        tools = TabTool.create(conv_state=None, terminal_executor=None)
         assert len(tools) == 1
 
     def test_description_includes_required_parameters(self) -> None:

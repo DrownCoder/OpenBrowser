@@ -19,10 +19,6 @@ class OpenBrowserAction(Action):
     actions, enabling proper type hierarchy and conversation isolation.
     """
 
-    conversation_id: Optional[str] = Field(
-        default=None, description="Conversation ID for session isolation"
-    )
-
 
 class OpenBrowserObservation(Observation):
     """Base observation returned by OpenBrowser tools after each action.
@@ -85,31 +81,225 @@ class OpenBrowserObservation(Observation):
 
     @property
     def to_llm_content(self) -> Sequence[TextContent | ImageContent]:
-        """Convert observation to LLM content format with markdown formatting."""
-        content_items: list[TextContent | ImageContent] = []
-        text_parts: list[str] = []
-
+        import json
+        
+        content_items = []
+        text_parts = []
+        
         # Operation Status Section
         text_parts.append("## Operation Status")
         text_parts.append("")
         if not self.success:
-            text_parts.append("**Status**: FAILED")
-            if self.error:
-                text_parts.append(f"**Error**: {self.error}")
+            text_parts.append(f"**Status**: FAILED")
+            text_parts.append(f"**Error**: {self.error}")
         else:
-            text_parts.append("**Status**: SUCCESS")
-            if self.message:
+            text_parts.append(f"**Status**: SUCCESS")
+            # For JavaScript operations, show minimal confirmation
+            if self.javascript_result is not None and self.message:
+                # Extract just "Executed JavaScript" without the script content
+                if "Executed JavaScript:" in self.message:
+                    text_parts.append("**Action**: JavaScript code executed successfully")
+                else:
+                    text_parts.append(f"**Action**: {self.message}")
+            elif self.message:
                 text_parts.append(f"**Action**: {self.message}")
-
+        
         text_parts.append("")
-
-        # Join text parts and create TextContent
-        if text_parts:
-            text_content = "\n".join(text_parts)
-            content_items.append(TextContent(text=text_content))
-
-        # Add screenshot if available
+        
+        # JavaScript Result Section (if applicable)
+        if self.javascript_result is not None:
+            text_parts.append("## Execution Result")
+            text_parts.append("")
+            
+            # Format result based on type
+            if isinstance(self.javascript_result, (dict, list)):
+                try:
+                    # Pretty-print JSON with indentation
+                    result_str = json.dumps(self.javascript_result, indent=2, ensure_ascii=False)
+                    if len(result_str) > 50000:
+                        result_str = result_str[:50000] + "\n... (output truncated)"
+                    text_parts.append("```json")
+                    text_parts.append(result_str)
+                    text_parts.append("```")
+                except (TypeError, ValueError):
+                    # Fallback to string representation
+                    result_str = str(self.javascript_result)
+                    if len(result_str) > 50000:
+                        result_str = result_str[:50000] + "... (truncated)"
+                    text_parts.append("```")
+                    text_parts.append(result_str)
+                    text_parts.append("```")
+            else:
+                # For non-dict/list results (strings, numbers, etc.)
+                result_str = str(self.javascript_result)
+                if len(result_str) > 50000:
+                    result_str = result_str[:50000] + "... (truncated)"
+                text_parts.append("```")
+                text_parts.append(result_str)
+                text_parts.append("```")
+            text_parts.append("")
+        
+        # Console Output Section (if applicable)
+        if self.console_output and len(self.console_output) > 0:
+            text_parts.append("## Console Output")
+            text_parts.append("")
+            
+            for entry in self.console_output:
+                console_type = entry.get('type', 'log')
+                args = entry.get('args', [])
+                timestamp = entry.get('timestamp')
+                
+                # Format console type with emoji
+                type_emoji = {
+                    'log': '📝',
+                    'warn': '⚠️',
+                    'error': '❌',
+                    'info': 'ℹ️',
+                    'debug': '🔍',
+                    'table': '📊',
+                    'trace': '🔍',
+                    'dir': '📁'
+                }.get(console_type, '📝')
+                
+                # Format arguments
+                formatted_args = []
+                for arg in args:
+                    if arg is None:
+                        formatted_args.append('undefined')
+                    elif isinstance(arg, str):
+                        formatted_args.append(arg)
+                    elif isinstance(arg, (dict, list)):
+                        try:
+                            formatted_args.append(json.dumps(arg, indent=2, ensure_ascii=False))
+                        except:
+                            formatted_args.append(str(arg))
+                    else:
+                        formatted_args.append(str(arg))
+                
+                # Join multiple arguments
+                args_str = ' '.join(formatted_args)
+                if len(args_str) > 1000:
+                    args_str = args_str[:1000] + "... (truncated)"
+                
+# Add console line with type
+                text_parts.append(f"{type_emoji} **[{console_type}]** {args_str}")
+            
+            text_parts.append("")
+        
+        # Dialog Section (if applicable)
+        if self.dialog_opened and self.dialog:
+            text_parts.append("## ⚠️ Dialog Opened")
+            text_parts.append("")
+            dialog_type = self.dialog.get('type', 'unknown')
+            dialog_message = self.dialog.get('message', '')
+            needs_decision = self.dialog.get('needsDecision', False)
+            
+            text_parts.append(f"**Type**: {dialog_type}")
+            text_parts.append(f"**Message**: \"{dialog_message}\"")
+            text_parts.append(f"**Needs Decision**: {'Yes' if needs_decision else 'No'}")
+            text_parts.append("")
+            
+            if needs_decision:
+                text_parts.append("**Action Required**: Use `handle_dialog` to respond.")
+                text_parts.append("- To accept: `{\"type\": \"handle_dialog\", \"dialog_action\": \"accept\"}`")
+                text_parts.append("- To dismiss: `{\"type\": \"handle_dialog\", \"dialog_action\": \"dismiss\"}`")
+                text_parts.append("- For prompts: `{\"type\": \"handle_dialog\", \"dialog_action\": \"accept\", \"prompt_text\": \"your text\"}`")
+            else:
+                text_parts.append("**Note**: This dialog was auto-accepted (no decision needed).")
+            text_parts.append("")
+        
+        # New Tabs Created Section (if applicable)
+        if self.new_tabs_created:
+            text_parts.append("## 🗂️ New Tabs Created")
+            text_parts.append("")
+            for tab in self.new_tabs_created:
+                tab_id = tab.get('tabId', 'unknown')
+                url = tab.get('url', 'No URL')
+                title = tab.get('title', '')
+                loading = tab.get('loading', False)
+                
+                text_parts.append(f"**Tab [{tab_id}]**: {url}")
+                if title:
+                    text_parts.append(f"   Title: {title}")
+                if loading:
+                    text_parts.append("   Loading: Yes")
+            text_parts.append("")
+        
+        # Highlighted Elements Section (if applicable)
+        if self.highlighted_elements:
+            text_parts.append("## Highlighted Elements")
+            text_parts.append("")
+            text_parts.append(f"**Total Elements**: {self.total_elements if self.total_elements is not None else len(self.highlighted_elements)}")
+            text_parts.append("")
+            # Format: id: <html> for each element
+            element_descriptions = []
+            for el in self.highlighted_elements:
+                el_id = el.get('id', 'unknown')
+                html = (el.get('html') or '').strip()
+                if len(html) > 200:
+                    html = html[:190] + '...(Truncated)'
+                if html:
+                    element_descriptions.append(f"{el_id}: {html}")
+                else:
+                    tag = el.get('tagName', '').upper()
+                    element_descriptions.append(f"{el_id} ({tag})")
+            text_parts.append('\n'.join(element_descriptions))
+            text_parts.append("")
+        
+        # Pending Confirmation Section (2PC)
+        if self.pending_confirmation:
+            text_parts.append("## ⚠️ Action Pending Confirmation")
+            text_parts.append("")
+            text_parts.append("**IMPORTANT**: This action requires confirmation before execution.")
+            text_parts.append("")
+            text_parts.append(f"**Element ID**: {self.pending_confirmation.get('element_id', 'unknown')}")
+            text_parts.append(f"**Action Type**: {self.pending_confirmation.get('action_type', 'unknown')}")
+            text_parts.append("")
+            text_parts.append("**Full HTML**:")
+            text_parts.append("```html")
+            full_html = self.pending_confirmation.get('full_html', '<not available>')
+            # Truncate if too long
+            if len(full_html) > 5000:
+                full_html = full_html[:5000] + "\n... (truncated)"
+            text_parts.append(full_html)
+            text_parts.append("```")
+            text_parts.append("")
+            text_parts.append("**To confirm this action, use:**")
+            action_type = self.pending_confirmation.get('action_type', '')
+            element_id = self.pending_confirmation.get('element_id', '')
+            confirm_cmd = f'{{"type": "confirm_{action_type}_element", "element_id": "{element_id}"}}'
+            text_parts.append(f"```json\n{confirm_cmd}\n```")
+            text_parts.append("")
+            text_parts.append("**Or choose a different action to cancel this pending confirmation.**")
+            text_parts.append("")
+        
+        if self.element_id:
+            text_parts.append("## Element Action Result")
+            text_parts.append("")
+            text_parts.append(f"**Element ID**: {self.element_id}")
+            text_parts.append("")
+        
+        # Browser State Section
+        if self.tabs:
+            text_parts.append("## Browser State")
+            text_parts.append("")
+            text_parts.append(f"**Open Tabs** ({len(self.tabs)}):")
+            text_parts.append("")
+            for i, tab in enumerate(self.tabs, 1):
+                active_marker = "●" if tab.get('active') else "○"
+                title = tab.get('title', 'No title')[:50]
+                url = tab.get('url', 'No URL')
+                # ✅ FIX: Use 'tabId' (from Extension ManagedTab) or fallback to 'id'
+                tab_id = tab.get('tabId') or tab.get('id', 'unknown')
+                text_parts.append(f"{i}. {active_marker} **[{tab_id}]** {title}")
+                text_parts.append(f"   URL: {url}")
+            text_parts.append("")
+        
+        text_content = "\n".join(text_parts)
+        content_items.append(TextContent(text=text_content))
+        
+        # Add image content if screenshot is available
         if self.screenshot_data_url:
             content_items.append(ImageContent(image_urls=[self.screenshot_data_url]))
-
+        
         return content_items
