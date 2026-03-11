@@ -18,7 +18,13 @@ FastAPI backend handling REST API, WebSocket communication with Chrome extension
 | WebSocket | `websocket/manager.py` | `ws_manager`, `send_command()` |
 | LLM config | `core/llm_config.py` | `llm_config_manager` |
 | Command models | `models/commands.py` | `Command`, `HandleDialogCommand`, `DialogAction` |
-| Browser tool | `agent/tools/open_browser_tool.py` | `OpenBrowserTool`, `handle_dialog` |
+| Tab tool | `agent/tools/tab_tool.py` | `TabTool`, `TabAction` |
+| Highlight tool | `agent/tools/highlight_tool.py` | `HighlightTool`, `HighlightAction` |
+| Element interaction | `agent/tools/element_interaction_tool.py` | `ElementInteractionTool`, `ElementInteractionAction` |
+| Dialog tool | `agent/tools/dialog_tool.py` | `DialogTool`, `DialogHandleAction` |
+| JavaScript tool | `agent/tools/javascript_tool.py` | `JavaScriptTool`, `JavaScriptAction` |
+| ToolSet aggregator | `agent/tools/toolset.py` | `OpenBrowserToolSet` |
+| Deprecated (monolithic) | `agent/tools/open_browser_tool.py` | `OpenBrowserTool` (deprecated) |
 ## STRUCTURE
 
 ```
@@ -207,12 +213,48 @@ After the screenshot refactor, the server layer no longer proactively triggers s
 
 **Best Practice:** Use explicit `screenshot` command when visual feedback is needed after navigation or JavaScript execution.
 
+## 5-TOOL ARCHITECTURE
+
+OpenBrowser now uses 5 focused tools instead of a single monolithic tool:
+
+### 1. Tab Tool (`tab`)
+- **Purpose**: Browser tab management with session isolation
+- **Actions**: `init`, `open`, `close`, `switch`, `list`, `refresh`, `view`
+- **Session isolation**: Each conversation has its own tab group
+
+### 2. Highlight Tool (`highlight`)
+- **Purpose**: Element discovery with collision-free visual overlays
+- **Element types**: `clickable` (default), `inputable`, `scrollable`, `hoverable`
+- **Visual coding**: BLUE stage - safe identification before interaction
+- **Pagination**: Collision-aware pages for non-overlapping element display
+
+### 3. Element Interaction Tool (`element_interaction`)
+- **Purpose**: Click, hover, scroll, keyboard input with Two-Phase Commit (2PC)
+- **Visual coding**: ORANGE stage - confirmation before execution
+- **2PC flow**: `click_element` → orange highlight → `confirm_click_element`
+- **Commands**: `click`, `hover`, `scroll`, `keyboard_input` with confirmation variants
+
+### 4. Dialog Tool (`dialog`)
+- **Purpose**: Browser dialog (alert/confirm/prompt) handling
+- **Dialog types**: `alert` (auto-accepted), `confirm`, `prompt`, `beforeunload`
+- **Required**: Handle dialogs before continuing browser operations
+
+### 5. JavaScript Tool (`javascript`)
+- **Purpose**: Custom JavaScript execution as fallback mechanism
+- **When to use**: When visual commands fail (2-Strike Rule) or for complex DOM manipulation
+- **Guidelines**: Return JSON-serializable values, 30-second timeout
+
+### Shared Architecture
+- **Shared executor**: All 5 tools share executor for 2PC state management
+- **Conversation isolation**: Each conversation has isolated state
+- **Backward compatibility**: `OpenBrowserTool` still available with deprecation warning
+- **ToolSet**: `OpenBrowserToolSet` aggregates all 5 tools for registration
 
 ## NOTES
 
 - WebSocket runs on port 8766, HTTP on 8765
 - `conversation_id` links all commands to session context
-- Agent uses OpenHands SDK with custom `OpenBrowserTool`
+- Agent uses OpenHands SDK with 5 focused tools (tab, highlight, element_interaction, dialog, javascript)
 - Dialogs block screenshot/JS until handled
 
 ## ANTI-PATTERNS

@@ -253,25 +253,32 @@ class HighlightElementsCommand(BaseCommand):
     )
 
 class ClickElementCommand(BaseCommand):
-    """Click a highlighted element by its ID"""
+    """Click a highlighted element by its ID
+    
+    tab_id is optional and will be auto-resolved to the current managed tab if not provided.
+    """
     type: Literal["click_element"] = "click_element"
     element_id: str = Field(
         description="Element ID from highlight response"
     )
-    tab_id: int = Field(..., description="Target tab ID")
-
+    tab_id: Optional[int] = Field(default=None, description="Target tab ID (optional, auto-resolved if not provided)")
 
 class HoverElementCommand(BaseCommand):
-    """Hover over a highlighted element by its ID"""
+    """Hover over a highlighted element by its ID
+    
+    tab_id is optional and will be auto-resolved to the current managed tab if not provided.
+    """
     type: Literal["hover_element"] = "hover_element"
     element_id: str = Field(
         description="Element ID from highlight response"
     )
-    tab_id: int = Field(..., description="Target tab ID")
-
+    tab_id: Optional[int] = Field(default=None, description="Target tab ID (optional, auto-resolved if not provided)")
 
 class ScrollElementCommand(BaseCommand):
-    """Scroll a highlighted element in a direction, or the entire page if element_id not provided"""
+    """Scroll a highlighted element in a direction, or the entire page if element_id not provided
+    
+    tab_id is optional and will be auto-resolved to the current managed tab if not provided.
+    """
     type: Literal["scroll_element"] = "scroll_element"
     element_id: Optional[str] = Field(
         default=None,
@@ -287,10 +294,12 @@ class ScrollElementCommand(BaseCommand):
         le=3.0,
         description="Scroll amount relative to page/element height (0.5 = half page, 1.0 = full page, 2.0 = two pages)"
     )
-    tab_id: int = Field(..., description="Target tab ID")
-
+    tab_id: Optional[int] = Field(default=None, description="Target tab ID (optional, auto-resolved if not provided)")
 class KeyboardInputCommand(BaseCommand):
-    """Type text into a highlighted element by its ID"""
+    """Type text into a highlighted element by its ID
+    
+    tab_id is optional and will be auto-resolved to the current managed tab if not provided.
+    """
     type: Literal["keyboard_input"] = "keyboard_input"
     element_id: str = Field(
         description="Element ID from highlight response"
@@ -298,7 +307,7 @@ class KeyboardInputCommand(BaseCommand):
     text: str = Field(
         description="Text to input into the element"
     )
-    tab_id: int = Field(..., description="Target tab ID")
+    tab_id: Optional[int] = Field(default=None, description="Target tab ID (optional, auto-resolved if not provided)")
 
 
 class GetElementHtmlCommand(BaseCommand):

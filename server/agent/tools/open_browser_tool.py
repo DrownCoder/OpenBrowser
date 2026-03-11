@@ -5,7 +5,23 @@ This tool allows an AI agent to control a Chrome browser using the existing
 Local Chrome Server infrastructure. After each operation, it returns both
 textual information (current tab list, mouse position) and a screenshot
 image for visual feedback.
+
+DEPRECATION WARNING: This monolithic tool is being replaced by 5 focused tools:
+- TabTool (tab management)
+- HighlightTool (element discovery) 
+- ElementInteractionTool (click/hover/scroll/keyboard with 2PC)
+- DialogTool (dialog handling)
+- JavaScriptTool (JavaScript execution)
+
+Please use the new tools via OpenBrowserToolSet for better AI cognitive load.
 """
+
+import warnings
+warnings.warn(
+    "OpenBrowserTool is deprecated. Use OpenBrowserToolSet with 5 focused tools instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 import os
 import time

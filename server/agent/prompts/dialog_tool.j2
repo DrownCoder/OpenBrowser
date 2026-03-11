@@ -1,0 +1,77 @@
+# Dialog Tool
+
+Browser dialog (alert/confirm/prompt) handling.
+
+## Overview
+
+The Dialog Tool handles browser modal dialogs that appear during JavaScript execution. These dialogs pause browser execution until handled, so you must respond appropriately to continue automation.
+
+## Dialog Types
+
+| Type | Needs Decision | AI Action |
+|------|----------------|----------|
+| alert | No | Auto-accepted |
+| confirm | Yes | handle_dialog(accept/dismiss) |
+| prompt | Yes | handle_dialog(accept, text) |
+| beforeunload | Yes | handle_dialog(accept/dismiss) |
+
+## Dialog Detection
+
+When JavaScript triggers a dialog, the browser pauses. OpenBrowser uses Promise.race to detect dialogs gracefully:
+
+```
+1. javascript_execute runs
+2. Promise.race([
+     jsExecution,    // Runtime.evaluate
+     dialogEvent,    // Page.javascriptDialogOpening
+     timeout         // User timeout
+   ])
+3. If dialog opens:
+   - Alert → Auto-accept
+   - Confirm/Prompt → Return dialog info
+4. AI calls handle_dialog(accept/dismiss)
+5. Extension handles, checks cascade
+```
+
+## Cascading Dialogs
+
+Dialog → Dialog → Dialog chain supported. After handling one dialog, the system checks for new dialogs within 150ms.
+
+## Commands
+
+### handle_dialog
+Handle a browser dialog.
+
+```json
+{ "type": "handle_dialog", "dialog_action": "accept" }
+{ "type": "handle_dialog", "dialog_action": "dismiss" }
+{ "type": "handle_dialog", "dialog_action": "accept", "prompt_text": "my response" }
+```
+
+**Parameters**:
+- `dialog_action`: "accept" or "dismiss"
+- `prompt_text`: (optional) Text to enter into prompt dialogs when accepting
+
+**Behavior**:
+- For `alert` dialogs: Auto-accepted (no action needed)
+- For `confirm` dialogs: Choose accept or dismiss
+- For `prompt` dialogs: Choose accept with prompt_text, or dismiss
+- For `beforeunload` dialogs: Choose accept (allow navigation) or dismiss (stay on page)
+
+## Workflow Integration
+
+1. **Dialog appears**: During JavaScript execution or page navigation.
+2. **Observation includes dialog info**: Type, message, default prompt value.
+3. **Decide action**: Based on dialog type and your goal.
+4. **Call handle_dialog**: With appropriate action and optional text.
+5. **Continue automation**: Dialog closes and execution resumes.
+
+## Screenshot Behavior
+
+`handle_dialog` returns a screenshot after handling the dialog, showing the resulting page state.
+
+## Error Handling
+
+- **No active dialog**: Returns error if no dialog is currently open.
+- **Invalid action**: Returns error for unsupported actions.
+- **Missing prompt_text**: Returns error if accepting a prompt without text.

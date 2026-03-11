@@ -1,0 +1,113 @@
+# JavaScript Tool
+
+Custom JavaScript execution for complex interactions.
+
+## Overview
+
+The JavaScript Tool executes arbitrary JavaScript code in the browser context. Use this as a **fallback** when visual commands cannot accomplish your goal. Visual commands should always be preferred for reliability and safety.
+
+## Dynamic JavaScript Control
+
+The `javascript_execute` command can be disabled via environment variable:
+```bash
+export OPEN_BROWSER_DISABLE_JAVASCRIPT_EXECUTE=1
+```
+
+When disabled:
+- Template removes all `javascript_execute` references
+- `OpenBrowserAction.type` description excludes `'javascript_execute'`
+- Command execution returns error if attempted
+
+## When to Use JavaScript
+
+**Use visual commands first**:
+1. `highlight_elements` → `click_element` → `confirm_click_element`
+2. `hover_element` → `confirm_hover_element`
+3. `keyboard_input` → `confirm_keyboard_input`
+4. `scroll_element` → `confirm_scroll_element`
+
+**Switch to JavaScript only when**:
+- Complex DOM manipulation needed
+- Visual commands fail twice (2-Strike Rule)
+- Special browser APIs required (geolocation, notifications, etc.)
+- Custom event sequences not covered by visual commands
+
+## Commands
+
+### javascript_execute
+Execute arbitrary JavaScript.
+
+```json
+{ "type": "javascript_execute", "script": "(() => { return document.title; })()" }
+```
+
+**Parameters**:
+- `script`: JavaScript code to execute
+
+**Guidelines**:
+- **30-second timeout**: Scripts timing out will return error
+- **Return JSON-serializable values only**: No DOM nodes, functions, or circular structures
+- **Use IIFE**: Wrap in `(() => { ... })()` for explicit return statements
+- **Console output captured**: `console.log()` output is included in response
+- **Dialog detection**: Dialogs triggered during execution are automatically detected and require `handle_dialog`
+
+## JavaScript-First Automation (Fallback Patterns)
+
+For complex interactions not covered by visual commands:
+
+### Click by visible text (universal pattern)
+```javascript
+(() => {
+    const text = 'YOUR_TEXT';
+    const leaf = Array.from(document.querySelectorAll('*'))
+        .find(el => el.children.length === 0 && el.textContent.includes(text));
+    if (!leaf) return 'not found';
+    const target = leaf.closest('a, button, [role="button"]') || leaf;
+    target.click();
+    return 'clicked: ' + target.tagName;
+})()
+```
+
+### Form filling
+```javascript
+(() => {
+    document.querySelector('#username').value = 'user';
+    document.querySelector('#password').value = 'pass';
+    document.querySelector('button[type="submit"]').click();
+    return 'form submitted';
+})()
+```
+
+### Scroll to element
+```javascript
+(() => {
+    const el = document.querySelector('.target');
+    if (el) el.scrollIntoView({ behavior: 'smooth' });
+    return 'scrolled';
+})()
+```
+
+## 2-Strike Rule
+
+If a visual command fails twice:
+1. Try full event sequence (pointerdown → mousedown → click)
+2. Inspect DOM structure
+3. Consider direct URL navigation
+4. **Then switch to JavaScript fallback**
+
+## Screenshot Behavior
+
+`javascript_execute` does NOT return a screenshot. If you need visual feedback after JavaScript execution, call `screenshot` explicitly:
+
+```
+1. javascript_execute "document.querySelector('#button').click()"  # No screenshot
+2. screenshot                                                # Explicit request for visual feedback
+```
+
+## Error Handling
+
+- **Syntax error**: Returns error with stack trace
+- **Timeout**: Returns error after 30 seconds
+- **Dialog opened**: Returns dialog info, requiring `handle_dialog`
+- **Non-serializable return**: Returns error
+- **Security violation**: Returns error (cross-origin access, etc.)
