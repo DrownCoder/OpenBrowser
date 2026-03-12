@@ -245,7 +245,7 @@ npm run typecheck
 
 ## License
 
-MIT
+LGPL-3.0
 
 ## Acknowledgments
 
