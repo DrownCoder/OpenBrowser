@@ -134,13 +134,6 @@ export async function performElementClick(
           el.dispatchEvent(event);
         }
 
-        // Mouse events sequence
-        const mouseEvents = ['mousedown', 'mouseup', 'click'];
-        for (const eventType of mouseEvents) {
-          const event = new MouseEvent(eventType, eventOptions);
-          el.dispatchEvent(event);
-        }
-
         // Native click as fallback - some frameworks only respond to native clicks
         // This is a no-op if synthetic events already triggered the action
         try {
