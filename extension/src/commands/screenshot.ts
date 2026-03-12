@@ -7,20 +7,24 @@ import { cacheScreenshotMetadata } from './computer';
 import { CdpCommander } from './cdp-commander';
 import { debuggerSessionManager } from './debugger-manager';
 import { workerManager } from '../workers/worker-manager';
-import { dialogManager, DialogType } from './dialog';
+import { dialogManager, DialogType, type DialogInfo } from './dialog';
 
 /**
  * Error thrown when screenshot capture is blocked by an open dialog
  */
 export class DialogBlockedError extends Error {
+  public autoAcceptedDialogs?: DialogInfo[];
+  
   constructor(
     public tabId: number,
     public dialogType: DialogType,
     public dialogMessage: string,
-    public needsDecision: boolean
+    public needsDecision: boolean,
+    autoAcceptedDialogs?: DialogInfo[]
   ) {
     super(`Cannot capture screenshot: A ${dialogType} dialog is open ("${dialogMessage}"). Use handle_dialog to respond first.`);
     this.name = 'DialogBlockedError';
+    this.autoAcceptedDialogs = autoAcceptedDialogs;
   }
 }
 
@@ -513,18 +517,56 @@ export async function captureScreenshot(
       throw new Error('[Screenshot] No active tab found');
     }
     targetTabId = tab.id;
-
-  // ⚠️ DIALOG BLOCKING CHECK: Cannot take screenshot while dialog is open
-  if (dialogManager.hasActiveDialog(targetTabId)) {
-    const dialog = dialogManager.getActiveDialog(targetTabId)!;
-    throw new DialogBlockedError(
-      targetTabId,
-      dialog.dialogType,
-      dialog.message,
-      dialog.needsDecision
-    );
   }
 
+  // Track all auto-accepted dialogs for metadata
+  const autoAcceptedDialogs: DialogInfo[] = [];
+
+  // ⚠️ DIALOG BLOCKING CHECK: Cannot take screenshot while dialog is open
+  // Process all dialogs in a loop: auto-accept alerts, throw for decisions needed
+  while (dialogManager.hasActiveDialog(targetTabId)) {
+    const dialog = dialogManager.getActiveDialog(targetTabId)!;
+    
+    if (!dialog.needsDecision) {
+      // Alert dialogs are auto-accepted by the system (no AI decision needed)
+      console.log(`💬 [Screenshot] Auto-accepting alert dialog: "${dialog.message}"`);
+      
+      try {
+        // Store dialog info before auto-accepting
+        autoAcceptedDialogs.push({...dialog});
+        
+        await dialogManager.autoAcceptDialog(targetTabId);
+        
+        // Wait a bit for dialog to close and page to settle
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        console.log(`✅ [Screenshot] Alert dialog auto-accepted`);
+        
+        // Continue loop to check for cascading dialogs
+        continue;
+        
+      } catch (autoAcceptError) {
+        console.error(`❌ [Screenshot] Failed to auto-accept alert dialog:`, autoAcceptError);
+        // If auto-accept fails, still throw DialogBlockedError so AI can handle it
+        throw new DialogBlockedError(
+          targetTabId,
+          dialog.dialogType,
+          dialog.message,
+          dialog.needsDecision,
+          autoAcceptedDialogs.length > 0 ? autoAcceptedDialogs : undefined
+        );
+      }
+    } else {
+      // For dialogs that need AI decision (confirm, prompt, beforeunload)
+      // Throw DialogBlockedError with information about auto-accepted dialogs if any
+      throw new DialogBlockedError(
+        targetTabId,
+        dialog.dialogType,
+        dialog.message,
+        dialog.needsDecision,
+        autoAcceptedDialogs.length > 0 ? autoAcceptedDialogs : undefined
+      );
+    }
   }
   
   // 会话 ID 是必需的
@@ -572,6 +614,29 @@ export async function captureScreenshot(
     waitForRender
   );
   
+  // Add auto-accepted dialog info to metadata if applicable
+  if (autoAcceptedDialogs.length > 0) {
+    console.log(`💬 [Screenshot] Adding ${autoAcceptedDialogs.length} auto-accepted dialog(s) to metadata`);
+    
+    // Create simplified dialog info objects for metadata
+    const dialogInfos = autoAcceptedDialogs.map(dialog => ({
+      type: dialog.dialogType,
+      message: dialog.message,
+      url: dialog.url,
+      timestamp: dialog.timestamp,
+    }));
+    
+    // Add to metadata
+    result.metadata = {
+      ...result.metadata,
+      dialog_auto_accepted: dialogInfos.length > 0 ? dialogInfos[0] : null, // First dialog for backward compatibility
+      dialog_auto_accepted_list: dialogInfos, // All dialogs
+    };
+    
+    // Also add as top-level property for easy access
+    result.dialog_auto_accepted = dialogInfos.length > 0 ? dialogInfos[0] : null; // First dialog for backward compatibility
+    result.dialog_auto_accepted_list = dialogInfos; // All dialogs
+  }
   console.log(`✅ [Screenshot] Screenshot captured successfully for tab ${targetTabId}`);
   
   return result;

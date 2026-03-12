@@ -102,6 +102,9 @@ OpenBrowser uses Promise.race to detect dialogs gracefully.
 Dialog → Dialog → Dialog chain supported. After handling one dialog,
 the system checks for new dialogs within 150ms.
 
+### Element Actions Dialog Handling
+When JavaScript execution triggers a dialog during element actions (click, hover, scroll, keyboard input), the `executeJavaScript` function returns a result with `dialog_opened: true` but no `result` field. Element action functions (`performElementClick`, `performElementHover`, etc.) must check for `jsResult.dialog_opened` before checking `jsResult.result?.value`. If a dialog opened, treat the action as successful (clicked/hovered/scrolled/input = true) and propagate dialog info to the screenshot handler. This prevents false "Invalid JavaScript result.value structure" errors.
+
 ## CONVENTIONS
 
 ### Python (server/)

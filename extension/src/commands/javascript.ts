@@ -107,6 +107,7 @@ export async function executeJavaScript(
 
   // ============================================================
   // STEP 1: Check for existing dialog (blocking state)
+  // Note: We don't handle dialogs here - they will be handled by captureScreenshot
   // ============================================================
   if (dialogManager.hasActiveDialog(tabId)) {
     const existingDialog = dialogManager.getActiveDialog(tabId)!;
@@ -249,41 +250,10 @@ export async function executeJavaScript(
         // Set conversation ID for the dialog
         dialogInfo.conversationId = conversationId;
 
-        // For alerts (no decision needed), auto-accept and return
-        if (!dialogInfo.needsDecision) {
-          console.log(`💬 [JavaScript] Auto-accepting alert dialog`);
-          
-          // Small delay to ensure dialog is fully opened
-          await new Promise(resolve => setTimeout(resolve, 50));
-          
-          await dialogManager.autoAcceptDialog(tabId);
-          
-          // Detect new tabs created
-          await new Promise(resolve => setTimeout(resolve, 500));
-          const tabsAfterAlert = tabManager.getManagedTabsOnly(conversationId);
-          const newTabsAlert = tabsAfterAlert.filter(tab => !tabIdsBeforeJs.has(tab.tabId));
-          
-          return {
-            success: true,
-            message: 'Alert dialog auto-accepted',
-            consoleOutput: consoleOutput.length > 0 ? consoleOutput : undefined,
-            dialog_opened: true,
-            dialog: {
-              type: dialogInfo.dialogType,
-              message: dialogInfo.message,
-              url: dialogInfo.url,
-              needsDecision: false,
-            },
-            new_tabs_created: newTabsAlert.length > 0 ? newTabsAlert.map(tab => ({
-              tabId: tab.tabId,
-              url: tab.url,
-              title: tab.title,
-              loading: !tab.url || tab.url === 'chrome://newtab/',
-            })) : undefined,
-          };
-        }
-
-        // For confirm/prompt/beforeunload, return dialog info and wait for handle_dialog
+        // ALL dialog handling is deferred to captureScreenshot
+        // We just return dialog info without auto-accepting even for alerts
+        console.log(`💬 [JavaScript] Dialog opened during execution: ${dialogInfo.dialogType} (message: "${dialogInfo.message}") - Deferring to captureScreenshot`);
+        
         // Detect new tabs created
         await new Promise(resolve => setTimeout(resolve, 500));
         const tabsAfterDialog = tabManager.getManagedTabsOnly(conversationId);
@@ -291,14 +261,14 @@ export async function executeJavaScript(
         
         return {
           success: true,
-          message: `Dialog opened: ${dialogInfo.dialogType}. Use handle_dialog action to respond.`,
+          message: `JavaScript execution paused: ${dialogInfo.dialogType} dialog opened. Dialog will be handled by screenshot.`,
           consoleOutput: consoleOutput.length > 0 ? consoleOutput : undefined,
           dialog_opened: true,
           dialog: {
             type: dialogInfo.dialogType,
             message: dialogInfo.message,
             url: dialogInfo.url,
-            needsDecision: true,
+            needsDecision: dialogInfo.needsDecision,  // Keep original needsDecision value
           },
           new_tabs_created: newTabsDialog.length > 0 ? newTabsDialog.map(tab => ({
             tabId: tab.tabId,
@@ -396,34 +366,19 @@ export async function executeJavaScript(
       // Check if a dialog was detected (might have opened right before timeout)
       if (dialogDetected) {
         const dd: DialogInfo = dialogDetected; // Type guard for TypeScript
-        console.log(`💬 [JavaScript] Dialog detected during error handling`);
+        console.log(`💬 [JavaScript] Dialog detected during error handling: ${dd.dialogType} (message: "${dd.message}") - Deferring to captureScreenshot`);
         
-        if (!dd.needsDecision) {
-          await dialogManager.autoAcceptDialog(tabId);
-          return {
-            success: true,
-            message: 'Alert dialog auto-accepted',
-            consoleOutput: consoleOutput.length > 0 ? consoleOutput : undefined,
-            dialog_opened: true,
-            dialog: {
-              type: dd.dialogType,
-              message: dd.message,
-              url: dd.url,
-              needsDecision: false,
-            },
-          };
-        }
-        
+        // All dialog handling deferred to captureScreenshot
         return {
           success: true,
-          message: `Dialog opened: ${dd.dialogType}. Use handle_dialog action to respond.`,
+          message: `JavaScript execution error with dialog: ${dd.dialogType} dialog opened. Dialog will be handled by screenshot.`,
           consoleOutput: consoleOutput.length > 0 ? consoleOutput : undefined,
           dialog_opened: true,
           dialog: {
             type: dd.dialogType,
             message: dd.message,
             url: dd.url,
-            needsDecision: true,
+            needsDecision: dd.needsDecision,  // Keep original needsDecision value
           },
         };
       }
