@@ -558,7 +558,7 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
         const conversationId = command.conversation_id;
         
         // Always use current active tab for the conversation (ignore tab_id if provided)
-        const activeTabId = tabManager.getCurrentActiveTabId(conversationId);
+        const activeTabId = await tabManager.resolveActiveTabId(conversationId);
         if (!activeTabId) {
           throw new Error(`No active tab found for conversation ${conversationId}. Use tab init or specify tab_id.`);
         }
@@ -741,7 +741,7 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
             };            
           case 'view': {
             // View action: Capture screenshot of current active tab
-            const viewActiveTabId = tabManager.getCurrentActiveTabId(conversationId);
+            const viewActiveTabId = await tabManager.resolveActiveTabId(conversationId);
             if (!viewActiveTabId) {
               throw new Error(`No active tab found for conversation ${conversationId}. Use tab init first.`);
             }
@@ -864,7 +864,7 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
         
         // Determine which tab to execute JavaScript in
         // Always use current active tab for the conversation (ignore tab_id if provided)
-        const activeTabId = tabManager.getCurrentActiveTabId(conversationId);
+        const activeTabId = await tabManager.resolveActiveTabId(conversationId);
         if (!activeTabId) {
           throw new Error(`No active tab found for conversation ${conversationId}. Use tab init or specify tab_id.`);
         }
@@ -928,7 +928,7 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
         console.log(`💬 [HandleDialog] Handling dialog for conversation ${conversationId}: action=${action}`);
         
         // Get the active tab for this conversation
-        const activeTabId = tabManager.getCurrentActiveTabId(conversationId);
+        const activeTabId = await tabManager.resolveActiveTabId(conversationId);
         if (!activeTabId) {
           throw new Error(`No active tab found for conversation ${conversationId}. Use tab init first.`);
         }
@@ -1076,7 +1076,7 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
           throw new Error('conversation_id is required for highlight_elements command');
         }
         const conversationId = command.conversation_id;
-        const activeTabId = tabManager.getCurrentActiveTabId(conversationId);
+        const activeTabId = await tabManager.resolveActiveTabId(conversationId);
         if (!activeTabId) {
           throw new Error(`No active tab for conversation ${conversationId}`);
         }
@@ -1694,7 +1694,7 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
         }
         
         // Get current active tab for this conversation
-        const activeTabId = tabManager.getCurrentActiveTabId(conversationId);
+        const activeTabId = await tabManager.resolveActiveTabId(conversationId);
         if (!activeTabId) {
           throw new Error(`No active tab found for conversation ${conversationId}. Use tab init first.`);
         }
@@ -1734,7 +1734,7 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
           throw new Error('conversation_id is required for highlight_single_element command');
         }
         const conversationId = command.conversation_id;
-        const activeTabId = tabManager.getCurrentActiveTabId(conversationId);
+        const activeTabId = await tabManager.resolveActiveTabId(conversationId);
         if (!activeTabId) {
           throw new Error(`No active tab for conversation ${conversationId}`);
         }

@@ -935,6 +935,52 @@ export class TabManager {
   }
 
   /**
+   * Resolve the current active tab for a conversation and verify it still exists.
+   * Cleans up stale tab IDs before returning a usable tab.
+   */
+  async resolveActiveTabId(conversationId: string): Promise<number | null> {
+    const session = this.sessions.get(conversationId);
+    if (!session || session.managedTabs.size === 0) {
+      return null;
+    }
+
+    const candidateIds: number[] = [];
+    if (session.currentActiveTabId !== null) {
+      candidateIds.push(session.currentActiveTabId);
+    }
+
+    for (const tabId of session.managedTabs.keys()) {
+      if (!candidateIds.includes(tabId)) {
+        candidateIds.push(tabId);
+      }
+    }
+
+    for (const tabId of candidateIds) {
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        if (!tab?.id) {
+          throw new Error(`Tab ${tabId} has no id`);
+        }
+
+        session.currentActiveTabId = tabId;
+        return tabId;
+      } catch (error) {
+        console.warn(`⚠️ [TabManager] Removing stale tab ${tabId} from ${conversationId}:`, error);
+        session.managedTabs.delete(tabId);
+        if (session.currentActiveTabId === tabId) {
+          session.currentActiveTabId = null;
+        }
+      }
+    }
+
+    if (session.managedTabs.size === 0) {
+      this.updateSessionStatus(conversationId, 'idle');
+    }
+
+    return null;
+  }
+
+  /**
    * Get current active tab for a conversation
    */
   getCurrentActiveTab(conversationId: string): ManagedTab | null {
