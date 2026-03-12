@@ -175,6 +175,22 @@ def format_event(event_type: str, payload: dict) -> str:
     return f"[agent:{payload_type}] {json.dumps(payload, ensure_ascii=False)}"
 
 
+def extract_text_result(event_type: str, payload: dict) -> Optional[str]:
+    """Extract the final user-facing text from an SSE event."""
+    if event_type == "error":
+        return payload.get("error")
+    if event_type != "agent_event":
+        return None
+
+    payload_type = payload.get("type", "unknown")
+    if payload_type == "MessageEvent" and payload.get("role") == "assistant":
+        text = payload.get("text", "").strip()
+        return text or None
+    if payload_type == "ErrorEvent":
+        return payload.get("error")
+    return None
+
+
 def stream_message(
     server_url: str,
     conversation_id: str,
@@ -182,8 +198,9 @@ def stream_message(
     cwd: str,
     output: TextIO,
     as_jsonl: bool = False,
+    stream: bool = False,
 ) -> int:
-    """Send a message to OpenBrowser and stream back the agent events."""
+    """Send a message to OpenBrowser and return either streamed or final text output."""
     req = Request(
         f"{server_url.rstrip('/')}/agent/conversations/{conversation_id}/messages",
         data=json.dumps({"text": task, "cwd": str(Path(cwd).resolve())}).encode("utf-8"),
@@ -195,23 +212,48 @@ def stream_message(
     )
 
     exit_code = 0
+    latest_text_result: Optional[str] = None
+    error_result: Optional[str] = None
     with urlopen(req, timeout=None) as resp:
         lines = (line.decode("utf-8") for line in resp)
         for event_type, payload in parse_sse_stream(lines):
-            if as_jsonl:
-                output.write(
-                    json.dumps(
-                        {"event": event_type, "payload": payload},
-                        ensure_ascii=False,
+            extracted_text = extract_text_result(event_type, payload)
+            if extracted_text:
+                if event_type == "error" or (
+                    event_type == "agent_event" and payload.get("type") == "ErrorEvent"
+                ):
+                    error_result = extracted_text
+                else:
+                    latest_text_result = extracted_text
+
+            if stream:
+                if as_jsonl:
+                    output.write(
+                        json.dumps(
+                            {"event": event_type, "payload": payload},
+                            ensure_ascii=False,
+                        )
+                        + "\n"
                     )
-                    + "\n"
-                )
-            else:
-                output.write(format_event(event_type, payload) + "\n")
-            output.flush()
+                else:
+                    output.write(format_event(event_type, payload) + "\n")
+                output.flush()
 
             if event_type == "error":
                 exit_code = 1
+
+    if not stream:
+        if error_result:
+            output.write(error_result + "\n")
+            output.flush()
+            return 1
+
+        if latest_text_result:
+            output.write(latest_text_result + "\n")
+            output.flush()
+        else:
+            output.write("OpenBrowser task finished, but no assistant text was returned.\n")
+            output.flush()
     return exit_code
 
 
@@ -279,6 +321,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--jsonl",
         action="store_true",
         help="Emit raw SSE events as JSON lines instead of formatted text.",
+    )
+    run_parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Stream intermediate OpenBrowser events instead of returning only the final text result.",
     )
 
     check_parser = subparsers.add_parser("check", help="Check OpenBrowser readiness.")
@@ -372,6 +419,7 @@ def handle_run(args: argparse.Namespace) -> int:
             cwd,
             sys.stdout,
             as_jsonl=args.jsonl,
+            stream=args.stream,
         )
     except (HTTPError, URLError, TimeoutError) as exc:
         print(f"[error] request failed: {exc}", file=sys.stderr)

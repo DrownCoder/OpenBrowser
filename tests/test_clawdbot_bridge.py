@@ -1,6 +1,7 @@
 import json
 
 from server.clawdbot_bridge import (
+    extract_text_result,
     format_event,
     load_state,
     parse_sse_stream,
@@ -45,3 +46,20 @@ def test_format_event_for_observation_event():
     }
 
     assert format_event("agent_event", payload) == "[observation:ok] Captured screenshot"
+
+
+def test_extract_text_result_prefers_assistant_messages():
+    payload = {
+        "type": "MessageEvent",
+        "role": "assistant",
+        "text": "Found 12 backend jobs and summarized the top 5.",
+    }
+
+    assert (
+        extract_text_result("agent_event", payload)
+        == "Found 12 backend jobs and summarized the top 5."
+    )
+
+
+def test_extract_text_result_reads_errors():
+    assert extract_text_result("error", {"error": "server unavailable"}) == "server unavailable"
