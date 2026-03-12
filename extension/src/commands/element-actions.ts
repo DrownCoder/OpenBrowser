@@ -134,13 +134,6 @@ export async function performElementClick(
           el.dispatchEvent(event);
         }
 
-        // Mouse events sequence
-        const mouseEvents = ['mousedown', 'mouseup', 'click'];
-        for (const eventType of mouseEvents) {
-          const event = new MouseEvent(eventType, eventOptions);
-          el.dispatchEvent(event);
-        }
-
         // Native click as fallback - some frameworks only respond to native clicks
         // This is a no-op if synthetic events already triggered the action
         try {
@@ -174,28 +167,11 @@ export async function performElementClick(
   }
 
   // ============================================================
-  // STEP 4: Process result and handle dialog
+  // STEP 4: Process result (dialog handling deferred to screenshot)
   // ============================================================
 
-  // If dialog opened during click
-  if (jsResult.dialog_opened && jsResult.dialog) {
-    console.log(`💬 [ElementClick] Dialog opened during click: type=${jsResult.dialog.type}`);
-
-
-    return {
-      success: true,
-      elementId,
-      clicked: true,
-      dialogOpened: true,
-      dialog: {
-        type: jsResult.dialog.type,
-        message: jsResult.dialog.message,
-      },
-
-      new_tabs_created: jsResult.new_tabs_created,
-    };
-
-  }
+  // Note: If dialog opened, we don't handle it here - it will be handled by captureScreenshot
+  // We just return the JavaScript result as-is
 
   // Check for execution errors
   if (!jsResult.success) {
@@ -208,12 +184,32 @@ export async function performElementClick(
     };
   }
 
-  // Check the result from the script
-  const clickResult = jsResult.result?.value as { clicked: boolean; error?: string; stale?: boolean } | undefined;
   // Debug: Log JavaScript result for diagnosis
   console.log(`🔍 [ElementClick] JavaScript result.value:`, JSON.stringify(jsResult.result?.value, null, 2));
   console.log(`🔍 [ElementClick] Full JavaScript result:`, jsResult);
 
+  // If a dialog opened during execution, treat as success with dialog info
+  if (jsResult.dialog_opened) {
+    console.log(`💬 [ElementClick] Dialog opened during click: ${jsResult.dialog?.type} - treating as successful click with dialog`);
+    const result: ClickResult = {
+      success: true,
+      elementId,
+      clicked: true,
+      new_tabs_created: jsResult.new_tabs_created,
+    };
+    if (jsResult.dialog) {
+      result.dialogOpened = true;
+      result.dialog = {
+        type: jsResult.dialog.type as 'alert' | 'confirm' | 'prompt' | 'beforeunload',
+        message: jsResult.dialog.message,
+      };
+    }
+    return result;
+  }
+
+  // Check the result from the script (only if no dialog opened)
+  const clickResult = jsResult.result?.value as { clicked: boolean; error?: string; stale?: boolean } | undefined;
+  
   // Check result structure
   if (!jsResult.result?.value || typeof jsResult.result.value !== 'object') {
     console.error(`❌ [ElementClick] Invalid JavaScript result.value structure:`, jsResult.result?.value);
@@ -235,13 +231,24 @@ export async function performElementClick(
 
   console.log(`✅ [ElementClick] Click executed successfully`);
 
-  return {
+  // If dialog opened during click, propagate dialog info
+  const result: ClickResult = {
     success: true,
     elementId,
     clicked: true,
-
     new_tabs_created: jsResult.new_tabs_created,
   };
+
+  if (jsResult.dialog_opened && jsResult.dialog) {
+    result.dialogOpened = true;
+    result.dialog = {
+      type: jsResult.dialog.type as 'alert' | 'confirm' | 'prompt' | 'beforeunload',
+      message: jsResult.dialog.message,
+    };
+    console.log(`💬 [ElementClick] Propagating dialog info to screenshot: ${jsResult.dialog.type}`);
+  }
+
+  return result;
 
 }
 
@@ -372,7 +379,30 @@ export async function performElementHover(
     };
   }
 
-  // Check the result from the script
+  // Debug: Log JavaScript result for diagnosis
+  console.log(`🔍 [ElementHover] JavaScript result.value:`, JSON.stringify(jsResult.result?.value, null, 2));
+  console.log(`🔍 [ElementHover] Full JavaScript result:`, jsResult);
+
+  // If a dialog opened during execution, treat as success with dialog info
+  if (jsResult.dialog_opened) {
+    console.log(`💬 [ElementHover] Dialog opened during hover: ${jsResult.dialog?.type} - treating as successful hover with dialog`);
+    const result: HoverResult = {
+      success: true,
+      elementId,
+      hovered: true,
+      new_tabs_created: jsResult.new_tabs_created,
+    };
+    if (jsResult.dialog) {
+      result.dialogOpened = true;
+      result.dialog = {
+        type: jsResult.dialog.type as 'alert' | 'confirm' | 'prompt' | 'beforeunload',
+        message: jsResult.dialog.message,
+      };
+    }
+    return result;
+  }
+
+  // Check the result from the script (only if no dialog opened)
   const hoverResult = jsResult.result?.value as { hovered: boolean; error?: string; stale?: boolean } | undefined;
 
   if (!hoverResult?.hovered) {
@@ -391,12 +421,23 @@ export async function performElementHover(
 
   console.log(`✅ [ElementHover] Hover executed successfully`);
 
-  return {
+  // If dialog opened during hover, propagate dialog info
+  const result: HoverResult = {
     success: true,
     elementId,
     hovered: true,
-
   };
+
+  if (jsResult.dialog_opened && jsResult.dialog) {
+    result.dialogOpened = true;
+    result.dialog = {
+      type: jsResult.dialog.type as 'alert' | 'confirm' | 'prompt' | 'beforeunload',
+      message: jsResult.dialog.message,
+    };
+    console.log(`💬 [ElementHover] Propagating dialog info to screenshot: ${jsResult.dialog.type}`);
+  }
+
+  return result;
 }
 
 
@@ -616,7 +657,30 @@ export async function performElementScroll(
     };
   }
 
-  // Check the result from the script
+  // Debug: Log JavaScript result for diagnosis
+  console.log(`🔍 [ElementScroll] JavaScript result.value:`, JSON.stringify(jsResult.result?.value, null, 2));
+  console.log(`🔍 [ElementScroll] Full JavaScript result:`, jsResult);
+
+  // If a dialog opened during execution, treat as success with dialog info
+  if (jsResult.dialog_opened) {
+    console.log(`💬 [ElementScroll] Dialog opened during scroll: ${jsResult.dialog?.type} - treating as successful scroll with dialog`);
+    const result: ScrollResult = {
+      success: true,
+      elementId,
+      scrolled: true,
+      new_tabs_created: jsResult.new_tabs_created,
+    };
+    if (jsResult.dialog) {
+      result.dialogOpened = true;
+      result.dialog = {
+        type: jsResult.dialog.type as 'alert' | 'confirm' | 'prompt' | 'beforeunload',
+        message: jsResult.dialog.message,
+      };
+    }
+    return result;
+  }
+
+  // Check the result from the script (only if no dialog opened)
   const scrollResult = jsResult.result?.value as { scrolled: boolean; error?: string; stale?: boolean; scrollPosition?: { x: number; y: number } } | undefined;
 
   if (!scrollResult?.scrolled) {
@@ -635,13 +699,24 @@ export async function performElementScroll(
 
   console.log(`✅ [ElementScroll] Scroll executed successfully`);
 
-  return {
+  // If dialog opened during scroll, propagate dialog info
+  const result: ScrollResult = {
     success: true,
     elementId,
     scrolled: true,
     scrollPosition: scrollResult.scrollPosition,
-
   };
+
+  if (jsResult.dialog_opened && jsResult.dialog) {
+    result.dialogOpened = true;
+    result.dialog = {
+      type: jsResult.dialog.type as 'alert' | 'confirm' | 'prompt' | 'beforeunload',
+      message: jsResult.dialog.message,
+    };
+    console.log(`💬 [ElementScroll] Propagating dialog info to screenshot: ${jsResult.dialog.type}`);
+  }
+
+  return result;
 }
 
 /**
@@ -791,27 +866,11 @@ export async function performKeyboardInput(
   }
 
   // ============================================================
-  // STEP 4: Process result and handle dialog
+  // STEP 4: Process result (dialog handling deferred to screenshot)
   // ============================================================
 
-  // If dialog opened during input
-  if (jsResult.dialog_opened && jsResult.dialog) {
-    console.log(`💬 [KeyboardInput] Dialog opened during input: type=${jsResult.dialog.type}`);
-
-
-
-    return {
-      success: true,
-      elementId,
-      input: true,
-      dialogOpened: true,
-      dialog: {
-        type: jsResult.dialog.type,
-        message: jsResult.dialog.message,
-      },
-
-    };
-  }
+  // Note: If dialog opened, we don't handle it here - it will be handled by captureScreenshot
+  // We just return the JavaScript result as-is
 
   // Check for execution errors
   if (!jsResult.success) {
@@ -824,7 +883,31 @@ export async function performKeyboardInput(
     };
   }
 
-  // Check the result from the script
+  // Debug: Log JavaScript result for diagnosis
+  console.log(`🔍 [KeyboardInput] JavaScript result.value:`, JSON.stringify(jsResult.result?.value, null, 2));
+  console.log(`🔍 [KeyboardInput] Full JavaScript result:`, jsResult);
+
+  // If a dialog opened during execution, treat as success with dialog info
+  if (jsResult.dialog_opened) {
+    console.log(`💬 [KeyboardInput] Dialog opened during input: ${jsResult.dialog?.type} - treating as successful input with dialog`);
+    const result: InputResult = {
+      success: true,
+      elementId,
+      input: true,
+      value: undefined,
+      new_tabs_created: jsResult.new_tabs_created,
+    };
+    if (jsResult.dialog) {
+      result.dialogOpened = true;
+      result.dialog = {
+        type: jsResult.dialog.type as 'alert' | 'confirm' | 'prompt' | 'beforeunload',
+        message: jsResult.dialog.message,
+      };
+    }
+    return result;
+  }
+
+  // Check the result from the script (only if no dialog opened)
   const inputResult = jsResult.result?.value as { input: boolean; error?: string; stale?: boolean; value?: string } | undefined;
 
   if (!inputResult?.input) {
@@ -843,13 +926,24 @@ export async function performKeyboardInput(
 
   console.log(`✅ [KeyboardInput] Input executed successfully, value="${inputResult.value}"`);
 
-  return {
+  // If dialog opened during input, propagate dialog info
+  const result: InputResult = {
     success: true,
     elementId,
     input: true,
     value: inputResult.value,
-
   };
+
+  if (jsResult.dialog_opened && jsResult.dialog) {
+    result.dialogOpened = true;
+    result.dialog = {
+      type: jsResult.dialog.type as 'alert' | 'confirm' | 'prompt' | 'beforeunload',
+      message: jsResult.dialog.message,
+    };
+    console.log(`💬 [KeyboardInput] Propagating dialog info to screenshot: ${jsResult.dialog.type}`);
+  }
+
+  return result;
 }
 
 /**

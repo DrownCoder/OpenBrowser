@@ -592,51 +592,6 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
         };
       }
 
-      case 'get_grounded_elements': {
-        if (!command.conversation_id) {
-          throw new Error('conversation_id is required for get_grounded_elements command (strict mode)');
-        }
-        const conversationId = command.conversation_id;
-        const activeTabId = tabManager.getCurrentActiveTabId(conversationId);
-        if (!activeTabId) {
-          throw new Error(`No active tab found for conversation ${conversationId}. Use tab init first.`);
-        }
-        await tabManager.ensureTabManaged(activeTabId, conversationId);
-
-        const maxElements = command.max_elements || 100;
-        const includeHidden = command.include_hidden || false;
-        const result = await extractGroundedElements(activeTabId, conversationId, maxElements, includeHidden);
-
-        return {
-          success: true,
-          message: `Found ${result.elements.length} interactive elements`,
-          data: result,
-          timestamp: Date.now(),
-        };
-      }
-
-      case 'get_accessibility_tree': {
-        if (!command.conversation_id) {
-          throw new Error('conversation_id is required for get_accessibility_tree command');
-        }
-        const conversationId = command.conversation_id;
-        const activeTabId = tabManager.getCurrentActiveTabId(conversationId);
-        if (!activeTabId) {
-          throw new Error(`No active tab found for conversation ${conversationId}. Use tab init first.`);
-        }
-        await tabManager.ensureTabManaged(activeTabId, conversationId);
-
-        const maxElements = command.max_elements || 50;
-        const result = await handleGetAccessibilityTree(activeTabId, conversationId, maxElements);
-
-        return {
-          success: true,
-          message: `Found ${result.elements.length} accessible elements`,
-          data: result,
-          timestamp: Date.now(),
-        };
-      }
-
       case 'tab': {
         // ✅ STRICT MODE: conversation_id is REQUIRED
         if (!command.conversation_id) {
@@ -670,6 +625,8 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
                 conversationId: conversationId,
                 isManaged: true,
                 screenshot: initScreenshotResult?.imageData,
+                ...(initScreenshotResult?.dialog_auto_accepted ? { dialog_auto_accepted: initScreenshotResult.dialog_auto_accepted } : {}),
+                ...(initScreenshotResult?.dialog_auto_accepted_list ? { dialog_auto_accepted_list: initScreenshotResult.dialog_auto_accepted_list } : {}),
               },
               timestamp: Date.now(),
             };
@@ -696,6 +653,8 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
                 ...openResult,
                 conversationId: conversationId,
                 screenshot: openScreenshotResult?.imageData,
+                ...(openScreenshotResult?.dialog_auto_accepted ? { dialog_auto_accepted: openScreenshotResult.dialog_auto_accepted } : {}),
+                ...(openScreenshotResult?.dialog_auto_accepted_list ? { dialog_auto_accepted_list: openScreenshotResult.dialog_auto_accepted_list } : {}),
               },
               timestamp: Date.now(),
             };
@@ -736,6 +695,8 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
                 ...switchResult,
                 conversationId: conversationId,
                 screenshot: switchScreenshotResult?.imageData,
+                ...(switchScreenshotResult?.dialog_auto_accepted ? { dialog_auto_accepted: switchScreenshotResult.dialog_auto_accepted } : {}),
+                ...(switchScreenshotResult?.dialog_auto_accepted_list ? { dialog_auto_accepted_list: switchScreenshotResult.dialog_auto_accepted_list } : {}),
               },
               timestamp: Date.now(),
             };
@@ -773,6 +734,8 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
                 ...refreshResult,
                 conversationId: conversationId,
                 screenshot: refreshScreenshotResult?.imageData,
+                ...(refreshScreenshotResult?.dialog_auto_accepted ? { dialog_auto_accepted: refreshScreenshotResult.dialog_auto_accepted } : {}),
+                ...(refreshScreenshotResult?.dialog_auto_accepted_list ? { dialog_auto_accepted_list: refreshScreenshotResult.dialog_auto_accepted_list } : {}),
               },
               timestamp: Date.now(),
             };            
@@ -797,6 +760,8 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
                 tabId: viewActiveTabId,
                 conversationId: conversationId,
                 screenshot: viewScreenshotResult?.imageData,
+                ...(viewScreenshotResult?.dialog_auto_accepted ? { dialog_auto_accepted: viewScreenshotResult.dialog_auto_accepted } : {}),
+                ...(viewScreenshotResult?.dialog_auto_accepted_list ? { dialog_auto_accepted_list: viewScreenshotResult.dialog_auto_accepted_list } : {}),
               },
               timestamp: Date.now(),
             };
@@ -941,7 +906,11 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
         return {
           success: true,
           message: 'JavaScript executed successfully',
-          data: { ...jsResult, screenshot: jsScreenshotResult?.imageData },
+          data: {
+            ...jsResult, screenshot: jsScreenshotResult?.imageData,
+            ...(jsScreenshotResult?.dialog_auto_accepted ? { dialog_auto_accepted: jsScreenshotResult.dialog_auto_accepted } : {}),
+            ...(jsScreenshotResult?.dialog_auto_accepted_list ? { dialog_auto_accepted_list: jsScreenshotResult.dialog_auto_accepted_list } : {}),
+          },
           timestamp: Date.now(),
           duration: jsDuration,
         };
@@ -1016,6 +985,8 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
                     autoAccepted: true,
                   },
                   screenshot: await compressIfNeeded(screenshotResult, getCompressionThreshold()),
+                  ...(screenshotResult?.dialog_auto_accepted ? { dialog_auto_accepted: screenshotResult.dialog_auto_accepted } : {}),
+                  ...(screenshotResult?.dialog_auto_accepted_list ? { dialog_auto_accepted_list: screenshotResult.dialog_auto_accepted_list } : {}),
                 },
                 timestamp: Date.now(),
               };
@@ -1059,6 +1030,8 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
             data: {
               handledDialog: handleResult.previousDialog,
               screenshot: await compressIfNeeded(screenshotResult, getCompressionThreshold()),
+              ...(screenshotResult?.dialog_auto_accepted ? { dialog_auto_accepted: screenshotResult.dialog_auto_accepted } : {}),
+              ...(screenshotResult?.dialog_auto_accepted_list ? { dialog_auto_accepted_list: screenshotResult.dialog_auto_accepted_list } : {}),
             },
             timestamp: Date.now(),
           };
@@ -1066,7 +1039,7 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
         } catch (error) {
           console.error(`❌ [HandleDialog] Failed to handle dialog:`, error);
           if (error instanceof DialogBlockedError) {
-            return {
+            const response: any = {
               success: false,
               error: error.message,
               dialog_opened: true,
@@ -1077,6 +1050,18 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
               },
               timestamp: Date.now(),
             };
+            
+            // Include auto-accepted dialogs if any
+            if (error.autoAcceptedDialogs && error.autoAcceptedDialogs.length > 0) {
+              response.auto_accepted_dialogs = error.autoAcceptedDialogs.map(dialog => ({
+                type: dialog.dialogType,
+                message: dialog.message,
+                url: dialog.url,
+                timestamp: dialog.timestamp,
+              }));
+            }
+            
+            return response;
           }
           return {
             success: false,
@@ -1593,6 +1578,8 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
             totalPages: totalPages,
             page: currentPage,
             screenshot: await compressIfNeeded(highlightedScreenshot, getCompressionThreshold()),
+            ...(screenshotResult?.dialog_auto_accepted ? { dialog_auto_accepted: screenshotResult.dialog_auto_accepted } : {}),
+            ...(screenshotResult?.dialog_auto_accepted_list ? { dialog_auto_accepted_list: screenshotResult.dialog_auto_accepted_list } : {}),
           },
           timestamp: Date.now(),
         };
@@ -1620,7 +1607,11 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
         
         return {
           success: clickResult.success,
-          data: { ...clickResult, screenshot: clickScreenshotResult?.imageData },
+          data: {
+            ...clickResult, screenshot: clickScreenshotResult?.imageData,
+            ...(clickScreenshotResult?.dialog_auto_accepted ? { dialog_auto_accepted: clickScreenshotResult.dialog_auto_accepted } : {}),
+            ...(clickScreenshotResult?.dialog_auto_accepted_list ? { dialog_auto_accepted_list: clickScreenshotResult.dialog_auto_accepted_list } : {}),
+          },
           error: clickResult.error,
           timestamp: Date.now(),
         };
@@ -1636,7 +1627,11 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
         
         return {
           success: hoverResult.success,
-          data: { ...hoverResult, screenshot: hoverScreenshotResult?.imageData },
+          data: { 
+            ...hoverResult, screenshot: hoverScreenshotResult?.imageData,
+            ...(hoverScreenshotResult?.dialog_auto_accepted ? { dialog_auto_accepted: hoverScreenshotResult.dialog_auto_accepted } : {}),
+            ...(hoverScreenshotResult?.dialog_auto_accepted_list ? { dialog_auto_accepted_list: hoverScreenshotResult.dialog_auto_accepted_list } : {}),
+          },
           error: hoverResult.error,
           timestamp: Date.now(),
         };
@@ -1659,7 +1654,11 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
         
         return {
           success: scrollResult.success,
-          data: { ...scrollResult, screenshot: scrollScreenshotResult?.imageData },
+          data: { 
+            ...scrollResult, screenshot: scrollScreenshotResult?.imageData,
+            ...(scrollScreenshotResult?.dialog_auto_accepted ? { dialog_auto_accepted: scrollScreenshotResult.dialog_auto_accepted } : {}),
+            ...(scrollScreenshotResult?.dialog_auto_accepted_list ? { dialog_auto_accepted_list: scrollScreenshotResult.dialog_auto_accepted_list } : {}),
+          },
           error: scrollResult.error,
           timestamp: Date.now(),
         };
@@ -1675,7 +1674,11 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
         
         return {
           success: inputResult.success,
-          data: { ...inputResult, screenshot: inputScreenshotResult?.imageData },
+          data: { 
+            ...inputResult, screenshot: inputScreenshotResult?.imageData,
+            ...(inputScreenshotResult?.dialog_auto_accepted ? { dialog_auto_accepted: inputScreenshotResult.dialog_auto_accepted } : {}),
+            ...(inputScreenshotResult?.dialog_auto_accepted_list ? { dialog_auto_accepted_list: inputScreenshotResult.dialog_auto_accepted_list } : {}),
+          },
           error: inputResult.error,
           timestamp: Date.now(),
         };
@@ -1849,6 +1852,8 @@ async function handleCommand(command: Command): Promise<CommandResponse> {
             html: element.html || '',
             screenshot: await compressIfNeeded(highlightedScreenshot, getCompressionThreshold()),
             elementId: command.element_id,
+            ...(screenshotResult?.dialog_auto_accepted ? { dialog_auto_accepted: screenshotResult.dialog_auto_accepted } : {}),
+            ...(screenshotResult?.dialog_auto_accepted_list ? { dialog_auto_accepted_list: screenshotResult.dialog_auto_accepted_list } : {}),
           },
           timestamp: Date.now(),
         };
@@ -1860,7 +1865,7 @@ default:
   } catch (error) {
     console.error(`Command ${(command as any).type} failed:`, error);
     if (error instanceof DialogBlockedError) {
-      return {
+      const response: any = {
         success: false,
         command_id: command.command_id,
         error: error.message,
@@ -1872,6 +1877,18 @@ default:
         },
         timestamp: Date.now(),
       };
+      
+      // Include auto-accepted dialogs if any
+      if (error.autoAcceptedDialogs && error.autoAcceptedDialogs.length > 0) {
+        response.auto_accepted_dialogs = error.autoAcceptedDialogs.map(dialog => ({
+          type: dialog.dialogType,
+          message: dialog.message,
+          url: dialog.url,
+          timestamp: dialog.timestamp,
+        }));
+      }
+      
+      return response;
     }
     return {
       success: false,

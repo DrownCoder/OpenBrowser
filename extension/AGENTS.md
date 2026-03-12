@@ -17,7 +17,6 @@ Chrome extension providing browser control via Chrome DevTools Protocol. Handles
 | `src/background/index.ts` | 890 | Command queue, CDP flow, dialog handling |
 | `src/commands/screenshot.ts` | 605 | CDP capture, image processing pipeline |
 | `src/workers/worker-manager.ts` | 635 | Web worker lifecycle, image resizing |
-| `src/helpers/browser-helpers.ts` | 542 | DOM utilities, wait helpers |
 
 ## WHERE TO LOOK
 
@@ -41,7 +40,6 @@ extension/
 │   ├── background/      # Service worker entry (746 lines)
 │   ├── commands/        # Browser command handlers (6 files)
 │   ├── content/         # Content script (visual feedback)
-│   ├── helpers/         # Browser utilities (542 lines)
 │   ├── websocket/       # Server communication
 │   ├── workers/         # Web workers (image processing)
 │   └── types.ts         # TypeScript interfaces

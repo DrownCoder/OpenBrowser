@@ -55,6 +55,14 @@ class OpenBrowserObservation(Observation):
         default=None,
         description="Dialog information if a dialog is open (type, message, needsDecision)"
     )
+    dialog_auto_accepted: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Information about an auto-accepted alert dialog (type, message, url, timestamp)"
+    )
+    auto_accepted_dialogs: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="List of all auto-accepted dialogs (for cascading alerts)"
+    )
     # Tab creation tracking
     new_tabs_created: Optional[List[Dict[str, Any]]] = Field(
         default=None,
@@ -206,6 +214,39 @@ class OpenBrowserObservation(Observation):
                 text_parts.append("- For prompts: `{\"type\": \"handle_dialog\", \"dialog_action\": \"accept\", \"prompt_text\": \"your text\"}`")
             else:
                 text_parts.append("**Note**: This dialog was auto-accepted (no decision needed).")
+            text_parts.append("")
+        
+        # Auto-Accepted Dialogs Section (if any were auto-accepted)
+        auto_accepted_dialogs_to_show = []
+        if self.auto_accepted_dialogs:
+            auto_accepted_dialogs_to_show = self.auto_accepted_dialogs
+        elif self.dialog_auto_accepted:
+            auto_accepted_dialogs_to_show = [self.dialog_auto_accepted]
+        
+        if auto_accepted_dialogs_to_show:
+            text_parts.append("## ✅ Auto-Accepted Dialogs")
+            text_parts.append("")
+            text_parts.append(f"**Total Auto-Accepted**: {len(auto_accepted_dialogs_to_show)}")
+            text_parts.append("")
+            
+            for i, dialog in enumerate(auto_accepted_dialogs_to_show, 1):
+                dialog_type = dialog.get('type', 'alert')
+                dialog_message = dialog.get('message', '')
+                dialog_url = dialog.get('url', '')
+                timestamp = dialog.get('timestamp', '')
+                
+                text_parts.append(f"{i}. **{dialog_type.upper()}**: \"{dialog_message}\"")
+                if dialog_url:
+                    text_parts.append(f"   URL: {dialog_url}")
+                if timestamp:
+                    from datetime import datetime
+                    try:
+                        dt = datetime.fromtimestamp(timestamp / 1000)
+                        text_parts.append(f"   Time: {dt.strftime('%H:%M:%S')}")
+                    except:
+                        pass
+                text_parts.append("")
+            text_parts.append("**Note**: Alert dialogs are auto-accepted by the system.")
             text_parts.append("")
         
         # New Tabs Created Section (if applicable)

@@ -571,7 +571,11 @@ class BrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation]):
         error = None
         dialog_opened = None
         dialog = None
+        dialog_auto_accepted = None
+        auto_accepted_dialogs = None
         new_tabs_created = None
+
+        logger.info(f"result_dict: {result_dict}")
         
         if result_dict:
             success = result_dict.get('success', False)
@@ -592,26 +596,65 @@ class BrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation]):
                     else:
                         message = f"Dialog auto-accepted: {dialog.get('type')} (\"{dialog.get('message')}\")"
             
+            # Extract auto-accepted dialog info if present
+            # Check multiple naming conventions from extension (camelCase and snake_case)
+            if 'dialog_auto_accepted' in result_dict:
+                dialog_auto_accepted = result_dict['dialog_auto_accepted']
+            elif 'dialogAutoAccepted' in result_dict:
+                dialog_auto_accepted = result_dict['dialogAutoAccepted']
+            
+            if dialog_auto_accepted:
+                # Update message to include auto-accepted dialog info
+                if success:
+                    dialog_type = dialog_auto_accepted.get('type', 'alert')
+                    dialog_message = dialog_auto_accepted.get('message', '')
+                    if not (dialog and dialog.get('needsDecision')):
+                        # Only update message if not already updated by dialog field
+                        message = f"Alert dialog auto-accepted: {dialog_type} (\"{dialog_message}\")"
+            
+            # Extract list of auto-accepted dialogs (for cascading alerts)
+            # Check multiple naming conventions from extension
+            if 'auto_accepted_dialogs' in result_dict:
+                auto_accepted_dialogs = result_dict['auto_accepted_dialogs']
+            elif 'dialogAutoAcceptedList' in result_dict:
+                auto_accepted_dialogs = result_dict['dialogAutoAcceptedList']
+            elif 'dialog_auto_accepted_list' in result_dict:
+                auto_accepted_dialogs = result_dict['dialog_auto_accepted_list']
+            
+            # Also check in data field if present
             if 'data' in result_dict and isinstance(result_dict['data'], dict):
+                data = result_dict['data']
+                if not dialog_auto_accepted and 'dialog_auto_accepted' in data:
+                    dialog_auto_accepted = data['dialog_auto_accepted']
+                elif not dialog_auto_accepted and 'dialogAutoAccepted' in data:
+                    dialog_auto_accepted = data['dialogAutoAccepted']
+                
+                if not auto_accepted_dialogs and 'auto_accepted_dialogs' in data:
+                    auto_accepted_dialogs = data['auto_accepted_dialogs']
+                elif not auto_accepted_dialogs and 'dialogAutoAcceptedList' in data:
+                    auto_accepted_dialogs = data['dialogAutoAcceptedList']
+                elif not auto_accepted_dialogs and 'dialog_auto_accepted_list' in data:
+                    auto_accepted_dialogs = data['dialog_auto_accepted_list']
+                
                 # Extract screenshot from visual interaction commands
                 # highlight_elements returns data.screenshot (highlighted image)
                 # click/hover/scroll/keyboard_input return data.screenshot
-                if 'screenshot' in result_dict['data']:
-                    screenshot_data_url = result_dict['data']['screenshot']
-                    logger.debug(f"DEBUG: Extracted screenshot from result_dict['data']['screenshot'], length={len(screenshot_data_url) if screenshot_data_url else 0}")
-                elif 'imageData' in result_dict['data']:
-                    screenshot_data_url = result_dict['data']['imageData']
-                    logger.debug(f"DEBUG: Extracted screenshot from result_dict['data']['imageData'], length={len(screenshot_data_url) if screenshot_data_url else 0}")
+                if 'screenshot' in data:
+                    screenshot_data_url = data['screenshot']
+                    logger.debug(f"DEBUG: Extracted screenshot from data['screenshot'], length={len(screenshot_data_url) if screenshot_data_url else 0}")
+                elif 'imageData' in data:
+                    screenshot_data_url = data['imageData']
+                    logger.debug(f"DEBUG: Extracted screenshot from data['imageData'], length={len(screenshot_data_url) if screenshot_data_url else 0}")
                 
                 # Extract highlighted elements for highlight_elements action
-                if highlighted_elements is None and 'elements' in result_dict['data']:
-                    highlighted_elements = result_dict['data']['elements']
-                if total_elements is None and 'totalElements' in result_dict['data']:
-                    total_elements = result_dict['data']['totalElements']
+                if highlighted_elements is None and 'elements' in data:
+                    highlighted_elements = data['elements']
+                if total_elements is None and 'totalElements' in data:
+                    total_elements = data['totalElements']
                 
                 # Extract new_tabs_created for javascript_execute and confirm_click_element
-                if 'new_tabs_created' in result_dict['data']:
-                    new_tabs_created = result_dict['data']['new_tabs_created']
+                if 'new_tabs_created' in data:
+                    new_tabs_created = data['new_tabs_created']
         
         # Get pending confirmation (do NOT auto-clear - original behavior)
         pending_confirmation = self._get_pending_confirmation()
@@ -625,6 +668,8 @@ class BrowserExecutor(ToolExecutor[OpenBrowserAction, OpenBrowserObservation]):
             screenshot_data_url=screenshot_data_url,
             dialog_opened=dialog_opened,
             dialog=dialog,
+            dialog_auto_accepted=dialog_auto_accepted,
+            auto_accepted_dialogs=auto_accepted_dialogs,
             highlighted_elements=highlighted_elements,
             total_elements=total_elements,
             new_tabs_created=new_tabs_created,
