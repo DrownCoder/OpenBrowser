@@ -31,7 +31,7 @@ If you need a screenshot after a non-screenshot command, call `screenshot` expli
 Initialize a new browser session with a tab group.
 
 ```json
-{ "type": "tab", "action": "init", "url": "https://example.com" }
+{ "action": "init", "url": "https://example.com" }
 ```
 
 **Parameters**:
@@ -49,7 +49,7 @@ Initialize a new browser session with a tab group.
 Open a new tab in the current session.
 
 ```json
-{ "type": "tab", "action": "open", "url": "https://example.com" }
+{ "action": "open", "url": "https://example.com" }
 ```
 
 **Parameters**:
@@ -66,7 +66,7 @@ Open a new tab in the current session.
 Close a specific tab.
 
 ```json
-{ "type": "tab", "action": "close", "tab_id": 123 }
+{ "action": "close", "tab_id": 123 }
 ```
 
 **Parameters**:
@@ -83,7 +83,7 @@ Close a specific tab.
 Switch to a specific tab within the session.
 
 ```json
-{ "type": "tab", "action": "switch", "tab_id": 123 }
+{ "action": "switch", "tab_id": 123 }
 ```
 
 **Parameters**:
@@ -100,7 +100,7 @@ Switch to a specific tab within the session.
 List all tabs in the current session.
 
 ```json
-{ "type": "tab", "action": "list" }
+{ "action": "list" }
 ```
 
 **Returns**: Array of tab objects with `tab_id`, `title`, `url`, `active` flags.
@@ -111,7 +111,7 @@ List all tabs in the current session.
 Refresh the current active tab.
 
 ```json
-{ "type": "tab", "action": "refresh" }
+{ "action": "refresh", "tab_id": 123 }
 ```
 
 **Behavior**:
@@ -124,7 +124,7 @@ Refresh the current active tab.
 Get a clean screenshot of the current active tab without element highlights.
 
 ```json
-{ "type": "tab", "action": "view" }
+{ "action": "view" }
 ```
 
 **Behavior**:
@@ -138,12 +138,12 @@ Get a clean screenshot of the current active tab without element highlights.
 1. **Start session**: `tab init https://example.com`
 2. **Navigate to other pages**: `tab open https://other.com`
 3. **Switch between tabs**: `tab switch` with appropriate tab_id
-4. **After tab operations**, use `highlight_elements` to discover interactive elements.
+4. **After tab operations**, use the highlight tool to discover interactive elements.
 
 ## Notes
 
 - **Tab IDs**: Integer identifiers assigned by Chrome. These are returned in tab list responses and used in other commands.
-- **Auto-resolution**: Visual commands (click, hover, scroll, keyboard) automatically use the conversation's active tab if `tab_id` is not provided.
+- **Auto-resolution**: element_interaction tool actions (click, hover, scroll, keyboard_input) automatically use the conversation's active tab if `tab_id` is not provided.
 - **Session persistence**: Tab groups remain until explicitly closed or browser restarts.
 
 ## Error Handling

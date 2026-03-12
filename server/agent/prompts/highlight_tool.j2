@@ -8,7 +8,7 @@ The Highlight Tool discovers interactive elements on a web page and marks them w
 
 ## Visual Color System - BLUE Stage
 
-When you call `highlight_elements()`, elements are marked with **BLUE boxes**:
+When you use the highlight tool, elements are marked with **BLUE boxes**:
 
 **Purpose**: Identify which element you want to interact with.
 
@@ -25,9 +25,9 @@ When you call `highlight_elements()`, elements are marked with **BLUE boxes**:
 
 ## Element ID Format
 
-Element IDs are unique 6-character hexadecimal hashes (e.g., `a3f2b1`, `c8e4d2`).
+Element IDs are unique 6-character base36 hashes (e.g., `a3f2b1`, `9z8x7c`).
 Each element is assigned a stable hash based on its DOM position and attributes.
-This hash remains consistent across `highlight_elements` calls for the same page state.
+This hash remains consistent across highlight tool calls for the same page state.
 
 ## Collision-Aware Pagination
 
@@ -40,16 +40,16 @@ Elements are paginated to ensure **no visual overlap** in each screenshot:
 
 ## Commands
 
-### highlight_elements
+### highlight
 Capture a screenshot with numbered visual markers on interactive elements of ONE type.
 
 ```json
-{ "type": "highlight_elements" }                           // Default: clickable elements, page 1
-{ "type": "highlight_elements", "element_type": "inputable" }  // Input fields
-{ "type": "highlight_elements", "element_type": "scrollable" } // Scrollable areas
-{ "type": "highlight_elements", "element_type": "hoverable" }  // Hoverable elements
-{ "type": "highlight_elements", "page": 2 }                 // Next page of clickable elements
-{ "type": "highlight_elements", "keywords": ["Submit", "提交"] }      // Filter by keyword list (no pagination needed)
+{}                           // Default: clickable elements, page 1
+{ "element_type": "inputable" }  // Input fields
+{ "element_type": "scrollable" } // Scrollable areas
+{ "element_type": "hoverable" }  // Hoverable elements
+{ "page": 2 }                 // Next page of clickable elements
+{ "keywords": ["Submit", "提交"] }      // Filter by keyword list (no pagination needed)
 ```
 
 **Parameters**:
@@ -75,12 +75,12 @@ Capture a screenshot with numbered visual markers on interactive elements of ONE
 
 ## Workflow Integration
 
-1. **Start with Highlight**: Always begin element interaction by calling `highlight_elements` to discover available elements.
+1. **Start with Highlight**: Always begin element interaction by calling the highlight tool to discover available elements.
 2. **Visual + Semantic Verification**: At the BLUE stage, verify using BOTH visual AND semantic information:
    - **Visual Check**: Is the blue box where you expect?
    - **Semantic Check**: Does the HTML match your goal?
 3. **Select Element**: Note the `element_id` of your target.
-4. **Proceed to Interaction**: Use `click_element`, `hover_element`, `scroll_element`, or `keyboard_input` with the selected element_id.
+4. **Proceed to Interaction**: Use the element_interaction tool with appropriate action (click, hover, scroll, or keyboard_input) and the selected element_id.
 
 ## Element Types
 
@@ -98,7 +98,7 @@ Elements that reveal tooltips, dropdowns, or change state on hover.
 
 ## Screenshot Behavior
 
-`highlight_elements` always returns a screenshot with blue overlays.
+The highlight tool always returns a screenshot with blue overlays.
 
 ## Error Handling
 

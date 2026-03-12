@@ -1657,8 +1657,8 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.7.0" },
     { name = "numpy", specifier = ">=1.24.0" },
-    { name = "openhands-sdk", git = "https://github.com/softpudding/agent-sdk.git?subdirectory=openhands-sdk&rev=open-browser" },
-    { name = "openhands-tools", git = "https://github.com/softpudding/agent-sdk.git?subdirectory=openhands-tools&rev=open-browser" },
+    { name = "openhands-sdk", git = "https://github.com/softpudding/agent-sdk.git?subdirectory=openhands-sdk&rev=13c53cb57997b70c33efc0d2b59d70675a718ea0" },
+    { name = "openhands-tools", git = "https://github.com/softpudding/agent-sdk.git?subdirectory=openhands-tools&rev=13c53cb57997b70c33efc0d2b59d70675a718ea0" },
     { name = "pillow", specifier = ">=10.0.0" },
     { name = "pydantic", specifier = ">=2.5.0" },
     { name = "pydantic-settings", specifier = ">=2.1.0" },
@@ -2193,7 +2193,7 @@ wheels = [
 [[package]]
 name = "openhands-sdk"
 version = "1.12.0"
-source = { git = "https://github.com/softpudding/agent-sdk.git?subdirectory=openhands-sdk&rev=open-browser#3b8a525b91ee7378aea2191a596d98d29d058e78" }
+source = { git = "https://github.com/softpudding/agent-sdk.git?subdirectory=openhands-sdk&rev=13c53cb57997b70c33efc0d2b59d70675a718ea0#13c53cb57997b70c33efc0d2b59d70675a718ea0" }
 dependencies = [
     { name = "agent-client-protocol" },
     { name = "deprecation" },
@@ -2213,7 +2213,7 @@ dependencies = [
 [[package]]
 name = "openhands-tools"
 version = "1.12.0"
-source = { git = "https://github.com/softpudding/agent-sdk.git?subdirectory=openhands-tools&rev=open-browser#3b8a525b91ee7378aea2191a596d98d29d058e78" }
+source = { git = "https://github.com/softpudding/agent-sdk.git?subdirectory=openhands-tools&rev=13c53cb57997b70c33efc0d2b59d70675a718ea0#13c53cb57997b70c33efc0d2b59d70675a718ea0" }
 dependencies = [
     { name = "bashlex" },
     { name = "binaryornot" },

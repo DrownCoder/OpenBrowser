@@ -1,77 +1,62 @@
 # Dialog Tool
 
-Browser dialog (alert/confirm/prompt) handling.
+Handle browser modal dialogs that block automation.
 
 ## Overview
 
-The Dialog Tool handles browser modal dialogs that appear during JavaScript execution. These dialogs pause browser execution until handled, so you must respond appropriately to continue automation.
+The Dialog Tool handles browser modal dialogs (alert, confirm, prompt, beforeunload) that appear during browser automation. When a dialog opens, the browser pauses execution until you handle it with this tool.
 
-## Dialog Types
+## When to Use
 
-| Type | Needs Decision | AI Action |
-|------|----------------|----------|
-| alert | No | Auto-accepted |
-| confirm | Yes | handle_dialog(accept/dismiss) |
-| prompt | Yes | handle_dialog(accept, text) |
-| beforeunload | Yes | handle_dialog(accept/dismiss) |
+Use this tool when you see dialog opened.
 
-## Dialog Detection
+**Dialog types you need to handle**:
 
-When JavaScript triggers a dialog, the browser pauses. OpenBrowser uses Promise.race to detect dialogs gracefully:
+| Type | When It Appears | Your Action |
+|------|----------------|------------|
+| confirm | User confirmation required | Accept or dismiss |
+| prompt | Text input required | Accept with text, or dismiss |
+| beforeunload | Leaving page with unsaved changes | Accept (leave) or dismiss (stay) |
 
-```
-1. javascript_execute runs
-2. Promise.race([
-     jsExecution,    // Runtime.evaluate
-     dialogEvent,    // Page.javascriptDialogOpening
-     timeout         // User timeout
-   ])
-3. If dialog opens:
-   - Alert → Auto-accept
-   - Confirm/Prompt → Return dialog info
-4. AI calls handle_dialog(accept/dismiss)
-5. Extension handles, checks cascade
-```
-
-## Cascading Dialogs
-
-Dialog → Dialog → Dialog chain supported. After handling one dialog, the system checks for new dialogs within 150ms.
+**Note**: `alert` dialogs are auto-accepted by the system - no action needed.
 
 ## Commands
 
-### handle_dialog
-Handle a browser dialog.
+### dialog
+Handle the currently open dialog.
 
+**For confirm dialogs** (accept = Yes, dismiss = No):
 ```json
-{ "type": "handle_dialog", "dialog_action": "accept" }
-{ "type": "handle_dialog", "dialog_action": "dismiss" }
-{ "type": "handle_dialog", "dialog_action": "accept", "prompt_text": "my response" }
+{ "dialog_action": "accept" }
+{ "dialog_action": "dismiss" }
+```
+
+**For prompt dialogs** (provide input text):
+```json
+{ "dialog_action": "accept", "prompt_text": "my response" }
+```
+
+**For beforeunload dialogs** (accept = leave page, dismiss = stay):
+```json
+{ "dialog_action": "accept" }
+{ "dialog_action": "dismiss" }
 ```
 
 **Parameters**:
-- `dialog_action`: "accept" or "dismiss"
-- `prompt_text`: (optional) Text to enter into prompt dialogs when accepting
+- `dialog_action`: "accept" or "dismiss" (required)
+- `prompt_text`: Text for prompt dialogs when accepting (optional)
 
-**Behavior**:
-- For `alert` dialogs: Auto-accepted (no action needed)
-- For `confirm` dialogs: Choose accept or dismiss
-- For `prompt` dialogs: Choose accept with prompt_text, or dismiss
-- For `beforeunload` dialogs: Choose accept (allow navigation) or dismiss (stay on page)
+## Important Notes
 
-## Workflow Integration
-
-1. **Dialog appears**: During JavaScript execution or page navigation.
-2. **Observation includes dialog info**: Type, message, default prompt value.
-3. **Decide action**: Based on dialog type and your goal.
-4. **Call handle_dialog**: With appropriate action and optional text.
-5. **Continue automation**: Dialog closes and execution resumes.
+- **Handle immediately**: Automation is blocked until you handle the dialog
+- **One at a time**: After handling, check if another dialog appeared (cascading dialogs)
+- **Returns screenshot**: You'll see the page state after dialog is handled
 
 ## Screenshot Behavior
 
-`handle_dialog` returns a screenshot after handling the dialog, showing the resulting page state.
+The dialog tool returns a screenshot after handling the dialog, showing the resulting page state.
 
 ## Error Handling
 
-- **No active dialog**: Returns error if no dialog is currently open.
-- **Invalid action**: Returns error for unsupported actions.
-- **Missing prompt_text**: Returns error if accepting a prompt without text.
+- Returns error if no dialog is currently open
+- Returns error if accepting a prompt without `prompt_text`
