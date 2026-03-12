@@ -1,0 +1,84 @@
+# JavaScript Tool
+
+Custom JavaScript execution for complex interactions.
+
+## Overview
+
+The JavaScript Tool executes arbitrary JavaScript code in the browser context. Use this as a **fallback** when visual commands cannot accomplish your goal. Visual commands should always be preferred for reliability and safety.
+
+## When to Use JavaScript
+
+**Use visual commands first**:
+1. highlight tool → element_interaction tool with click action → element_interaction tool with confirm_click
+2. element_interaction tool with hover action → element_interaction tool with confirm_hover
+3. element_interaction tool with keyboard_input action → element_interaction tool with confirm_keyboard_input
+4. element_interaction tool with scroll action → element_interaction tool with confirm_scroll
+
+**Switch to JavaScript only when**:
+- Complex DOM manipulation needed
+- Visual commands fail twice (2-Strike Rule)
+- Special browser APIs required (geolocation, notifications, etc.)
+- Custom event sequences not covered by visual commands
+
+## Commands
+
+### javascript
+Execute arbitrary JavaScript.
+
+```json
+{ "script": "(() => { return document.title; })()" }
+```
+
+**Parameters**:
+- `script`: JavaScript code to execute
+
+**Guidelines**:
+- **30-second timeout**: Scripts timing out will return error
+- **Return JSON-serializable values only**: No DOM nodes, functions, or circular structures
+- **Use IIFE**: Wrap in `(() => { ... })()` for explicit return statements
+- **Console output captured**: `console.log()` output is included in response
+- **Dialog detection**: Dialogs triggered during execution are automatically detected and require the dialog tool
+
+## JavaScript-First Automation (Fallback Patterns)
+
+For complex interactions not covered by visual commands:
+
+### Click by visible text (universal pattern)
+```javascript
+(() => {
+    const text = 'YOUR_TEXT';
+    const leaf = Array.from(document.querySelectorAll('*'))
+        .find(el => el.children.length === 0 && el.textContent.includes(text));
+    if (!leaf) return 'not found';
+    const target = leaf.closest('a, button, [role="button"]') || leaf;
+    target.click();
+    return 'clicked: ' + target.tagName;
+})()
+```
+
+### Form filling
+```javascript
+(() => {
+    document.querySelector('#username').value = 'user';
+    document.querySelector('#password').value = 'pass';
+    document.querySelector('button[type="submit"]').click();
+    return 'form submitted';
+})()
+```
+
+### Scroll to element
+```javascript
+(() => {
+    const el = document.querySelector('.target');
+    if (el) el.scrollIntoView({ behavior: 'smooth' });
+    return 'scrolled';
+})()
+```
+
+## Error Handling
+
+- **Syntax error**: Returns error with stack trace
+- **Timeout**: Returns error after 30 seconds
+- **Dialog opened**: Returns dialog info, requiring the dialog tool
+- **Non-serializable return**: Returns error
+- **Security violation**: Returns error (cross-origin access, etc.)

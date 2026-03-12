@@ -33,7 +33,13 @@ OpenBrowser/
 | WebSocket handling | `server/websocket/manager.py` | Extension communication |
 | Command models | `server/models/commands.py` | Pydantic command/response types |
 | **Prompt templates** | `server/prompts/` | **Jinja2 templates for agent prompts** |
-| Tool description | `server/agent/tools/open_browser_tool.py` | OpenBrowserTool with dynamic rendering |
+| Tab tool | `server/agent/tools/tab_tool.py` | TabTool for tab management |
+| Highlight tool | `server/agent/tools/highlight_tool.py` | HighlightTool for element discovery |
+| Element interaction | `server/agent/tools/element_interaction_tool.py` | ElementInteractionTool with 2PC flow |
+| Dialog tool | `server/agent/tools/dialog_tool.py` | DialogTool for dialog handling |
+| JavaScript tool | `server/agent/tools/javascript_tool.py` | JavaScriptTool for fallback execution |
+| ToolSet aggregator | `server/agent/tools/toolset.py` | OpenBrowserToolSet aggregates all 5 tools |
+| Deprecated tool | `server/agent/tools/open_browser_tool.py` | OpenBrowserTool (monolithic, deprecated) |
 | Extension entry | `extension/src/background/index.ts` | Command handler, dialog processing |
 | Dialog manager | `extension/src/commands/dialog.ts` | CDP dialog events, cascading |
 | JavaScript execution | `extension/src/commands/javascript.ts` | CDP Runtime.evaluate, dialog race |
@@ -118,7 +124,13 @@ OpenBrowser uses Jinja2 templates for agent prompts, enabling dynamic content in
 ### Template Structure
 - **Location**: `server/prompts/` directory
 - **Format**: `.j2` extension with Jinja2 syntax
-- **Example**: `open_browser_description.j2` - main tool description
+- **5 Tool Templates**: Each of the 5 focused tools has its own template:
+  - `tab_tool.j2` - Tab management documentation
+  - `highlight_tool.j2` - Element discovery with color coding
+  - `element_interaction_tool.j2` - 2PC flow with orange confirmations
+  - `dialog_tool.j2` - Dialog handling
+  - `javascript_tool.j2` - JavaScript fallback
+- **Legacy**: `open_browser_description.j2` - original monolithic tool description (retained for reference)
 
 ### Dynamic JavaScript Control
 The `javascript_execute` command can be disabled via environment variable:
@@ -184,6 +196,18 @@ Elements are identified by a 6-character hash string:
 | `hover_element` | Hover by element ID | `{element_id: "9z8x7c"}` |
 | `scroll_element` | Scroll by element ID | `{element_id: "m5k2p8", direction: "down"}` |
 | `keyboard_input` | Type into element | `{element_id: "j4n7q1", text: "hello"}` |
+
+### Tool Mapping (5-Tool Architecture)
+The visual interaction workflow is implemented across 5 focused tools:
+
+| Tool | Commands | Purpose |
+|------|----------|---------|
+| `tab` | `tab init`, `tab open`, `tab close`, `tab switch`, `tab list`, `tab refresh`, `tab view` | Session and tab management |
+| `highlight` | `highlight_elements` | Element discovery with blue overlays |
+| `element_interaction` | `click_element`, `confirm_click_element`, `hover_element`, `confirm_hover_element`, `scroll_element`, `confirm_scroll_element`, `keyboard_input`, `confirm_keyboard_input` | Element interaction with orange 2PC confirmations |
+| `dialog` | `handle_dialog` | Dialog handling (accept/dismiss) |
+| `javascript` | `javascript_execute` | JavaScript fallback execution |
+
 ## UNIQUE PATTERNS
 
 ### JavaScript-First Automation (Fallback)

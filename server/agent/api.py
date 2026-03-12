@@ -370,11 +370,20 @@ def initialize_agent():
 
     # Register tools if not already registered
     try:
-        from .tools.open_browser_tool import OpenBrowserTool
-
-        logger.info("OpenBrowserTool registered")
+        # Import the old OpenBrowserTool for backward compatibility
+        # from .tools.open_browser_tool import OpenBrowserTool
+        # logger.info("OpenBrowserTool registered (deprecated, for backward compatibility)")
+        
+        # Import new focused tools to ensure they're registered
+        from .tools.tab_tool import TabTool
+        from .tools.highlight_tool import HighlightTool
+        from .tools.element_interaction_tool import ElementInteractionTool
+        from .tools.dialog_tool import DialogTool
+        from .tools.javascript_tool import JavaScriptTool
+        logger.info("5 focused OpenBrowser tools registered: tab, highlight, element_interaction, dialog, javascript")
+        
     except Exception as e:
-        logger.error(f"Failed to register OpenBrowserTool: {e}")
+        logger.error(f"Failed to register OpenBrowser tools: {e}")
 
     logger.info("OpenBrowserAgent initialized")
 

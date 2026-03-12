@@ -30,8 +30,6 @@ from server.agent.visualizer import QueueVisualizer
 from server.agent.conversation import ConversationState
 from server.core.llm_config import llm_config_manager
 from server.core.session_manager import session_manager, SessionStatus
-from server.agent.tools.open_browser_tool import OpenBrowserTool
-
 logger = get_logger(__name__)
 
 
@@ -41,12 +39,16 @@ class OpenBrowserAgentManager:
     def __init__(self):
         self.conversations: Dict[str, ConversationState] = {}
 
-        # Default tools
+        # Default tools - OpenBrowser suite now has 5 focused tools
         self.default_tools = [
-            Tool(name="open_browser"),  # Our browser automation tool
-            Tool(name=TerminalTool.name),  # Terminal access
+            Tool(name="tab"),                # Tab management
+            Tool(name="highlight"),          # Element discovery with visual overlays
+            Tool(name="element_interaction"), # Click, hover, scroll, keyboard with 2PC
+            Tool(name="dialog"),             # Browser dialog handling
+            Tool(name="javascript"),         # JavaScript execution fallback
+            Tool(name=TerminalTool.name),    # Terminal access
             Tool(name=FileEditorTool.name),  # File editing
-            Tool(name=TaskTrackerTool.name),  # Task tracking
+            Tool(name=TaskTrackerTool.name), # Task tracking
         ]
 
 

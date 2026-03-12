@@ -2193,7 +2193,7 @@ wheels = [
 [[package]]
 name = "openhands-sdk"
 version = "1.12.0"
-source = { git = "https://github.com/softpudding/agent-sdk.git?subdirectory=openhands-sdk&rev=open-browser#5c992373fa84c19dc7d61d7b9fabb4da4dffeb25" }
+source = { git = "https://github.com/softpudding/agent-sdk.git?subdirectory=openhands-sdk&rev=open-browser#13c53cb57997b70c33efc0d2b59d70675a718ea0" }
 dependencies = [
     { name = "agent-client-protocol" },
     { name = "deprecation" },
@@ -2212,8 +2212,7 @@ dependencies = [
 
 [[package]]
 name = "openhands-tools"
-version = "1.12.0"
-source = { git = "https://github.com/softpudding/agent-sdk.git?subdirectory=openhands-tools&rev=open-browser#5c992373fa84c19dc7d61d7b9fabb4da4dffeb25" }
+version = "1.12.source = { git = "https://github.com/softpudding/agent-sdk.git?subdirectory=openhands-tools&rev=open-browser#13c53cb57997b70c33efc0d2b59d70675a718ea0" }
 dependencies = [
     { name = "bashlex" },
     { name = "binaryornot" },

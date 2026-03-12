@@ -1,0 +1,107 @@
+# Highlight Tool
+
+Element discovery with collision-free visual overlays.
+
+## Overview
+
+The Highlight Tool discovers interactive elements on a web page and marks them with visual overlays. This is the **BLUE stage** of the two-stage color system, designed for safe element identification before interaction.
+
+## Visual Color System - BLUE Stage
+
+When you use the highlight tool, elements are marked with **BLUE boxes**:
+
+**Purpose**: Identify which element you want to interact with.
+
+**You see**:
+- Screenshot with **multiple blue boxes** (one per element)
+- Each box has an **element ID label**
+- List of element IDs with their HTML
+
+**Your task**:
+1. Look at the screenshot - find blue boxes
+2. Match visual position with your intent
+3. Read HTML semantics to confirm
+4. Note the element_id of your target
+
+## Element ID Format
+
+Element IDs are unique 6-character base36 hashes (e.g., `a3f2b1`, `9z8x7c`).
+Each element is assigned a stable hash based on its DOM position and attributes.
+This hash remains consistent across highlight tool calls for the same page state.
+
+## Collision-Aware Pagination
+
+Elements are paginated to ensure **no visual overlap** in each screenshot:
+- **One element type per call** for stable, predictable pagination
+- Each page returns a maximal set of non-colliding elements
+- Collision detection includes label area (26px above element)
+- AI calls `page=1, page=2, page=3...` to see all elements of that type
+- No offset/limit - pages are determined by collision geometry
+
+## Commands
+
+### highlight
+Capture a screenshot with numbered visual markers on interactive elements of ONE type.
+
+```json
+{}                           // Default: clickable elements, page 1
+{ "element_type": "inputable" }  // Input fields
+{ "element_type": "scrollable" } // Scrollable areas
+{ "element_type": "hoverable" }  // Hoverable elements
+{ "page": 2 }                 // Next page of clickable elements
+{ "keywords": ["Submit", "提交"] }      // Filter by keyword list (no pagination needed)
+```
+
+**Parameters**:
+- `element_type`: Single type to highlight - "clickable" (default), "scrollable", "inputable", or "hoverable"
+- `page`: Page number for pagination (1-indexed, default 1). Ignored when `keywords` is provided.
+- `keywords`: Keywords list to filter elements by HTML content. When provided, only matching elements are returned without pagination. Example: ["button", "submit", "login"]
+
+**When to Use Pagination**:
+- If the element you want to interact with is NOT visible on the current page, increment `page` to see more elements
+- Continue to the next page until you find the most appropriate element for your task
+- Stay on the same `element_type` across pages to browse through all elements of that category
+
+**When to Use Keywords**:
+- When you know what text/attribute you're looking for (e.g., "Submit", "Login", "search")
+- More efficient than pagination when target is visually identifiable
+- No need for pagination - all matching elements are returned at once
+
+**Best practice for Keywords**:
+- Always provide multiple keywords for improving matching probability.
+- Provide Chinese and English keywords together.
+- DO NOT use keywords that's likely to match too many elements, like a simple "x".
+- For example, when searching for a close button, use ["关闭", "close", "closing"]. When searching for a search button, use ["search", "搜索", "query", "查询"]
+
+## Workflow Integration
+
+1. **Start with Highlight**: Always begin element interaction by calling the highlight tool to discover available elements.
+2. **Visual + Semantic Verification**: At the BLUE stage, verify using BOTH visual AND semantic information:
+   - **Visual Check**: Is the blue box where you expect?
+   - **Semantic Check**: Does the HTML match your goal?
+3. **Select Element**: Note the `element_id` of your target.
+4. **Proceed to Interaction**: Use the element_interaction tool with appropriate action (click, hover, scroll, or keyboard_input) and the selected element_id.
+
+## Element Types
+
+### clickable (default)
+Buttons, links, and any element that responds to clicks.
+
+### inputable
+Text inputs, textareas, checkboxes, radio buttons, select dropdowns.
+
+### scrollable
+Scrollable containers and the entire page.
+
+### hoverable
+Elements that reveal tooltips, dropdowns, or change state on hover.
+
+## Screenshot Behavior
+
+The highlight tool always returns a screenshot with blue overlays.
+
+## Error Handling
+
+- **No elements found**: Returns empty element list but still provides screenshot.
+- **Invalid element_type**: Returns error.
+- **Page out of range**: Returns empty element list for that page.
