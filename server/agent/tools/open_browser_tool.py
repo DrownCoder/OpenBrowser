@@ -73,8 +73,9 @@ else:
 class OpenBrowserAction(Action):
     """Browser automation action with visual-first interaction support"""
     
+    # default value to handle type not provided err
     type: str = Field(
-        description=TYPE_DESCRIPTION
+        default="tab", description=TYPE_DESCRIPTION
     )
     
     # Tab operation parameters

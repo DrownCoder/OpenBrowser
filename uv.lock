@@ -1579,7 +1579,7 @@ wheels = [
 [[package]]
 name = "litellm"
 version = "1.82.1"
-source = { git = "https://github.com/softpudding/litellm.git?rev=open-browser#5814bfa7d3ab9e7eae6584256a3e9eba169d7215" }
+source = { git = "https://github.com/softpudding/litellm.git?rev=open-browser#49a31d434608cbfa598866b0e8191786797d280c" }
 dependencies = [
     { name = "aiohttp" },
     { name = "click" },
@@ -2212,8 +2212,7 @@ dependencies = [
 
 [[package]]
 name = "openhands-tools"
-version = "1.12.0"
-source = { git = "https://github.com/softpudding/agent-sdk.git?subdirectory=openhands-tools&rev=open-browser#13c53cb57997b70c33efc0d2b59d70675a718ea0" }
+version = "1.12.source = { git = "https://github.com/softpudding/agent-sdk.git?subdirectory=openhands-tools&rev=open-browser#13c53cb57997b70c33efc0d2b59d70675a718ea0" }
 dependencies = [
     { name = "bashlex" },
     { name = "binaryornot" },
