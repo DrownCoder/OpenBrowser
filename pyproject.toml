@@ -33,6 +33,7 @@ dev = [
 [project.scripts]
 local-chrome-server = "server.main:cli"
 chrome-cli = "cli.main:main"
+openbrowser-clawdbot = "server.clawdbot_bridge:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]

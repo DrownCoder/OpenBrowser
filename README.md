@@ -132,6 +132,20 @@ You can now interact with the AI Agent through the web interface.
 
 Simply tell your agent to install skill/open-browser
 
+### Use OpenBrowser from Clawdbot/OpenClaw
+
+This repo now includes a workspace skill and bridge CLI for routing Clawdbot turns into the existing OpenBrowser panel session.
+
+Quick example:
+
+```bash
+uv run openbrowser-clawdbot check --cwd .
+uv run openbrowser-clawdbot run "Open LinkedIn Jobs and search for backend engineer roles in Seattle" --cwd .
+uv run openbrowser-clawdbot run "Continue with the same browser session and summarize the first five jobs" --cwd .
+```
+
+The bridge stores the active OpenBrowser `conversation_id` in `.openbrowser_clawdbot_session.json`, so follow-up prompts continue in the same browser conversation by default.
+
 ## Why Qwen3.5-Plus?
 
 We chose Qwen3.5-Plus as our foundation model because it offers exceptional multimodal capabilities at a fraction of the cost of competitors. Its native agentic design makes it ideal for tasks that require both visual understanding and code execution.
