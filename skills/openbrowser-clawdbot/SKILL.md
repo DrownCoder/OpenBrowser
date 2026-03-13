@@ -7,6 +7,8 @@ description: Use this skill when the user wants Clawdbot/OpenClaw to control the
 
 Use this skill when Clawdbot/OpenClaw should drive the existing OpenBrowser panel instead of calling the browser directly.
 
+This skill is self-contained. It does not import Python modules from the OpenBrowser repo, so it can be installed into OpenClaw as an independent skill package.
+
 ## What this skill does
 
 - Reuses the existing OpenBrowser agent, panel, and Chrome extension
@@ -19,7 +21,7 @@ Use this skill when Clawdbot/OpenClaw should drive the existing OpenBrowser pane
 Run this before the first browser task:
 
 ```bash
-uv run openbrowser-clawdbot check --cwd .
+python3 scripts/run_openbrowser_bridge.py check --cwd .
 ```
 
 The bridge is ready only when:
@@ -35,7 +37,7 @@ If not ready, start and configure OpenBrowser first.
 Send a prompt into the existing OpenBrowser panel session:
 
 ```bash
-uv run openbrowser-clawdbot run "Open LinkedIn Jobs and search for staff backend engineer roles in San Francisco" --cwd .
+python3 scripts/run_openbrowser_bridge.py run "Open LinkedIn Jobs and search for staff backend engineer roles in San Francisco" --cwd .
 ```
 
 Important behavior:
@@ -51,19 +53,19 @@ Important behavior:
 Check the saved conversation:
 
 ```bash
-uv run openbrowser-clawdbot status --cwd .
+python3 scripts/run_openbrowser_bridge.py status --cwd .
 ```
 
 Reset the saved conversation:
 
 ```bash
-uv run openbrowser-clawdbot reset --cwd .
+python3 scripts/run_openbrowser_bridge.py reset --cwd .
 ```
 
 Get raw events as JSONL:
 
 ```bash
-uv run openbrowser-clawdbot run "Summarize the visible page" --cwd . --stream --jsonl
+python3 scripts/run_openbrowser_bridge.py run "Summarize the visible page" --cwd . --stream --jsonl
 ```
 
 ## How to use it well
@@ -77,7 +79,7 @@ uv run openbrowser-clawdbot run "Summarize the visible page" --cwd . --stream --
 
 When this skill is selected:
 
-1. Convert the user's request into one `uv run openbrowser-clawdbot run "...task..." --cwd .` command
+1. Convert the user's request into one `python3 scripts/run_openbrowser_bridge.py run "...task..." --cwd .` command
 2. Wait for the command to finish in the background
 3. Return the command stdout to the user as the final text answer
 4. Do not use `--stream` unless the user explicitly asks for step-by-step debugging output
@@ -85,7 +87,7 @@ When this skill is selected:
 ## Example follow-up flow
 
 ```bash
-uv run openbrowser-clawdbot run "Open Indeed and search for machine learning engineer jobs in New York" --cwd .
-uv run openbrowser-clawdbot run "Filter to remote-friendly roles and summarize the top 10" --cwd .
-uv run openbrowser-clawdbot run "Save the results into jobs.md in the workspace" --cwd .
+python3 scripts/run_openbrowser_bridge.py run "Open Indeed and search for machine learning engineer jobs in New York" --cwd .
+python3 scripts/run_openbrowser_bridge.py run "Filter to remote-friendly roles and summarize the top 10" --cwd .
+python3 scripts/run_openbrowser_bridge.py run "Save the results into jobs.md in the workspace" --cwd .
 ```
